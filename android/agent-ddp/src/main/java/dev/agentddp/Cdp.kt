@@ -409,7 +409,8 @@ internal class Dom(private val title: String, val elements: JSONArray, private v
         val (x, y, width, height) = (0 until 4).map { round2(frame.getDouble(it) / density) }
         val quad = JSONArray(listOf(x, y, x + width, y, x + width, y + height, x, y + height).map(::round2))
         return JSONObject().put("content", quad).put("padding", quad).put("border", quad).put("margin", quad)
-            .put("width", width).put("height", height)
+            // Integers in the protocol; clients fail to parse a fraction.
+            .put("width", Math.round(width)).put("height", Math.round(height))
     }
 
     /**

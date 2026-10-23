@@ -120,6 +120,7 @@ class CdpTest {
     fun theBoxModelIsTheFrameInDp() {
         val dom = Dom("Example", JSONArray().put(JSONObject().put("frame", JSONArray(listOf(20, 40, 60, 80)))), density = 2f)
         assertEquals("[10,20,40,20,40,60,10,60]", dom.boxModel(4).getJSONArray("content").toString())
+        assertEquals(48L, Dom("", JSONArray().put(JSONObject().put("frame", JSONArray(listOf(0, 0, 121.67, 48.33))))).boxModel(4).get("height"))
         assertTrue(runCatching { Dom("Example", JSONArray()).boxModel(4) }.isFailure)
     }
 

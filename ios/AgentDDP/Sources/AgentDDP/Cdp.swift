@@ -496,7 +496,9 @@ struct Dom {
         guard let frame = element(id)?["frame"] as? [Double] else { throw Cdp.Failure(description: "Could not compute box model.") }
         let (x, y, width, height) = (frame[0], frame[1], frame[2], frame[3])
         let quad = [x, y, x + width, y, x + width, y + height, x, y + height].map { round2($0) }
-        return ["content": quad, "padding": quad, "border": quad, "margin": quad, "width": width, "height": height]
+        return ["content": quad, "padding": quad, "border": quad, "margin": quad,
+                // Integers in the protocol; clients fail to parse a fraction.
+                "width": Int(width.rounded()), "height": Int(height.rounded())]
     }
 
     /// Selector lists of compound selectors: `button`, `#saveButton`, `[label='Save']`, `button[label^='Sa']`, `*`.

@@ -113,6 +113,7 @@ final class CdpTests: XCTestCase {
     func testTheBoxModelIsTheFrame() throws {
         let model = try Dom(title: "Example", elements: [["frame": [10.0, 20.0, 30.0, 40.0]]]).boxModel(4)
         XCTAssertEqual(model["content"] as? [Double], [10, 20, 40, 20, 40, 60, 10, 60])
+        XCTAssertEqual(try Dom(title: "", elements: [["frame": [0.0, 0.0, 121.67, 48.33]]]).boxModel(4)["height"] as? Int, 48)
         XCTAssertThrowsError(try Dom(title: "Example", elements: []).boxModel(4))
     }
 
