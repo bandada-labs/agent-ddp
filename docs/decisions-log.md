@@ -64,3 +64,6 @@ After a long try to get Chrome DevTools to show the app: "sí, deja ya eso apart
 ### Phases in order, and what the CDP work is for
 "sigamos en orden con las fases, y recuerda que la idea también es ahorrar tokens, optimizar memoria y todo, por eso usamos Rust, adicionalmente debemos ser capaces de ofrecer mejores cosas que agent-device".
 (Let's keep the phases in order. Remember the idea is also to save tokens and memory, that's why we use Rust. And we must offer better things than agent-device.)
+
+### CSS through the JavaScript DOM
+After hearing that agent-browser reads styles with `getComputedStyle` in JavaScript and never calls the CSS domain: "ah no, sabiendo eso estamos super bien alineados entonces, el CSS se cubre pero por otros medios, buenísimo". (Knowing that, we are well aligned. CSS is covered by other means.) Phase 2 closes without the CSS domain. Styles come in phase 4, from `getComputedStyle` in the JavaScript DOM, with CSS names for the values the library captures.

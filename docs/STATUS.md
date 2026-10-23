@@ -12,7 +12,7 @@ A small library inside a Debug build of an iOS or Android app serves what the ap
 
 ## Next
 
-1. The CDP server in the library (ADR 0007). Order: transport and discovery, read domains, act domains, `Runtime.evaluate`, the `DDP` domain, then the CLI on top.
+1. The CDP server in the library (ADR 0007). Order: transport and discovery, read domains, act domains, `Runtime.evaluate`, the `DDP` domain, then the CLI on top. Transport and read domains are done (Target, DOM, Accessibility, Page screenshots, Network events, Log); agent-browser `snapshot` and `screenshot` work. Next is Input for `click`, `hover`, `press` and `type`.
 2. A code of conduct, once the maintainer gives a contact address.
 3. iOS on physical devices (today the CLI uses `simctl`).
 4. History on iOS for `UIView.animate` animations, if users need more than their start and end (ADR 0005).
