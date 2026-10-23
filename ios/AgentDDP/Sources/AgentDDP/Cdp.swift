@@ -331,6 +331,37 @@ final class CdpSession {
         "DOM.getBoxModel": { [target] params in
             ["model": try Dom(title: target.title, elements: Dom.read()).boxModel(Dom.nodeId(params))]
         },
+        "Input.dispatchMouseEvent": { params in
+            let point = CGPoint(x: params["x"] as? Double ?? 0, y: params["y"] as? Double ?? 0)
+            switch params["type"] as? String {
+            case "mousePressed": try onMain { Result { try Input.touch(point) } }.get()
+            case "mouseMoved": try onMain { Result { try Input.touch(Input.isTouching ? point : nil) } }.get()
+            case "mouseReleased": try onMain { Result { try Input.touch(nil) } }.get()
+            default: throw Cdp.Failure(description: "Only mousePressed, mouseMoved and mouseReleased; scroll with Input.dispatchTouchEvent")
+            }
+            return [:]
+        },
+        "Input.dispatchTouchEvent": { params in
+            let first = (params["touchPoints"] as? [[String: Any]])?.first
+            let point = first.map { CGPoint(x: $0["x"] as? Double ?? 0, y: $0["y"] as? Double ?? 0) }
+            let type = params["type"] as? String
+            try onMain { Result { try Input.touch(type == "touchEnd" || type == "touchCancel" ? nil : point) } }.get()
+            return [:]
+        },
+        "Input.dispatchKeyEvent": { params in
+            let type = params["type"] as? String, text = params["text"] as? String ?? ""
+            // A keyDown with text types it; a separate char event only comes for keys whose keyDown had none.
+            if !text.isEmpty, type == "keyDown" || type == "char" {
+                onMain { Input.type(text) }
+            } else if type == "keyDown" || type == "rawKeyDown" {
+                onMain { Input.press(params["key"] as? String ?? "") }
+            }
+            return [:]
+        },
+        "Input.insertText": { params in
+            onMain { Input.type(params["text"] as? String ?? "") }
+            return [:]
+        },
     ].merging(Cdp.toggledDomains.flatMap { domain -> [(String, ([String: Any]) throws -> [String: Any])] in
         [("\(domain).enable", { _ in [:] }), ("\(domain).disable", { _ in [:] })]
     }) { $1 }
@@ -558,7 +589,7 @@ func onMain<T>(_ work: () -> T) -> T { Thread.isMainThread ? work() : DispatchQu
 
 enum Cdp {
     static let protocolVersion = "1.3"
-    static let domains = ["Accessibility", "Browser", "DOM", "Log", "Network", "Page", "Runtime", "Schema", "Target"]
+    static let domains = ["Accessibility", "Browser", "DOM", "Input", "Log", "Network", "Page", "Runtime", "Schema", "Target"]
     /// Domains whose enable and disable only switch events on and off.
     static let toggledDomains = ["Accessibility", "DOM", "Page", "Runtime"]
 

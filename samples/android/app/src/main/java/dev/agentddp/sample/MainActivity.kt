@@ -16,6 +16,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -174,6 +175,15 @@ fun SampleScreen(initialAction: String = "none") {
                 }
             }
             item { Text("Last action: $lastAction", Modifier.padding(16.dp)) }
+            item {
+                // For `Input` typing: Enter submits and shows the text as the last action.
+                var name by remember { mutableStateOf("") }
+                TextField(
+                    name, { name = it }, Modifier.testTag("nameField").fillMaxWidth().padding(horizontal = 16.dp),
+                    placeholder = { Text("Name") }, singleLine = true,
+                    keyboardActions = KeyboardActions(onDone = { lastAction = "submit $name" }),
+                )
+            }
             item {
                 Text("Load", Modifier.testTag("netButton").clickable {
                     thread { lastAction = SampleNetwork.load() }

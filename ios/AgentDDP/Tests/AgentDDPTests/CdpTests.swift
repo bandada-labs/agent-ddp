@@ -145,6 +145,12 @@ final class CdpTests: XCTestCase {
         XCTAssertEqual(entry["timestamp"] as? Double, 1_729_700_000_123)
     }
 
+    func testAMouseWheelPointsToTouchEvents() {
+        let error = answer(to: "{\"id\":1,\"method\":\"Input.dispatchMouseEvent\",\"params\":{\"type\":\"mouseWheel\",\"x\":1,\"y\":1}}")["error"] as? [String: Any]
+        XCTAssertEqual(error?["code"] as? Int, -32000)
+        XCTAssertEqual(error?["message"] as? String, "Only mousePressed, mouseMoved and mouseReleased; scroll with Input.dispatchTouchEvent")
+    }
+
     private func messages(after input: [String], browserLevel: Bool = true) -> [[String: Any]] {
         var sent: [[String: Any]] = []
         let session = CdpSession(target: CdpTarget(bundleIdentifier: "com.example", title: "Example"),

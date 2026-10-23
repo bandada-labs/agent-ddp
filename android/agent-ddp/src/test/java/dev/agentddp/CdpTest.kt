@@ -160,6 +160,13 @@ class CdpTest {
         return sent
     }
 
+    @Test
+    fun `a mouse wheel points to touch events`() {
+        val error = answerTo("""{"id":1,"method":"Input.dispatchMouseEvent","params":{"type":"mouseWheel","x":1,"y":1}}""").getJSONObject("error")
+        assertEquals(-32000, error.getInt("code"))
+        assertEquals("Only mousePressed, mouseMoved and mouseReleased; scroll with Input.dispatchTouchEvent", error.getString("message"))
+    }
+
     private fun answerTo(message: String): JSONObject {
         var answer = ""
         CdpSession(CdpTarget("com.example", "Example")) { answer = it }.receive(message)

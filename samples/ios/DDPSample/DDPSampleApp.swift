@@ -16,6 +16,7 @@ struct DDPSampleApp: App {
 
 struct ContentView: View {
     @State private var isSelected = false
+    @State private var name = ""
     @State private var lastAction = "none"
     @State private var isFlashing = false
 
@@ -113,6 +114,10 @@ struct ContentView: View {
                         Button("Delete", role: .destructive) { lastAction = "delete" }
                     }
                 Text("Last action: \(lastAction)")
+                // For `Input` typing: Enter submits and shows the text as the last action.
+                TextField("Name", text: $name)
+                    .accessibilityIdentifier("nameField")
+                    .onSubmit { lastAction = "submit \(name)" }
                 Button("Load") { Task { lastAction = await SampleNetwork.load() } }
                     .accessibilityIdentifier("netButton")
             }

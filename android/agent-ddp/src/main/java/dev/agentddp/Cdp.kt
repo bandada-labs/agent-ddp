@@ -3,6 +3,7 @@ package dev.agentddp
 import android.app.Application
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.PointF
 import android.net.LocalServerSocket
 import org.json.JSONArray
 import org.json.JSONObject
@@ -274,6 +275,35 @@ internal class CdpSession(
         },
         "DOM.querySelectorAll" to { params -> JSONObject().put("nodeIds", JSONArray(Dom.read(target.title).query(params.optString("selector")))) },
         "DOM.getBoxModel" to { params -> JSONObject().put("model", Dom.read(target.title).boxModel(Dom.nodeId(params))) },
+        "Input.dispatchMouseEvent" to { params ->
+            val point = PointF(params.optDouble("x", 0.0).toFloat(), params.optDouble("y", 0.0).toFloat())
+            when (params.optString("type")) {
+                "mousePressed" -> onMain { Input.touch(point) }
+                "mouseMoved" -> onMain { Input.touch(point.takeIf { Input.isTouching }) }
+                "mouseReleased" -> onMain { Input.touch(null) }
+                else -> throw IllegalArgumentException("Only mousePressed, mouseMoved and mouseReleased; scroll with Input.dispatchTouchEvent")
+            }
+            JSONObject()
+        },
+        "Input.dispatchTouchEvent" to { params ->
+            val first = params.optJSONArray("touchPoints")?.optJSONObject(0)
+            val point = first?.let { PointF(it.optDouble("x", 0.0).toFloat(), it.optDouble("y", 0.0).toFloat()) }
+            val type = params.optString("type")
+            onMain { Input.touch(point.takeUnless { type == "touchEnd" || type == "touchCancel" }) }
+            JSONObject()
+        },
+        "Input.dispatchKeyEvent" to { params ->
+            val type = params.optString("type")
+            val text = params.optString("text")
+            // A keyDown with text types it; a separate char event only comes for keys whose keyDown had none.
+            if (text.isNotEmpty() && (type == "keyDown" || type == "char")) onMain { Input.type(text) }
+            else if (type == "keyDown" || type == "rawKeyDown") onMain { Input.press(params.optString("key")) }
+            JSONObject()
+        },
+        "Input.insertText" to { params ->
+            onMain { Input.type(params.optString("text")) }
+            JSONObject()
+        },
     ) + Cdp.TOGGLED_DOMAINS.flatMap { listOf("$it.enable", "$it.disable") }.associateWith { { _: JSONObject -> JSONObject() } }
 
     /** The connection closed: stop feeding it events. */
@@ -462,7 +492,7 @@ internal class SimpleSelector(text: String) {
 
 internal object Cdp {
     const val PROTOCOL_VERSION = "1.3"
-    val DOMAINS = listOf("Accessibility", "Browser", "DOM", "Log", "Network", "Page", "Runtime", "Schema", "Target")
+    val DOMAINS = listOf("Accessibility", "Browser", "DOM", "Input", "Log", "Network", "Page", "Runtime", "Schema", "Target")
     /** Domains whose enable and disable only switch events on and off. */
     val TOGGLED_DOMAINS = listOf("Accessibility", "DOM", "Page", "Runtime")
 

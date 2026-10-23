@@ -67,3 +67,6 @@ After a long try to get Chrome DevTools to show the app: "sí, deja ya eso apart
 
 ### CSS through the JavaScript DOM
 After hearing that agent-browser reads styles with `getComputedStyle` in JavaScript and never calls the CSS domain: "ah no, sabiendo eso estamos super bien alineados entonces, el CSS se cubre pero por otros medios, buenísimo". (Knowing that, we are well aligned. CSS is covered by other means.) Phase 2 closes without the CSS domain. Styles come in phase 4, from `getComputedStyle` in the JavaScript DOM, with CSS names for the values the library captures.
+
+### Touches on iOS
+Asked how `Input` should touch the app on iOS, where no public API lets an app touch itself. Picked "Synthesized touch": private UIKit and IOKit calls, the way KIF and EarlGrey do it, Debug only. Real touches, so gesture recognizers, SwiftUI, drags and scrolling work. A new iOS version can break it and then we fix it. Built as an IOHIDEvent handed to UIKit (Lyft's Hammer approach): KIF's UITouch path reached the view but not SwiftUI's gesture recognizers.

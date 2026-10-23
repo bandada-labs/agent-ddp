@@ -26,6 +26,7 @@ A line leaves this file when the maintainer replaces it or when its work has lan
 - CDP work is checked against agent-browser, the client agents use. Making Chrome DevTools panels work is not a goal. (2026-10-23)
 - The CDP phases go in order (ADR 0007, STATUS.md). Every answer stays small for agents: only the fields we have, no padding to look like Chrome. Low memory in the app and the CLI. Each phase should give agents something agent-device cannot. (2026-10-23)
 - No CSS domain. Styles reach clients through `getComputedStyle` in the phase 4 JavaScript DOM, with CSS names for the values the library captures. (2026-10-23)
+- `Input` on iOS synthesizes real touches with private API, Debug only: an IOHIDEvent handed to UIKit as backboardd hands it a finger (the approach of Lyft's Hammer). On Android it dispatches `MotionEvent`s to the window. (2026-10-23)
 
 ## Distribution
 
