@@ -1,7 +1,7 @@
 name: release
 
-# Push a tag like v0.1.0: builds ddp for every platform, attaches the binaries to a GitHub release
-# and publishes the npm package (needs the NPM_TOKEN secret).
+# Push a tag like v0.1.1: builds ddp for every platform and attaches the binaries to a GitHub release.
+# npm is published by hand with 2FA from those binaries: npm/publish.sh 0.1.1
 on:
   push:
     tags: ["v*"]
@@ -32,7 +32,7 @@ jobs:
           name: ddp-${{ matrix.npm }}
           path: ddp-${{ matrix.npm }}${{ matrix.exe }}
 
-  publish:
+  release:
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -41,23 +41,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          path: npm/bin
+          path: bin
           merge-multiple: true
-      - run: chmod +x npm/bin/ddp-*
       - name: Version from the tag
         run: |
           version="${GITHUB_REF_NAME#v}"
           grep -q "^version = \"$version\"" cli/Cargo.toml || { echo "cli/Cargo.toml is not at $version"; exit 1; }
-          (cd npm && npm version "$version" --no-git-tag-version --allow-same-version)
-      # The GitHub release first: a failed npm publish can then be re-run on its own.
-      - run: gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" npm/bin/ddp-* --title "$GITHUB_REF_NAME" --generate-notes
+          grep -q "\"version\": \"$version\"" npm/package.json || { echo "npm/package.json is not at $version"; exit 1; }
+      - run: gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" bin/ddp-* --title "$GITHUB_REF_NAME" --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          registry-url: https://registry.npmjs.org
-      - run: npm publish --access public
-        working-directory: npm
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
