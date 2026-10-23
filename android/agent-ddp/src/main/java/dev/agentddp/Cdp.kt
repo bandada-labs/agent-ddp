@@ -210,6 +210,7 @@ internal class CdpSession(
     private var networkWatch: java.util.UUID? = null
     /** The `sessionId` of the message being answered. */
     private var currentSessionId: Any? = null
+    private var appLog: AppLog? = null
 
     private val methods: Map<String, (JSONObject) -> JSONObject> = mapOf<String, (JSONObject) -> JSONObject>(
         "Browser.getVersion" to { _ -> Cdp.browserVersion(target) },
@@ -240,6 +241,15 @@ internal class CdpSession(
             JSONObject()
         },
         "Network.disable" to { _ -> stopNetwork(); JSONObject() },
+        "Log.enable" to { _ ->
+            appLog?.stop()
+            val sessionId = currentSessionId
+            appLog = AppLog { entry -> runCatching { event("Log.entryAdded", JSONObject().put("entry", entry), sessionId) } }
+                .also { it.start() }
+            JSONObject()
+        },
+        "Log.disable" to { _ -> appLog?.stop(); appLog = null; JSONObject() },
+        "Log.clear" to { _ -> JSONObject() },
         "Network.getResponseBody" to { params ->
             JSONObject().put("body", Cdp.networkEntry(params).optString("responseBody")).put("base64Encoded", false)
         },
@@ -262,7 +272,10 @@ internal class CdpSession(
     ) + Cdp.TOGGLED_DOMAINS.flatMap { listOf("$it.enable", "$it.disable") }.associateWith { { _: JSONObject -> JSONObject() } }
 
     /** The connection closed: stop feeding it events. */
-    fun close() = stopNetwork()
+    fun close() {
+        stopNetwork()
+        appLog?.stop()
+    }
 
     private fun stopNetwork() {
         networkWatch?.let(NetworkLog::stopWatching)
@@ -439,7 +452,7 @@ internal object Cdp {
     const val PROTOCOL_VERSION = "1.3"
     val DOMAINS = listOf("Accessibility", "Browser", "DOM", "Log", "Network", "Page", "Runtime", "Schema", "Target")
     /** Domains whose enable and disable only switch events on and off. */
-    val TOGGLED_DOMAINS = listOf("Accessibility", "DOM", "Log", "Page", "Runtime")
+    val TOGGLED_DOMAINS = listOf("Accessibility", "DOM", "Page", "Runtime")
 
     private const val PRODUCT = "Agent-DDP/${FrameCapture.PROTOCOL}"
 

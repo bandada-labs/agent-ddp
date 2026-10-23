@@ -129,6 +129,14 @@ final class CdpTests: XCTestCase {
         XCTAssertEqual(events[1].params["errorText"] as? String, "The Internet connection appears to be offline.")
     }
 
+    func testALogEntryCarriesItsCategoryAndLevel() {
+        let entry = AppLog.logEntry(level: .fault, category: "network", message: "timed out",
+                                    date: Date(timeIntervalSince1970: 1_729_700_000.123))
+        XCTAssertEqual(entry["level"] as? String, "error")
+        XCTAssertEqual(entry["text"] as? String, "network: timed out")
+        XCTAssertEqual(entry["timestamp"] as? Double, 1_729_700_000_123)
+    }
+
     private func messages(after input: [String], browserLevel: Bool = true) -> [[String: Any]] {
         var sent: [[String: Any]] = []
         let session = CdpSession(target: CdpTarget(bundleIdentifier: "com.example", title: "Example"),

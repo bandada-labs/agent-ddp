@@ -250,6 +250,7 @@ final class CdpSession {
     private var networkWatch: (sessionId: Any?, key: UUID)?
     /// The `sessionId` of the message being answered.
     private var currentSessionId: Any?
+    private var appLog: AppLog?
     private lazy var methods: [String: ([String: Any]) throws -> [String: Any]] = [
         "Browser.getVersion": { [target] _ in Cdp.browserVersion(target) },
         "Target.getTargets": { [target] _ in ["targetInfos": [target.info()]] },
@@ -281,6 +282,19 @@ final class CdpSession {
             return [:]
         },
         "Network.disable": { [unowned self] _ in stopNetwork(); return [:] },
+        "Log.enable": { [unowned self] _ in
+            appLog?.stop()
+            let sessionId = currentSessionId
+            appLog = AppLog { [weak self] entry in self?.event("Log.entryAdded", ["entry": entry], sessionId: sessionId) }
+            appLog?.start()
+            return [:]
+        },
+        "Log.disable": { [unowned self] _ in
+            appLog?.stop()
+            appLog = nil
+            return [:]
+        },
+        "Log.clear": { _ in [:] },
         "Network.getResponseBody": { params in
             ["body": try Cdp.networkEntry(params)["responseBody"] as? String ?? "", "base64Encoded": false]
         },
@@ -334,7 +348,10 @@ final class CdpSession {
     }
 
     /// The connection closed: stop feeding it events.
-    func close() { stopNetwork() }
+    func close() {
+        stopNetwork()
+        appLog?.stop()
+    }
 
     private func stopNetwork() {
         if let networkWatch { NetworkLog.shared.stopWatching(networkWatch.key) }
@@ -530,7 +547,7 @@ enum Cdp {
     static let protocolVersion = "1.3"
     static let domains = ["Accessibility", "Browser", "DOM", "Log", "Network", "Page", "Runtime", "Schema", "Target"]
     /// Domains whose enable and disable only switch events on and off.
-    static let toggledDomains = ["Accessibility", "DOM", "Log", "Page", "Runtime"]
+    static let toggledDomains = ["Accessibility", "DOM", "Page", "Runtime"]
 
     struct Failure: Error, CustomStringConvertible {
         let description: String

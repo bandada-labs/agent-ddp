@@ -8,6 +8,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 - CDP: flat Target sessions, `Accessibility.getFullAXTree` and `Page.captureScreenshot`. agent-browser can `connect`, `snapshot` and `screenshot` an app on both platforms.
 - CDP DOM over the elements: `getDocument`, `querySelector(All)` with `button#saveButton` or `[label='Save']` on both platforms, `getBoxModel`, `getOuterHTML`.
 - CDP Network events and `getResponseBody` for the requests `ddp net` sees, redacted the same way.
+- CDP `Log.entryAdded` with the app's own log lines (os_log on iOS, logcat on Android).
 - Elements have a `role` (`button`, `textbox`, `checkbox` and so on), the same words on iOS and Android.
 
 ## 0.1.5 (2026-10-23)

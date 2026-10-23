@@ -135,6 +135,15 @@ class CdpTest {
         assertEquals("java.net.UnknownHostException", events[1].second.getString("errorText"))
     }
 
+    @Test
+    fun aLogcatLineBecomesALogEntry() {
+        val entry = AppLog.logEntry("1729700000.123  8684  8700 W DDPSample: slow frame")!!
+        assertEquals("warning", entry.getString("level"))
+        assertEquals("DDPSample: slow frame", entry.getString("text"))
+        assertEquals(1729700000123.0, entry.getDouble("timestamp"), 0.0)
+        assertEquals(null, AppLog.logEntry("--------- beginning of main"))
+    }
+
     private fun messagesAfter(message: String, browserLevel: Boolean = true): List<JSONObject> {
         val sent = mutableListOf<JSONObject>()
         CdpSession(CdpTarget("com.example", "Example"), browserLevel) { sent += JSONObject(it) }.receive(message)
