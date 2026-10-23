@@ -75,6 +75,8 @@ Sessions for `--on` are named: `ddp connect <sim> --app ID --session ios` and `.
 
 ## Checks
 
+Every check exits 1 when it finds a problem, so any of them works as a gate in a script or CI.
+
 ```
 ddp check overlap      # something drawn over a control
 ddp check corners      # a fill or hatch past rounded corners

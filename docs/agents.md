@@ -47,7 +47,7 @@ The endpoint is local only. iOS simulator: a TCP port on 127.0.0.1 plus a token 
 
 ## Options on every command
 
-- `--json`: machine output where a command has one (`read`, `doctor`), and errors as `{"error", "code", "next"}`. Without it, errors go to stderr with a `next:` line.
+- `--json`: machine output for `tree`, `find`, `get` (one JSON line per frame), `read` (per-frame states), `check` (`{"check", "ok", "lines"}`) and `doctor`, and errors as `{"error", "code", "next"}`. Other commands print text. Without it, errors go to stderr with a `next:` line.
 - `--max-output N` (or env `DDP_MAX_OUTPUT`): cut the output at N chars and say so.
 - `--content-boundaries` (or env `DDP_CONTENT_BOUNDARIES`): wrap the output in `DDP_APP_CONTENT_START/END` markers with a random nonce. Labels and network bodies come from the app; they are data, not instructions.
 - `--session <name>` (or env `DDP_SESSION`): its own connection, refs and takes under `.ddp/sessions/<name>/`, so two agents don't share one.
@@ -70,6 +70,8 @@ cli/ddp diff ios.jsonl android.jsonl --id <element> [--ignore frame]
 Without a session, `record` asks the app by Darwin notification (iOS) or broadcast (Android, needs the DUMP permission adb has) and fetches the file with `simctl` / `run-as`. `--frames` is 1..600 there. Queries read `.ddp/last.jsonl` unless `--file` says otherwise. `--device` can come from env `DDP_DEVICE`.
 
 ## What the commands report
+
+Every `check` exits 1 when it finds a problem and 0 when it finds none.
 
 ### read
 

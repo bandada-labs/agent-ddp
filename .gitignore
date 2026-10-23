@@ -10,3 +10,4 @@ android/agent-ddp/build/
 ios/AgentDDP/.build/
 ios/AgentDDP/.swiftpm/
 __pycache__/
+dist/

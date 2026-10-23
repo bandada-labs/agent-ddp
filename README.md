@@ -25,7 +25,7 @@ So if the extra layer is there mostly for the tooling, it may not be needed anym
 
 - iOS: add the Swift package `ios/AgentDDP` (one folder, no dependencies) and call `AgentDDP.start()` at launch. Simulator only for now.
 - Android: add `debugImplementation(project(":agent-ddp"))` pointing at `android/agent-ddp`. It starts by itself, no app code.
-- CLI: `cli/ddp` is one Python 3 file with no dependencies. It needs `xcrun simctl` for iOS and `adb` for Android.
+- CLI: `cli/ddp` runs from a checkout with Python 3 and no dependencies (the code is in `cli/ddpcli`). `python3 cli/build.py` makes `dist/ddp`, one file with the guides inside, to copy into another repo. It needs `xcrun simctl` for iOS and `adb` for Android.
 
 `samples/ios` and `samples/android` are small apps with the library already wired in.
 

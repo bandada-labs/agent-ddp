@@ -31,9 +31,12 @@ def frame(i, border_width, banner):
 
 
 def run(*args, recording):
-    # Run inside the recording's folder: ddp keeps refs and history in ./.ddp.
-    return subprocess.run([sys.executable, str(CLI), *args, "--file", str(recording)], cwd=recording.parent,
-                          capture_output=True, text=True, check=True).stdout
+    # Run inside the recording's folder: ddp keeps refs and history in ./.ddp. Checks that find problems
+    # exit 1, so the exit code is not checked here; a crash shows as missing output in the asserts.
+    result = subprocess.run([sys.executable, str(CLI), *args, "--file", str(recording)], cwd=recording.parent,
+                            capture_output=True, text=True)
+    assert "Traceback" not in result.stderr, result.stderr
+    return result.stdout
 
 
 def ddp_in(directory, *args, stdin=None):
@@ -152,7 +155,7 @@ with tempfile.TemporaryDirectory() as directory:
     other = Path(directory, "other.jsonl")
     other.write_text(timeline_recording().replace("#FFFFFF80", "#FFFFFFFF"))
     diffed = subprocess.run([sys.executable, str(CLI), "diff", str(recording), str(other), "--id", "glow",
-                             "--ignore", "frame"], capture_output=True, text=True, check=True).stdout
+                             "--ignore", "frame"], cwd=directory, capture_output=True, text=True, check=True).stdout
     assert "alpha 0.5 vs 1.0; fill #FFFFFF80 vs #FFFFFFFF" in diffed, diffed
 
 # Agent ergonomics: refs, filters, find, duplicate names, errors, output budget, batch, check all, gzip, diff, skills.
@@ -180,6 +183,14 @@ with tempfile.TemporaryDirectory() as directory:
     assert missing.returncode == 1 and "next: ddp tree" in missing.stderr, missing.stderr
     as_json = json.loads(ddp_in(directory, "get", "nope", "--json", "--file", "r.jsonl").stdout)
     assert as_json["code"] == "unknown_element" and as_json["next"], as_json
+
+    tree_json = json.loads(run("tree", "-i", "--json", recording=recording))
+    assert tree_json["elements"][0]["ref"] == "@e1" and tree_json["elements"][1]["parent"] == "button", tree_json
+    assert json.loads(run("find", "text", "open", "--json", recording=recording))[0]["key"] == "Open"
+    rows = [json.loads(line) for line in run("get", "button", "--json", recording=recording).splitlines()]
+    assert len(rows) == 5 and rows[2]["border"] == 4, rows
+    checked = ddp_in(directory, "check", "overlap", "--json", "--file", "r.jsonl")
+    assert checked.returncode == 1 and json.loads(checked.stdout)["ok"] is False, checked.stdout
 
     cut = run("tree", "--max-output", "40", "--content-boundaries", recording=recording)
     assert "[truncated: showing 40 of" in cut and "DDP_APP_CONTENT_START nonce=" in cut and "CONTENT_END" in cut, cut
@@ -225,8 +236,8 @@ with tempfile.TemporaryDirectory() as directory:
     take = Path(directory, "move.jsonl")
     times = [i * 16 for i in range(80)]
     # Holds at 0, moves to 100 over 400 ms on the CSS ease-out curve, then holds.
-    from importlib.machinery import SourceFileLoader
-    curves = SourceFileLoader("ddp_curves", str(CLI)).load_module()
+    sys.path.insert(0, str(CLI.parent))
+    from ddpcli import device as screenshots, summary as curves
     xs = [0] * 10 + [round(100 * curves.bezier_progress(curves.EASINGS["easeOut"], u / 25), 2) for u in range(1, 26)] + [100] * 45
     take.write_text(motion_recording(times, xs))
     curve = run("get", "box", "--curve", recording=take)
@@ -283,8 +294,8 @@ with tempfile.TemporaryDirectory() as directory:
     assert "COVERED dark" in ddp_in(directory, "check", "overlap", "--file", "a11y.jsonl").stdout
 
     rows = [bytearray(b"\x10\x20\x30\xff" * 5) for _ in range(4)]
-    png = curves.png_write(5, 4, rows)
-    width, height, back = curves.png_read(png)
+    png = screenshots.png_write(5, 4, rows)
+    width, height, back = screenshots.png_read(png)
     assert (width, height) == (5, 4) and back == rows
 
     page = ddp_in(directory, "view", "page.html", "--file", "a11y.jsonl")
@@ -399,8 +410,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert both.returncode == 0 and "['ios', '{k:', '1}']" in both.stdout and "parity" in both.stdout, both.stdout + both.stderr
 
 # --then runs without a shell, so "; touch" is an argument to echo, not a second command.
-from importlib.machinery import SourceFileLoader
-ddp = SourceFileLoader("ddp", str(CLI)).load_module()
+from ddpcli import live as ddp
 with tempfile.TemporaryDirectory() as directory:
     marker = Path(directory, "injected")
     assert ddp.run_then(f"echo safe ; touch {marker}") and not marker.exists()
