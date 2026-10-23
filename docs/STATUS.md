@@ -8,24 +8,13 @@ A small library inside a Debug build of an iOS or Android app serves what the ap
 
 ## Released
 
-0.1.4 on 2026-10-23: npm `agent-ddp`, GitHub release with 5 binaries, JitPack `com.github.bandada-labs:agent-ddp:v0.1.4`, SwiftPM from the repo URL.
-
-## Done since 0.1.4, not released
-
-- Protocol version 1 in every header; the CLI refuses a newer library.
-- `ddp history` on iOS.
-- History busy throttling fixed and cheaper (4 captures a second while only a clock or spinner changes; about 4% CPU on the samples).
-- Unit tests in both libraries; CI runs fmt, clippy, the CLI suites, both library builds and their unit tests.
-- README with banner and badges, architecture, protocol, contributor and security docs, this docs folder.
-- Code layout: `cli/src/checks/`, `Capture.kt`, `Capture.swift`.
+0.1.5 on 2026-10-23: npm `agent-ddp`, GitHub release with 5 binaries, JitPack `com.github.bandada-labs:agent-ddp:v0.1.5`, SwiftPM from the repo URL. What is in it: [CHANGELOG.md](../CHANGELOG.md).
 
 ## Next
 
-1. Release 0.1.5 so npm shows the new README (needs the maintainer's yes).
-2. Enable GitHub private vulnerability reporting (maintainer, repo settings).
-3. A code of conduct, once the maintainer gives a contact address.
-4. iOS on physical devices (today the CLI uses `simctl`).
-5. History on iOS for `UIView.animate` animations, if users need more than their start and end (ADR 0005).
+1. A code of conduct, once the maintainer gives a contact address.
+2. iOS on physical devices (today the CLI uses `simctl`).
+3. History on iOS for `UIView.animate` animations, if users need more than their start and end (ADR 0005).
 
 ## Known limits
 

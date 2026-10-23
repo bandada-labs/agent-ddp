@@ -1,7 +1,7 @@
 #!/bin/sh
 # Publishes agent-ddp by hand from the binaries of a GitHub release, when the staged one from the release
 # workflow can't be used. npm asks for your 2FA code.
-# Usage: npm/publish.sh 0.1.4 [--otp=123456]
+# Usage: npm/publish.sh 0.1.5 [--otp=123456]
 set -eu
 version="$1"
 shift

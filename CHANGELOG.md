@@ -4,6 +4,8 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 
 ## Unreleased
 
+## 0.1.5 (2026-10-23)
+
 - Protocol version 1: the libraries send `"protocol": 1` in every header. The CLI stops with `protocol_too_new` when a library is newer than it, and still reads older ones.
 - `ddp history` works on iOS. The library records every change, tap, swipe and screen for the last 15 minutes, like on Android.
 - History throttles to 4 captures a second (was 10) while only a clock or spinner changes, and detects those animations even when they skip captures. About 4% CPU on the samples with a clock that never stops.

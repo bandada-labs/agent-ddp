@@ -1,6 +1,6 @@
 {
   "name": "agent-ddp",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "See and check native iOS and Android UI from a coding agent, frame by frame. CLI and MCP server for Debug builds (Device DevTools Protocol).",
   "license": "MIT",
   "author": {
