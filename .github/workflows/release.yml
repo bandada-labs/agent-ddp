@@ -1,6 +1,6 @@
 name: release
 
-# Push a tag like v0.1.3: builds ddp for every platform, attaches the binaries to a GitHub release and
+# Push a tag like v0.1.4: builds ddp for every platform, attaches the binaries to a GitHub release and
 # publishes agent-ddp to npm. No token: npm trusts this workflow (Trusted Publishing, OIDC) and signs
 # the provenance of each version.
 on:
