@@ -23,13 +23,13 @@ dependencies {
     compileOnly("com.squareup.okhttp3:okhttp:4.12.0")
 }
 
-// What JitPack builds from a tag (jitpack.yml): com.github.sebospc:agent-ddp:<tag>.
+// What JitPack builds from a tag (jitpack.yml): com.github.bandada-labs:agent-ddp:<tag>.
 afterEvaluate {
     publishing {
         publications {
             create<MavenPublication>("release") {
                 from(components["release"])
-                groupId = "com.github.sebospc"
+                groupId = "com.github.bandada-labs"
                 artifactId = "agent-ddp"
                 version = System.getenv("VERSION") ?: "dev"
             }

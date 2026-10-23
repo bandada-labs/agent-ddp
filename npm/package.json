@@ -1,14 +1,26 @@
 {
-  "name": "@bandada-labs/agent-ddp",
+  "name": "agent-ddp",
   "version": "0.1.0",
   "description": "ddp: see what a Debug iOS or Android app draws, frame by frame (Device DevTools Protocol)",
   "license": "MIT",
+  "author": {
+    "name": "sebospc",
+    "url": "https://github.com/sebospc"
+  },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/sebospc/agent-ddp.git"
+    "url": "git+https://github.com/bandada-labs/agent-ddp.git"
   },
-  "homepage": "https://github.com/sebospc/agent-ddp#readme",
-  "keywords": ["ios", "android", "devtools", "agent", "animation", "swiftui", "compose"],
+  "homepage": "https://github.com/bandada-labs/agent-ddp#readme",
+  "keywords": [
+    "ios",
+    "android",
+    "devtools",
+    "agent",
+    "animation",
+    "swiftui",
+    "compose"
+  ],
   "bin": {
     "ddp": "bin/ddp.js"
   },

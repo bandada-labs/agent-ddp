@@ -190,9 +190,9 @@ A drawn node belongs to the smallest element whose frame holds it (4 pt toleranc
 
 ## Adding it to an app (Debug only)
 
-- The CLI: `npm i -g @bandada-labs/agent-ddp` (one native binary, no runtime), or `cargo install --git https://github.com/sebospc/agent-ddp agent-ddp`.
-- iOS: add the Swift package `https://github.com/sebospc/agent-ddp` (or the local folder `ios/AgentDDP`; no dependencies) and call `AgentDDP.start()` at launch. Outside Debug every call is empty. Simulator only for now (the CLI uses `simctl`).
-- Android: `debugImplementation("com.github.sebospc:agent-ddp:<tag>")` with `maven("https://jitpack.io")` in the repositories, or `debugImplementation(project(":agent-ddp"))` pointing at `android/agent-ddp`. It starts by itself through a ContentProvider; no app code. Needs a debuggable build. In Debug it installs its own Compose window recomposer factory (for `ddp time`); an app that sets its own factory replaces it.
+- The CLI: `npm i -g agent-ddp` (one native binary, no runtime), or `cargo install --git https://github.com/bandada-labs/agent-ddp agent-ddp`.
+- iOS: add the Swift package `https://github.com/bandada-labs/agent-ddp` (or the local folder `ios/AgentDDP`; no dependencies) and call `AgentDDP.start()` at launch. Outside Debug every call is empty. Simulator only for now (the CLI uses `simctl`).
+- Android: `debugImplementation("com.github.bandada-labs:agent-ddp:<tag>")` with `maven("https://jitpack.io")` in the repositories, or `debugImplementation(project(":agent-ddp"))` pointing at `android/agent-ddp`. It starts by itself through a ContentProvider; no app code. Needs a debuggable build. In Debug it installs its own Compose window recomposer factory (for `ddp time`); an app that sets its own factory replaces it.
 
 Opt-ins from the app's Debug composition root (the app's own ports stay as they are):
 

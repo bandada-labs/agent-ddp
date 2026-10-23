@@ -20,18 +20,18 @@ It works in the style of CDP. A small library inside the Debug build opens a loc
 Paste this in your agent's chat inside your app's repo:
 
 ```
-Set up agent-ddp so you can see and check this app's UI: https://github.com/sebospc/agent-ddp
+Set up agent-ddp so you can see and check this app's UI: https://github.com/bandada-labs/agent-ddp
 
-1. Install the CLI: npm i -g @bandada-labs/agent-ddp
+1. Install the CLI: npm i -g agent-ddp
 2. Add the library to the Debug build only:
-   - iOS: add the Swift package https://github.com/sebospc/agent-ddp (from 0.1.0) and call
+   - iOS: add the Swift package https://github.com/bandada-labs/agent-ddp (from 0.1.0) and call
      AgentDDP.start() at launch. It does nothing in Release. Simulator only for now.
    - Android: add maven("https://jitpack.io") to the repositories and
-     debugImplementation("com.github.sebospc:agent-ddp:v0.1.0"). It starts by itself.
+     debugImplementation("com.github.bandada-labs:agent-ddp:v0.1.0"). It starts by itself.
 3. Run `ddp skills get core` and follow it. Start with `ddp doctor`.
 ```
 
-The CLI is one native binary (macOS, Linux, Windows), plus `xcrun simctl` for iOS and `adb` for Android. Without npm: `cargo install --git https://github.com/sebospc/agent-ddp agent-ddp`. `samples/ios` and `samples/android` are small apps with the library already wired in.
+The CLI is one native binary (macOS, Linux, Windows), plus `xcrun simctl` for iOS and `adb` for Android. Without npm: `cargo install --git https://github.com/bandada-labs/agent-ddp agent-ddp`. `samples/ios` and `samples/android` are small apps with the library already wired in.
 
 ## Why native
 

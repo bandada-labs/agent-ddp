@@ -5,7 +5,7 @@ description: Start here. The ddp loop, the commands you need most, waits, refs, 
 
 # ddp core
 
-ddp shows what a Debug iOS or Android app draws, frame by frame: per element its frame, fill, border, corner, opacity, clip, and what covers it. agent-device (or `ddp tap`) is the hands, ddp is the eyes. Install it with `npm i -g @bandada-labs/agent-ddp`.
+ddp shows what a Debug iOS or Android app draws, frame by frame: per element its frame, fill, border, corner, opacity, clip, and what covers it. agent-device (or `ddp tap`) is the hands, ddp is the eyes. Install it with `npm i -g agent-ddp`.
 
 ## The loop
 

@@ -49,6 +49,10 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           grep -q "^version = \"$version\"" cli/Cargo.toml || { echo "cli/Cargo.toml is not at $version"; exit 1; }
           (cd npm && npm version "$version" --no-git-tag-version --allow-same-version)
+      # The GitHub release first: a failed npm publish can then be re-run on its own.
+      - run: gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" npm/bin/ddp-* --title "$GITHUB_REF_NAME" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -57,6 +61,3 @@ jobs:
         working-directory: npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      - run: gh release create "$GITHUB_REF_NAME" npm/bin/ddp-* --title "$GITHUB_REF_NAME" --generate-notes
-        env:
-          GH_TOKEN: ${{ github.token }}

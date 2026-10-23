@@ -8,7 +8,7 @@ const name = `ddp-${process.platform}-${process.arch}${process.platform === "win
 const binary = path.join(__dirname, name);
 if (!existsSync(binary)) {
   console.error(`ddp: no build for ${process.platform}-${process.arch} in this package.`);
-  console.error("next: cargo install --git https://github.com/sebospc/agent-ddp agent-ddp");
+  console.error("next: cargo install --git https://github.com/bandada-labs/agent-ddp agent-ddp");
   process.exit(1);
 }
 const result = spawnSync(binary, process.argv.slice(2), { stdio: "inherit" });

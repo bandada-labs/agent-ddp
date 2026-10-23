@@ -15,4 +15,4 @@ ddp skills get core --full   # plus every command and output shape
 ddp skills list
 ```
 
-Not installed? `npm i -g @bandada-labs/agent-ddp`.
+Not installed? `npm i -g agent-ddp`.
