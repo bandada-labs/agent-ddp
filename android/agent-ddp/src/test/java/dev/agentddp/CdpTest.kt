@@ -114,6 +114,27 @@ class CdpTest {
         assertTrue(runCatching { Dom("Example", JSONArray()).boxModel(4) }.isFailure)
     }
 
+    @Test
+    fun aFinishedRequestBecomesChromesThreeEvents() {
+        val events = Cdp.networkEvents(JSONObject().put("id", "n1").put("method", "POST").put("url", "https://api.example.com/items")
+            .put("startedAt", 1_000_000L).put("ms", 250L).put("status", 201).put("responseBytes", 12L).put("requestBody", "{}")
+            .put("responseHeaders", JSONObject().put("Content-Type", "application/json; charset=utf-8")))
+        assertEquals(listOf("Network.requestWillBeSent", "Network.responseReceived", "Network.loadingFinished"), events.map { it.first })
+        assertEquals("{}", events[0].second.getJSONObject("request").getString("postData"))
+        assertEquals(201, events[1].second.getJSONObject("response").getInt("status"))
+        assertEquals("application/json", events[1].second.getJSONObject("response").getString("mimeType"))
+        assertEquals(1000.0, events[0].second.getDouble("timestamp"), 0.0)
+        assertEquals(1000.25, events[2].second.getDouble("timestamp"), 0.0)
+    }
+
+    @Test
+    fun aFailedRequestEndsInLoadingFailed() {
+        val events = Cdp.networkEvents(JSONObject().put("id", "n2").put("url", "https://down.example.com").put("startedAt", 0L)
+            .put("ms", 5L).put("error", "java.net.UnknownHostException"))
+        assertEquals(listOf("Network.requestWillBeSent", "Network.loadingFailed"), events.map { it.first })
+        assertEquals("java.net.UnknownHostException", events[1].second.getString("errorText"))
+    }
+
     private fun messagesAfter(message: String, browserLevel: Boolean = true): List<JSONObject> {
         val sent = mutableListOf<JSONObject>()
         CdpSession(CdpTarget("com.example", "Example"), browserLevel) { sent += JSONObject(it) }.receive(message)

@@ -74,7 +74,12 @@ private final class CdpConnection {
             if buffer.count > WebSocket.maxMessageBytes { return connection.cancel() }
             if session == nil, let request = HttpRequest.parse(&buffer) { handle(request) }
             while session != nil, let frame = WebSocket.parse(&buffer) { handle(frame) }
-            if isComplete || error != nil { connection.cancel() } else { receive() }
+            if isComplete || error != nil {
+                session?.close()
+                connection.cancel()
+            } else {
+                receive()
+            }
         }
     }
 
@@ -119,6 +124,7 @@ private final class CdpConnection {
             connection.send(content: WebSocket.frame(opcode: WebSocket.pong, payload: frame.payload),
                             completion: .contentProcessed { _ in })
         case WebSocket.close:
+            session?.close()
             session = nil
             connection.send(content: WebSocket.frame(opcode: WebSocket.close, payload: frame.payload),
                             completion: .contentProcessed { [connection] _ in connection.cancel() })
@@ -240,6 +246,10 @@ final class CdpSession {
     private let send: (String) -> Void
     /// Flat sessions: the app is one page, so every session id reaches the same handlers and only goes back on answers.
     private var sessionIds = Set<String>()
+    /// The session that enabled Network, whose id its events carry, and the log watch feeding them.
+    private var networkWatch: (sessionId: Any?, key: UUID)?
+    /// The `sessionId` of the message being answered.
+    private var currentSessionId: Any?
     private lazy var methods: [String: ([String: Any]) throws -> [String: Any]] = [
         "Browser.getVersion": { [target] _ in Cdp.browserVersion(target) },
         "Target.getTargets": { [target] _ in ["targetInfos": [target.info()]] },
@@ -259,6 +269,27 @@ final class CdpSession {
         "Runtime.runIfWaitingForDebugger": { _ in [:] },
         "Accessibility.getFullAXTree": { [target] _ in ["nodes": Cdp.axTree(title: target.title, elements: Dom.read())] },
         "Page.captureScreenshot": { params in try Cdp.screenshot(params) },
+        "Network.enable": { [unowned self] _ in
+            stopNetwork()
+            let sessionId = currentSessionId
+            let key = NetworkLog.shared.watch { [weak self] summary in
+                guard let self, let entry = NetworkLog.shared.entry(id: summary["id"] as? String ?? "") else { return false }
+                Cdp.networkEvents(entry).forEach { self.event($0.method, $0.params, sessionId: sessionId) }
+                return true
+            }
+            networkWatch = (sessionId, key)
+            return [:]
+        },
+        "Network.disable": { [unowned self] _ in stopNetwork(); return [:] },
+        "Network.getResponseBody": { params in
+            ["body": try Cdp.networkEntry(params)["responseBody"] as? String ?? "", "base64Encoded": false]
+        },
+        "Network.getRequestPostData": { params in
+            guard let body = try Cdp.networkEntry(params)["requestBody"] as? String else {
+                throw Cdp.Failure(description: "No post data available for the request")
+            }
+            return ["postData": body]
+        },
         "DOM.getDocument": { [target] params in
             ["root": Dom(title: target.title, elements: Dom.read()).document(depth: params["depth"] as? Int ?? 1)]
         },
@@ -302,6 +333,20 @@ final class CdpSession {
         return sessionId
     }
 
+    /// The connection closed: stop feeding it events.
+    func close() { stopNetwork() }
+
+    private func stopNetwork() {
+        if let networkWatch { NetworkLog.shared.stopWatching(networkWatch.key) }
+        networkWatch = nil
+    }
+
+    private func event(_ method: String, _ params: [String: Any], sessionId: Any?) {
+        var message: [String: Any] = ["method": method, "params": params]
+        if let sessionId { message["sessionId"] = sessionId }
+        reply(message)
+    }
+
     func receive(_ text: String) {
         guard let message = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] else {
             return reply(Cdp.error(id: nil, code: -32700, message: "Message must be a valid JSON"))
@@ -313,6 +358,7 @@ final class CdpSession {
         guard let handler = methods[method] else {
             return reply(Cdp.error(id: id, code: -32601, message: "'\(method)' wasn't found"))
         }
+        currentSessionId = message["sessionId"]
         var answer: [String: Any]
         do {
             answer = ["id": id, "result": try handler(message["params"] as? [String: Any] ?? [:])]
@@ -484,7 +530,7 @@ enum Cdp {
     static let protocolVersion = "1.3"
     static let domains = ["Accessibility", "Browser", "DOM", "Log", "Network", "Page", "Runtime", "Schema", "Target"]
     /// Domains whose enable and disable only switch events on and off.
-    static let toggledDomains = ["Accessibility", "DOM", "Log", "Network", "Page", "Runtime"]
+    static let toggledDomains = ["Accessibility", "DOM", "Log", "Page", "Runtime"]
 
     struct Failure: Error, CustomStringConvertible {
         let description: String
@@ -504,6 +550,48 @@ enum Cdp {
                                    "name": ["type": "computedString", "value": title],
                                    "childIds": children.map { $0["nodeId"]! }]
         return [root] + children
+    }
+
+    /// One finished request from the network log as Chrome's events, in Chrome's order. The log only hears of a request
+    /// when it ends, so all of them arrive together; the timestamps are when it started and ended (seconds since 1970).
+    static func networkEvents(_ entry: [String: Any]) -> [(method: String, params: [String: Any])] {
+        let id = entry["id"] as? String ?? ""
+        let started = (entry["startedAt"] as? Double ?? 0) / 1000
+        let ended = started + (entry["ms"] as? Double ?? 0) / 1000
+        let url = entry["url"] as? String ?? ""
+        var request: [String: Any] = ["url": url, "method": entry["method"] as? String ?? "GET",
+                                      "headers": entry["requestHeaders"] ?? [:], "hasPostData": entry["requestBody"] != nil]
+        if let body = entry["requestBody"] { request["postData"] = body }
+        var events: [(String, [String: Any])] = [("Network.requestWillBeSent", [
+            "requestId": id, "loaderId": "", "documentURL": url, "request": request, "timestamp": started,
+            "wallTime": started, "initiator": ["type": "other"], "type": "Fetch", "redirectHasExtraInfo": false,
+        ])]
+        if let status = entry["status"] as? Int {
+            let headers = entry["responseHeaders"] as? [String: String] ?? [:]
+            let contentType = headers.first { $0.key.lowercased() == "content-type" }?.value ?? ""
+            events.append(("Network.responseReceived", [
+                "requestId": id, "loaderId": "", "timestamp": ended, "type": "Fetch", "hasExtraInfo": false,
+                "response": ["url": url, "status": status, "statusText": "",
+                             "headers": headers, "mimeType": contentType.split(separator: ";").first.map(String.init) ?? "",
+                             "connectionReused": false, "connectionId": 0, "encodedDataLength": entry["responseBytes"] ?? 0,
+                             "securityState": url.hasPrefix("https") ? "secure" : "insecure"],
+            ]))
+        }
+        if let error = entry["error"] as? String {
+            events.append(("Network.loadingFailed", ["requestId": id, "timestamp": ended, "type": "Fetch",
+                                                     "errorText": error, "canceled": false]))
+        } else {
+            events.append(("Network.loadingFinished", ["requestId": id, "timestamp": ended,
+                                                       "encodedDataLength": entry["responseBytes"] ?? 0]))
+        }
+        return events
+    }
+
+    static func networkEntry(_ params: [String: Any]) throws -> [String: Any] {
+        guard let entry = NetworkLog.shared.entry(id: params["requestId"] as? String ?? "") else {
+            throw Failure(description: "No resource with given identifier found")
+        }
+        return entry
     }
 
     /// `Page.captureScreenshot` in device pixels, like Chrome. `clip` is in points.

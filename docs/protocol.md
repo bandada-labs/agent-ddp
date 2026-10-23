@@ -27,9 +27,10 @@ Methods today:
 
 - `Browser.getVersion`, `Schema.getDomains`.
 - `Target.getTargets`, `getTargetInfo`, `setDiscoverTargets`, `attachToTarget`, `detachFromTarget`, `setAutoAttach`. Sessions are flat (`flatten: true`): a message with a `sessionId` gets it back on its answer. Attaching sends `Target.attachedToTarget` first, as Chrome does.
-- `enable` and `disable` of Accessibility, DOM, Log, Network, Page and Runtime. `Runtime.runIfWaitingForDebugger`.
+- `enable` and `disable` of Accessibility, DOM, Log, Network, Page and Runtime. Only Network sends events so far. `Runtime.runIfWaitingForDebugger`.
 - `Accessibility.getFullAXTree`: a `RootWebArea` node named after the app, with one child per element. `role` is the element's role, `name` its label or else its id. Node ids are positions in that read and hold only until the screen changes.
 - DOM: `getDocument` (`depth`, default 1, -1 for all), `describeNode`, `getAttributes`, `getOuterHTML`, `querySelector`, `querySelectorAll`, `getBoxModel`, `requestChildNodes`. The tree is `#document > html > body`, then one node per element in the same order as the accessibility tree, so `backendDOMNodeId` points at the same node. The tag is the role (`text` for StaticText); the attributes are `role`, `id` and `label` on both platforms. Selectors are compound selectors with tag, `#id`, `[attr]` and `[attr=, ^=, $=, *= value]`, in comma lists. The tree has no view hierarchy yet, so combinators fail with `DOM Error while querying`. The box model has no padding, border or margin: all four quads are the frame.
+- Network: `enable` sends `requestWillBeSent`, `responseReceived` and `loadingFinished` or `loadingFailed` for each request the app's Debug network decorator reports (the same requests as `ddp net`), with the `sessionId` that enabled it. The decorator only hears of a request when it ends, so the events of one request arrive together; `timestamp` and `wallTime` are seconds since 1970, start and end. `getResponseBody` and `getRequestPostData` return the redacted text, cut at 16 KB, never base64. Request ids are the `ddp net` ids (`n1`).
 - `Page.captureScreenshot`: `format` png or jpeg, `quality`, `clip`. Every window of the app, like a frame capture. On Android, SurfaceView and TextureView content is not drawn.
 
 The rest of the domains come in the order in [STATUS.md](STATUS.md).

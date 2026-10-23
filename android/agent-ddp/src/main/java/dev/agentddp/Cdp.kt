@@ -79,13 +79,17 @@ internal class CdpConnection(
             "Sec-WebSocket-Accept: ${WebSocket.acceptKey(key)}\r\n\r\n").toByteArray())
         output.flush()
         val session = CdpSession(target, browserLevel = request.path.startsWith("/devtools/browser")) { message -> synchronized(output) { WebSocket.writeText(output, message) } }
-        while (true) {
-            val frame = runCatching { WebSocket.readFrame(input) }.getOrNull() ?: return
-            when (frame.opcode) {
-                WebSocket.TEXT -> session.receive(String(frame.payload))
-                WebSocket.PING -> synchronized(output) { WebSocket.write(output, WebSocket.PONG, frame.payload) }
-                WebSocket.CLOSE -> return synchronized(output) { WebSocket.write(output, WebSocket.CLOSE, frame.payload) }
+        try {
+            while (true) {
+                val frame = runCatching { WebSocket.readFrame(input) }.getOrNull() ?: return
+                when (frame.opcode) {
+                    WebSocket.TEXT -> session.receive(String(frame.payload))
+                    WebSocket.PING -> synchronized(output) { WebSocket.write(output, WebSocket.PONG, frame.payload) }
+                    WebSocket.CLOSE -> return synchronized(output) { WebSocket.write(output, WebSocket.CLOSE, frame.payload) }
+                }
             }
+        } finally {
+            session.close()
         }
     }
 
@@ -202,6 +206,10 @@ internal class CdpSession(
 ) {
     /** Flat sessions: the app is one page, so every session id reaches the same handlers and only goes back on answers. */
     private val sessionIds = mutableSetOf<String>()
+    /** The log watch feeding Network events. */
+    private var networkWatch: java.util.UUID? = null
+    /** The `sessionId` of the message being answered. */
+    private var currentSessionId: Any? = null
 
     private val methods: Map<String, (JSONObject) -> JSONObject> = mapOf<String, (JSONObject) -> JSONObject>(
         "Browser.getVersion" to { _ -> Cdp.browserVersion(target) },
@@ -219,6 +227,26 @@ internal class CdpSession(
         "Runtime.runIfWaitingForDebugger" to { _ -> JSONObject() },
         "Accessibility.getFullAXTree" to { _ -> JSONObject().put("nodes", Cdp.axTree(target.title, Dom.read(target.title).elements)) },
         "Page.captureScreenshot" to { params -> Cdp.screenshot(params) },
+        "Network.enable" to { _ ->
+            stopNetwork()
+            val sessionId = currentSessionId
+            // Runs on the app's network thread: a closed socket must not throw into the app's request.
+            networkWatch = NetworkLog.watch { summary ->
+                runCatching {
+                    val entry = NetworkLog.entry(summary.optString("id")) ?: return@runCatching
+                    Cdp.networkEvents(entry).forEach { (method, params) -> event(method, params, sessionId) }
+                }.isSuccess
+            }
+            JSONObject()
+        },
+        "Network.disable" to { _ -> stopNetwork(); JSONObject() },
+        "Network.getResponseBody" to { params ->
+            JSONObject().put("body", Cdp.networkEntry(params).optString("responseBody")).put("base64Encoded", false)
+        },
+        "Network.getRequestPostData" to { params ->
+            JSONObject().put("postData", Cdp.networkEntry(params).optString("requestBody").ifEmpty { null }
+                ?: throw IllegalStateException("No post data available for the request"))
+        },
         "DOM.getDocument" to { params -> JSONObject().put("root", Dom.read(target.title).document(params.optInt("depth", 1))) },
         "DOM.requestChildNodes" to { _ -> JSONObject() },
         "DOM.describeNode" to { params -> JSONObject().put("node", Dom.read(target.title).node(Dom.nodeId(params))) },
@@ -232,6 +260,17 @@ internal class CdpSession(
         "DOM.querySelectorAll" to { params -> JSONObject().put("nodeIds", JSONArray(Dom.read(target.title).query(params.optString("selector")))) },
         "DOM.getBoxModel" to { params -> JSONObject().put("model", Dom.read(target.title).boxModel(Dom.nodeId(params))) },
     ) + Cdp.TOGGLED_DOMAINS.flatMap { listOf("$it.enable", "$it.disable") }.associateWith { { _: JSONObject -> JSONObject() } }
+
+    /** The connection closed: stop feeding it events. */
+    fun close() = stopNetwork()
+
+    private fun stopNetwork() {
+        networkWatch?.let(NetworkLog::stopWatching)
+        networkWatch = null
+    }
+
+    private fun event(method: String, params: JSONObject, sessionId: Any?) =
+        send(JSONObject().put("method", method).put("params", params).apply { sessionId?.let { put("sessionId", it) } }.toString())
 
     private fun attach(): String {
         val sessionId = java.util.UUID.randomUUID().toString().replace("-", "").uppercase()
@@ -247,6 +286,7 @@ internal class CdpSession(
         val id = message.opt("id") as? Int
             ?: return send(Cdp.error(null, -32600, "Message must have integer 'id' property").toString())
         val method = message.optString("method")
+        currentSessionId = message.opt("sessionId")
         val handler = methods[method] ?: return send(Cdp.error(id, -32601, "'$method' wasn't found").toString())
         val answer = runCatching { JSONObject().put("id", id).put("result", handler(message.optJSONObject("params") ?: JSONObject())) }
             .getOrElse { Cdp.error(id, -32000, it.message ?: it.toString()) }
@@ -399,7 +439,7 @@ internal object Cdp {
     const val PROTOCOL_VERSION = "1.3"
     val DOMAINS = listOf("Accessibility", "Browser", "DOM", "Log", "Network", "Page", "Runtime", "Schema", "Target")
     /** Domains whose enable and disable only switch events on and off. */
-    val TOGGLED_DOMAINS = listOf("Accessibility", "DOM", "Log", "Network", "Page", "Runtime")
+    val TOGGLED_DOMAINS = listOf("Accessibility", "DOM", "Log", "Page", "Runtime")
 
     private const val PRODUCT = "Agent-DDP/${FrameCapture.PROTOCOL}"
 
@@ -433,6 +473,45 @@ internal object Cdp {
         .put("backendDOMNodeId", id).put("ignored", false).put("childIds", JSONArray())
         .put("role", JSONObject().put("type", "role").put("value", role))
         .put("name", JSONObject().put("type", "computedString").put("value", name))
+
+    /**
+     * One finished request from the network log as Chrome's events, in Chrome's order. The log only hears of a request
+     * when it ends, so all of them arrive together; the timestamps are when it started and ended (seconds since 1970).
+     */
+    fun networkEvents(entry: JSONObject): List<Pair<String, JSONObject>> {
+        val id = entry.optString("id")
+        val started = entry.optDouble("startedAt") / 1000
+        val ended = started + entry.optDouble("ms") / 1000
+        val url = entry.optString("url")
+        val request = JSONObject().put("url", url).put("method", entry.optString("method", "GET"))
+            .put("headers", entry.optJSONObject("requestHeaders") ?: JSONObject()).put("hasPostData", entry.has("requestBody"))
+        entry.opt("requestBody")?.let { request.put("postData", it) }
+        val events = mutableListOf("Network.requestWillBeSent" to JSONObject().put("requestId", id).put("loaderId", "")
+            .put("documentURL", url).put("request", request).put("timestamp", started).put("wallTime", started)
+            .put("initiator", JSONObject().put("type", "other")).put("type", "Fetch").put("redirectHasExtraInfo", false))
+        if (entry.has("status")) {
+            val headers = entry.optJSONObject("responseHeaders") ?: JSONObject()
+            val contentType = headers.keys().asSequence().firstOrNull { it.equals("content-type", ignoreCase = true) }
+                ?.let(headers::optString).orEmpty()
+            events += "Network.responseReceived" to JSONObject().put("requestId", id).put("loaderId", "").put("timestamp", ended)
+                .put("type", "Fetch").put("hasExtraInfo", false).put("response", JSONObject().put("url", url)
+                    .put("status", entry.getInt("status")).put("statusText", "").put("headers", headers)
+                    .put("mimeType", contentType.substringBefore(";").trim()).put("connectionReused", false).put("connectionId", 0)
+                    .put("encodedDataLength", entry.optLong("responseBytes"))
+                    .put("securityState", if (url.startsWith("https")) "secure" else "insecure"))
+        }
+        events += if (entry.has("error")) {
+            "Network.loadingFailed" to JSONObject().put("requestId", id).put("timestamp", ended).put("type", "Fetch")
+                .put("errorText", entry.optString("error")).put("canceled", false)
+        } else {
+            "Network.loadingFinished" to JSONObject().put("requestId", id).put("timestamp", ended)
+                .put("encodedDataLength", entry.optLong("responseBytes"))
+        }
+        return events
+    }
+
+    fun networkEntry(params: JSONObject): JSONObject = NetworkLog.entry(params.optString("requestId"))
+        ?: throw IllegalArgumentException("No resource with given identifier found")
 
     /**
      * `Page.captureScreenshot` in device pixels, like Chrome; `clip` is in dp, Android's CSS pixel. Draws every app

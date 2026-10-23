@@ -109,6 +109,26 @@ final class CdpTests: XCTestCase {
         XCTAssertThrowsError(try Dom(title: "Example", elements: []).boxModel(4))
     }
 
+    func testAFinishedRequestBecomesChromesThreeEvents() {
+        let events = Cdp.networkEvents(["id": "n1", "method": "POST", "url": "https://api.example.com/items",
+                                        "startedAt": 1_000_000.0, "ms": 250.0, "status": 201, "responseBytes": 12,
+                                        "requestBody": "{}", "responseHeaders": ["Content-Type": "application/json; charset=utf-8"]])
+        XCTAssertEqual(events.map(\.method), ["Network.requestWillBeSent", "Network.responseReceived", "Network.loadingFinished"])
+        XCTAssertEqual((events[0].params["request"] as? [String: Any])?["postData"] as? String, "{}")
+        let response = events[1].params["response"] as? [String: Any]
+        XCTAssertEqual(response?["status"] as? Int, 201)
+        XCTAssertEqual(response?["mimeType"] as? String, "application/json")
+        XCTAssertEqual(events[0].params["timestamp"] as? Double, 1000)
+        XCTAssertEqual(events[2].params["timestamp"] as? Double, 1000.25)
+    }
+
+    func testAFailedRequestEndsInLoadingFailed() {
+        let events = Cdp.networkEvents(["id": "n2", "url": "https://down.example.com", "startedAt": 0.0, "ms": 5.0,
+                                        "error": "The Internet connection appears to be offline."])
+        XCTAssertEqual(events.map(\.method), ["Network.requestWillBeSent", "Network.loadingFailed"])
+        XCTAssertEqual(events[1].params["errorText"] as? String, "The Internet connection appears to be offline.")
+    }
+
     private func messages(after input: [String], browserLevel: Bool = true) -> [[String: Any]] {
         var sent: [[String: Any]] = []
         let session = CdpSession(target: CdpTarget(bundleIdentifier: "com.example", title: "Example"),
