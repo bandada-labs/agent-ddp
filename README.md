@@ -18,6 +18,10 @@ DDP (Device DevTools Protocol) gives a coding agent what the Chrome DevTools Pro
 
 Works with Claude Code, Codex, Cursor and any agent that can run a CLI or connect over MCP. SwiftUI and UIKit on iOS, Compose and Views on Android.
 
+<p align="center">
+  <img alt="An agent records a tap on an iOS simulator with ddp read, gets each element's changes with sparklines, then runs ddp check all, which flags a covered label, a small target and low contrast text" src="https://raw.githubusercontent.com/bandada-labs/agent-ddp/main/docs/assets/demo.gif" width="100%">
+</p>
+
 ## Quick start
 
 ```bash
