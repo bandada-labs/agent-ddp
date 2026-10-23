@@ -1,7 +1,7 @@
 {
   "name": "agent-ddp",
   "version": "0.1.4",
-  "description": "ddp: see what a Debug iOS or Android app draws, frame by frame (Device DevTools Protocol)",
+  "description": "See and check native iOS and Android UI from a coding agent, frame by frame. CLI and MCP server for Debug builds (Device DevTools Protocol).",
   "license": "MIT",
   "author": {
     "name": "sebospc",
@@ -13,13 +13,29 @@
   },
   "homepage": "https://github.com/bandada-labs/agent-ddp#readme",
   "keywords": [
+    "agent",
+    "ai-agent",
+    "cli",
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "devtools",
     "ios",
     "android",
-    "devtools",
-    "agent",
-    "animation",
+    "ios-simulator",
+    "android-emulator",
     "swiftui",
-    "compose"
+    "uikit",
+    "jetpack-compose",
+    "compose",
+    "animation",
+    "accessibility",
+    "ui-testing",
+    "mobile-testing",
+    "visual-testing",
+    "claude-code",
+    "codex",
+    "cursor"
   ],
   "bin": {
     "ddp": "bin/ddp.js"

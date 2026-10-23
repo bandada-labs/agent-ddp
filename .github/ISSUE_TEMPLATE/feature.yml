@@ -1,0 +1,16 @@
+name: Idea
+description: Something ddp should see, check or do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you or your agent could not do
+      description: The case, and what you tried.
+    validations:
+      required: true
+  - type: textarea
+    id: shape
+    attributes:
+      label: How it could look
+      description: The command and the output you would want.

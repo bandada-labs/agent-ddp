@@ -1,0 +1,35 @@
+name: Bug
+description: ddp shows something wrong, fails, or the library breaks the app
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: The command you ran, what it printed and what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: ddp doctor
+      description: Output of `ddp doctor <device> --app <id>`.
+      render: text
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: "`ddp --version`, the library version, and the platform: iOS simulator or Android device/emulator with its OS version."
+    validations:
+      required: true
+  - type: dropdown
+    id: ui
+    attributes:
+      label: UI framework
+      multiple: true
+      options: [SwiftUI, UIKit, Jetpack Compose, Android Views, other]
+  - type: textarea
+    id: recording
+    attributes:
+      label: Recording
+      description: If you can, attach `.ddp/last.jsonl` (zip it). Check it has nothing private first.
