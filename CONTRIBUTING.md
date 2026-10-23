@@ -13,7 +13,7 @@ You only need the toolchain of the part you change.
 | Part | Needs | Build |
 | --- | --- | --- |
 | CLI (`cli/`) | Rust stable, Python 3 for the black-box tests | `cargo build --release --manifest-path cli/Cargo.toml` |
-| iOS library (`ios/AgentDDP`) | Xcode 16 or newer | `xcodebuild -scheme AgentDDP -destination 'generic/platform=iOS Simulator' build` |
+| iOS library (`ios/AgentDDP`) | Xcode 15 or newer | `xcodebuild -scheme AgentDDP -destination 'generic/platform=iOS Simulator' build` |
 | Android library (`android/agent-ddp`) | JDK 17, Android SDK | `./samples/android/gradlew -p samples/android :agent-ddp:assembleRelease` |
 | Sample apps | the platform's toolchain, [XcodeGen](https://github.com/yonaskolb/XcodeGen) for iOS | `xcodegen` in `samples/ios`, `:app:installDebug` in `samples/android` |
 

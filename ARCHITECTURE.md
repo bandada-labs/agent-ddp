@@ -78,6 +78,22 @@ The guides in `docs/skills/` and `docs/agents.md` are compiled into the binary, 
 
 Offline, step 1 to 4 are replaced by `--file <recording>`.
 
+## Patterns in use
+
+Use a pattern when it removes branching or duplication, not to add a layer. These are already in the code; copy them when the same problem comes up. A new ADR names the ones it uses.
+
+| Pattern | Where | Why |
+| --- | --- | --- |
+| Facade | `AgentDDP` (iOS), `AgentDdpNetwork`, `AgentDdpTime` (Android) | A small public API over internal capture code |
+| Strategy | `OfflineDevice` with `IosDevice` and `AndroidDevice` (`live.rs`) | Offline recording works the same on both platforms |
+| Dispatch table | `handler()` in `main.rs` | One map from command to handler; `batch` and `mcp` reuse `run_command` |
+| Decorator | `TouchWatcher` over `Window.Callback` (Android); the output sinks in `state.rs` | Adds behavior without touching what it wraps |
+| Chain of responsibility | `AgentDdpInterceptor` in OkHttp | Network logging as one more link in the app's own chain |
+| Observer | draw listener, run loop observer, `NetworkLog.watch`, lifecycle callbacks | The library reacts to the app instead of polling |
+| Adapter | `ControllableFrameClock` (Compose clock), `py.rs` | Fits a foreign interface: Compose's clock, Python's printing |
+| Producer-consumer | the outbox queue in Android `LiveSession`; the history writer queues | The main thread never waits on a socket or a file |
+| Errors as values | `Failure` with `code` and `next` | Every error tells the agent what to run next |
+
 ## Adding things
 
 A new field in a frame:
@@ -94,3 +110,7 @@ A new check: one function in `checks.rs` that returns how many problems it found
 ## Versions
 
 All parts share one version and one tag (`vX.Y.Z`). The tag builds the CLI binaries, publishes npm, and is the version JitPack and SwiftPM resolve. Until 1.0 a minor version may change the protocol or the output. Every such change is listed in [CHANGELOG.md](CHANGELOG.md).
+
+## Decisions
+
+Why things are the way they are: [docs/adr/](docs/adr/README.md). What the maintainer decided and what is in progress: [docs/README.md](docs/README.md).

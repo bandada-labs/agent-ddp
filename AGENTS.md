@@ -2,6 +2,8 @@
 
 This file is for agents that change agent-ddp itself. To use ddp on an app, run `ddp skills get core` instead.
 
+- Start with [docs/README.md](docs/README.md): the read order, the project status, the maintainer's standing decisions and the ADRs. Follow decisions in `docs/DECISIONS.md` without asking again.
+- Nothing leaves the machine without the maintainer's yes: no push, tag, release or publish.
 - Read [ARCHITECTURE.md](ARCHITECTURE.md) before a change. Its rules are not optional: Debug only, read-only library, cheap main thread, local endpoint, one wire format, no daemon, stable output.
 - The protocol in [docs/protocol.md](docs/protocol.md) is shared by the iOS library, the Android library and the CLI. A change to it touches all three, or explains why not.
 - CLI output is a contract that tests compare as text. `py.rs` keeps numbers and JSON printed the same way everywhere. Do not format values by hand.
@@ -18,3 +20,4 @@ This file is for agents that change agent-ddp itself. To use ddp on an app, run 
 - A library change is checked on a simulator or emulator with the sample app in `samples/`. Report the numbers, not only "it works".
 - Update `docs/agents.md`, `docs/protocol.md` and `docs/skills/` in the same change. The guides are compiled into the binary.
 - Do not add dependencies to the libraries. They ship inside other people's apps.
+- When the maintainer decides something, write it to `docs/decisions-log.md` (date, their words) and `docs/DECISIONS.md` (one line). A hard-to-undo technical choice gets an ADR. Update `docs/STATUS.md` when work lands.

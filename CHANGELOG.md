@@ -10,6 +10,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 - History stamps a touch when the finger went down, so a swipe shows before what it caused.
 - The libraries have unit tests (`ChangeTracker`, frame signatures, gzip), run in CI.
 - Code layout: `checks/` has one file per check; capture code moved to `Capture.kt` and `Capture.swift`.
+- docs/README.md, STATUS.md, DECISIONS.md, a decision log and ADRs 0001 to 0006.
 - README rewritten with real output, prompts to give an agent, MCP setup and a FAQ.
 - ARCHITECTURE.md, docs/protocol.md, CONTRIBUTING.md, SECURITY.md and AGENTS.md for contributors.
 - CI also checks `rustfmt` and `clippy`, and builds the iOS and Android libraries.

@@ -152,6 +152,7 @@ iOS works on the simulator only for now. Android goes through `adb`, so it reach
 - [docs/agents.md](docs/agents.md): every command, its output and the recording format.
 - [docs/protocol.md](docs/protocol.md): the wire protocol between the library and a client.
 - [ARCHITECTURE.md](ARCHITECTURE.md): how the parts fit and the rules every change keeps.
+- [docs/README.md](docs/README.md): status, decisions and ADRs.
 - [SURVEY.md](SURVEY.md): what existing tools could and could not see before DDP.
 
 Without npm: `cargo install --git https://github.com/bandada-labs/agent-ddp agent-ddp`.
