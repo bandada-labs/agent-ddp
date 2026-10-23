@@ -31,7 +31,7 @@ afterEvaluate {
                 from(components["release"])
                 groupId = "com.github.bandada-labs"
                 artifactId = "agent-ddp"
-                version = System.getenv("VERSION") ?: "dev"
+                version = findProperty("publishVersion") as String? ?: "dev"
             }
         }
     }

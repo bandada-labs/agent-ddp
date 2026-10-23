@@ -2,4 +2,4 @@
 jdk:
   - openjdk17
 install:
-  - cd samples/android && ./gradlew :agent-ddp:publishReleasePublicationToMavenLocal
+  - cd samples/android && ./gradlew :agent-ddp:publishReleasePublicationToMavenLocal -PpublishVersion="${VERSION:-$(git describe --tags)}"
