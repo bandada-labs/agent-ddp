@@ -30,8 +30,13 @@ def frame(i, border_width, banner):
 
 
 def run(*args, recording):
-    return subprocess.run([sys.executable, str(CLI), *args, "--file", str(recording)],
+    # Run inside the recording's folder: ddp keeps refs and history in ./.ddp.
+    return subprocess.run([sys.executable, str(CLI), *args, "--file", str(recording)], cwd=recording.parent,
                           capture_output=True, text=True, check=True).stdout
+
+
+def ddp_in(directory, *args, stdin=None):
+    return subprocess.run([sys.executable, str(CLI), *args], cwd=directory, input=stdin, capture_output=True, text=True)
 
 
 with tempfile.TemporaryDirectory() as directory:
@@ -148,6 +153,63 @@ with tempfile.TemporaryDirectory() as directory:
     diffed = subprocess.run([sys.executable, str(CLI), "diff", str(recording), str(other), "--id", "glow",
                              "--ignore", "frame"], capture_output=True, text=True, check=True).stdout
     assert "alpha 0.5 vs 1.0; fill #FFFFFF80 vs #FFFFFFFF" in diffed, diffed
+
+# Agent ergonomics: refs, filters, find, duplicate names, errors, output budget, batch, check all, gzip, diff, skills.
+with tempfile.TemporaryDirectory() as directory:
+    recording = Path(directory, "r.jsonl")
+    widths = [0, 2, 4, 2, 0]
+    lines = [{"type": "header", "platform": "ios", "unit": "pt", "scale": 3, "frames": 5}]
+    lines += [frame(i, w, banner=(i == 4)) for i, w in enumerate(widths)]
+    for line in lines[1:]:
+        # Two rows with the same label, and a zero-width space in one of them.
+        line["elements"] += [{"label": "Open", "frame": [0, 100, 50, 20]}, {"label": "Op\u200ben", "frame": [0, 130, 50, 20]}]
+    lines.append({"type": "end", "frames": 5})
+    recording.write_text("\n".join(json.dumps(line) for line in lines))
+
+    interactive = run("tree", "-i", recording=recording)
+    assert "@e1 button [10, 10, 100, 40]" in interactive and "z=" not in interactive, interactive
+    assert "  @e2 Tap" in interactive, interactive  # nested under the button that holds it
+    assert "Open [2]" in interactive, interactive
+    assert ddp_in(directory, "get", "@e1", "--file", "r.jsonl").stdout.startswith("button:")
+    assert "@e3 Open" in run("find", "text", "open", recording=recording)
+    changed = run("tree", "-c", "-i", recording=recording)
+    assert "button" in changed and "Open" not in changed, changed
+
+    missing = ddp_in(directory, "get", "nope", "--file", "r.jsonl")
+    assert missing.returncode == 1 and "next: ddp tree" in missing.stderr, missing.stderr
+    as_json = json.loads(ddp_in(directory, "get", "nope", "--json", "--file", "r.jsonl").stdout)
+    assert as_json["code"] == "unknown_element" and as_json["next"], as_json
+
+    cut = run("tree", "--max-output", "40", "--content-boundaries", recording=recording)
+    assert "[truncated: showing 40 of" in cut and "DDP_APP_CONTENT_START nonce=" in cut and "CONTENT_END" in cut, cut
+
+    batch = ddp_in(directory, "batch", stdin="tree -i --file r.jsonl\nget nope --file r.jsonl\ncheck all --file r.jsonl\n")
+    assert batch.returncode == 1 and batch.stdout.count("$ ddp ") == 3 and "overlap 2" in batch.stdout, batch.stdout
+    bail = ddp_in(directory, "batch", "--bail", "get nope --file r.jsonl", "tree --file r.jsonl")
+    assert bail.stdout.count("$ ddp ") == 1, bail.stdout
+
+    import gzip
+    with gzip.open(Path(directory, "r.jsonl.gz"), "wt") as archive:
+        archive.write(recording.read_text())
+    assert "TRANSIENT" in ddp_in(directory, "read", "--file", "r.jsonl.gz").stdout
+
+    assert "are the same" in ddp_in(directory, "diff", "r.jsonl", "r.jsonl.gz").stdout
+    other = Path(directory, "other.jsonl")
+    other.write_text(recording.read_text().replace("#0000FFFF", "#00FF00FF"))
+    screen = ddp_in(directory, "diff", "r.jsonl", "other.jsonl").stdout
+    assert "-button" in screen and "+button" in screen and "#00FF00FF" in screen, screen
+
+    skills = ddp_in(directory, "skills", "list").stdout
+    assert "core" in skills and "reviewer" in skills, skills
+    timeline_only = ddp_in(directory, "skills", "get", "core", "--full", "--filter", "timeline").stdout
+    assert "check timeline" in timeline_only and "## The loop" not in timeline_only, timeline_only
+
+    # Output budget: a verbosity regression fails here. Tokens are about chars / 4.
+    for command, budget in ((["tree", "-i"], 200), (["tree"], 450), (["read"], 1000), (["check", "all"], 450)):
+        size = len(ddp_in(directory, *command, "--file", "r.jsonl").stdout)
+        assert size <= budget, f"{command} printed {size} chars, budget {budget}"
+        if "-v" in sys.argv:
+            print(command, size)
 
 # --then runs without a shell, so "; touch" is an argument to echo, not a second command.
 from importlib.machinery import SourceFileLoader

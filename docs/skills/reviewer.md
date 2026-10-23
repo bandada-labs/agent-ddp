@@ -1,6 +1,11 @@
+---
+name: reviewer
+description: Review an animation step by step: attach, watch, pause and step, record and query, checks, compare platforms, network, report.
+---
+
 # Reviewing an animation with ddp
 
-You are the reviewer. The app runs a Debug build on a simulator or emulator. agent-device is your hands, `ddp` your eyes. You never need a video: every question below has a text answer. Commands are in docs/agents.md.
+You are the reviewer. The app runs a Debug build on a simulator or emulator. agent-device is your hands, `ddp` your eyes. You never need a video: every question below has a text answer. Commands are in `ddp skills get core --full`.
 
 ## 1. Attach
 

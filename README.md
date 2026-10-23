@@ -31,8 +31,9 @@ So if the extra layer is there mostly for the tooling, it may not be needed anym
 
 ## Docs
 
-- [docs/agents.md](docs/agents.md): every command, its output and the recording format. Written for agents.
-- [REVIEWER.md](REVIEWER.md): how an agent reviews an animation with ddp, step by step.
+- `ddp skills get core`: the guide for agents, shipped with the CLI ([docs/skills](docs/skills)). [skills/ddp/SKILL.md](skills/ddp/SKILL.md) is a thin skill file that only points there.
+- [docs/agents.md](docs/agents.md): every command, its output and the recording format.
+- `ddp skills get reviewer`: how an agent reviews an animation with ddp, step by step.
 - [SURVEY.md](SURVEY.md): what existing tools could and could not see before DDP.
 
 ## Limits

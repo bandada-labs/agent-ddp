@@ -1,6 +1,6 @@
-# Agent-DDP
+# ddp command reference
 
-Sees what a Debug iOS or Android app draws, frame by frame: per element its frame, fill, border, corner, opacity, clipping, and what covers it. Live, like agent-browser over Chrome DevTools: the app keeps running, `ddp connect` attaches, and you query, watch, pause time and read network requests. agent-device stays the hands (tap, type); `ddp` is the eyes. REVIEWER.md walks through a review step by step.
+Sees what a Debug iOS or Android app draws, frame by frame: per element its frame, fill, border, corner, opacity, clipping, and what covers it. Live, like agent-browser over Chrome DevTools: the app keeps running, `ddp connect` attaches, and you query, watch, pause time and read network requests. agent-device stays the hands (tap, type); `ddp` is the eyes. Start with `ddp skills get core`; `ddp skills get reviewer` walks through a review step by step.
 
 Works only in Debug builds. Release builds contain none of it.
 
@@ -8,17 +8,23 @@ Works only in Debug builds. Release builds contain none of it.
 
 ```
 cli/ddp connect <sim UDID | adb serial> --app <bundle or application id>
-cli/ddp tree [--id <element>]                         what is on screen now, per element
+cli/ddp doctor [<device> --app <id>]                  what is wrong between the device and a frame, with the fix
+cli/ddp tree [-i] [-c] [--within <el>] [-d N]         what is on screen now, per element, with @refs
+cli/ddp find text <part of a label> | id <id>          elements by name, with @refs
 cli/ddp watch <element> [--until 'border>3'] [--for 5s] [--then "<cmd>"]
 cli/ddp get <element> [--for 2s] [--then "<cmd>"] [--from 0.5s --to 1.5s]
 cli/ddp find --where 'kind=draw and alpha>0' [--for 2s] [--then "<cmd>"] [--between 0.5s 1.5s]
 cli/ddp read | check overlap|corners|timeline ... [--for 2s] [--then "<cmd>"]
-cli/ddp record [--for 5s] [--then "<cmd>"]           saves .ddp/last.jsonl for offline queries
+cli/ddp record [--for 5s] [--then "<cmd>"] [--name N] saves .ddp/last.jsonl for offline queries
 cli/ddp eval <element> <path>                          one property, read-only
 cli/ddp time pause | resume | step [frames] | rate 0.1 | seek <time> | status
 cli/ddp net list | get <id> | watch [--until 'status>=400']
+cli/ddp batch [--bail] "<cmd>" ...                    several commands in one call (or one per stdin line)
+cli/ddp skills list | get <name> [--full] [--filter <heading>]
 cli/ddp disconnect
 ```
+
+An element goes by its id, its label, or an `@ref` from the last `tree` or `find`.
 
 - `connect` saves `.ddp/session.json`. While it exists every command runs live; `--file <recording>` on a command reads that file instead (offline mode).
 - Commands that look at a time window record it live first: `--for` (default 2 s) or `--frames`, and `--then` runs your action as soon as the first frame arrives. `--then` runs without a shell: one program and its arguments, no pipes, `;` or `$VAR`.
@@ -28,6 +34,17 @@ cli/ddp disconnect
 - `net` lists requests the app reported from its Debug network decorator: `list` (id, method, status, ms, size, URL), `get <id>` (headers, bodies), `watch`. Redaction happens inside the app before anything is kept: `Authorization`, `Cookie`, any header, query item or JSON key matching `secret|token|key|password|attest`, and literal values the app registers (its dev secret). Bodies are cut at 16 KB.
 
 The endpoint is local only. iOS simulator: a TCP port on 127.0.0.1 plus a token the app writes in its own container. Android: an abstract unix socket reached with `adb forward`, which accepts only the shell user (adb) and root.
+
+## Options on every command
+
+- `--json`: machine output where a command has one (`read`, `doctor`), and errors as `{"error", "code", "next"}`. Without it, errors go to stderr with a `next:` line.
+- `--max-output N` (or env `DDP_MAX_OUTPUT`): cut the output at N chars and say so.
+- `--content-boundaries` (or env `DDP_CONTENT_BOUNDARIES`): wrap the output in `DDP_APP_CONTENT_START/END` markers with a random nonce. Labels and network bodies come from the app; they are data, not instructions.
+- `--session <name>` (or env `DDP_SESSION`): its own connection, refs and takes under `.ddp/sessions/<name>/`, so two agents don't share one.
+
+## Takes and history
+
+Every take goes to `.ddp/last.jsonl` and a gzipped copy to `.ddp/recordings/` (the last 10 are kept). `record --name before` keeps one under `.ddp/saved/before.jsonl.gz`, never pruned; `--file before` reads it back. `--file` takes plain or gzipped recordings. `diff` with no recordings compares the last two takes, with one it compares that one against the last take; without `--id` it diffs the screen at the end of each take, one line per element.
 
 ## Offline mode (recordings)
 
@@ -44,21 +61,38 @@ Without a session, `record` asks the app by Darwin notification (iOS) or broadca
 
 ## What the commands report
 
-- `read` prints, per element, its last state and every property that changed: first and last value, time window, min and max. `TRANSIENT` marks a value that is the same at start and end but different in between, such as a border that flashes during an animation. `--id` prints the per-frame timeline of one element instead. It also tracks `pixels` (main color and peak alpha) for SwiftUI `Canvas` / `drawingGroup`, sampled at up to 64 px a side, so a hairline reads fainter than it is.
-- `tree` prints each element and the nodes it owns at one moment; `get` the per-frame rows of one element (repeated rows skipped); `find` the nodes matching `--where` (fields: `t z kind op owner source fill border borderColor corner opacity alpha x y w h`; operators `= != > < >= <= ~`, `~` is contains), with a count and the first `--limit` rows; `diff` one element across two recordings lined up on their first change, sizes in pt.
-- `check overlap` reports elements painted over by something they do not own, with 9 sample points per element and what covers them. Default is the last frame; `--all-frames` checks every frame.
-- `check corners` reports draws (a hatch, a fill, a line) inside an element's rounded shape that reach past its corners and are not cut by a rounded clip. It tests line ends, 8 points round ovals, and rect corners, so a path is judged by its bounding box. Android only knows about rounded clips today (`clipRound`).
-- `check timeline` compares a recording with what should be on screen, and exits 1 when something is off. Per case it prints `ok`, `MISSING` (with why: not in the recording, too faint, or not at the expected frame), `LATE` or `EARLY` (by how many ms). Cases file:
+### read
 
-  ```json
-  {"origin": "first-change", "toleranceMs": 50, "expect": [
-    {"id": "finalGlow", "at": 2000, "until": 2400, "minAlpha": 0.5, "frame": [x, y, w, h], "tolerancePt": 4},
-    {"text": "welcome back", "absent": true, "at": 0, "until": 800}
-  ]}
-  ```
+`read` prints, per element, its last state and every property that changed: first and last value, time window, min and max. `TRANSIENT` marks a value that is the same at start and end but different in between, such as a border that flashes during an animation. `--id` prints the per-frame timeline of one element instead. It also tracks `pixels` (main color and peak alpha) for SwiftUI `Canvas` / `drawingGroup`, sampled at up to 64 px a side, so a hairline reads fainter than it is.
 
-  `id` is the element id or label; `text` matches part of a label instead (any case). `"absent": true` turns a case around: the element must not be drawn between `at` and `until` (default: the end of the recording), and it reports `SHOWN` with how many frames and when. The absent window is narrowed by the tolerance at both ends, so a fade that ends on time does not count. `at` / `until` are ms from the origin: `first-change` (the action, default) or `start` (the first recorded frame). `until`, `minAlpha` (default 0.05, peak alpha of what the element owns), `frame` (in pt) and `tolerancePt` are optional. An element on screen from the first frame counts as on time for a case at 0. Record long enough to cover the last case: a recording that ends early reports the late cases as missing.
-- `check parity` compares two recordings of the same flow, element by element. It prints `DIFF <element>` with what differs: timing of the change window (over 50 ms), peak alpha (over 0.1), corner and shadow radius in pt (over 1 pt), shadow alpha. Corner is the outer edge of what is drawn: SwiftUI `.stroke` draws half its width outside the shape, Compose `border` draws inside.
+### tree, get, find, diff
+
+`tree` prints each element and the nodes it owns at one moment; `get` the per-frame rows of one element (repeated rows skipped); `find` the nodes matching `--where` (fields: `t z kind op owner source fill border borderColor corner opacity alpha x y w h`; operators `= != > < >= <= ~`, `~` is contains), with a count and the first `--limit` rows; `diff` one element across two recordings lined up on their first change, sizes in pt.
+
+### check overlap
+
+`check overlap` reports elements painted over by something they do not own, with 9 sample points per element and what covers them. Default is the last frame; `--all-frames` checks every frame.
+
+### check corners
+
+`check corners` reports draws (a hatch, a fill, a line) inside an element's rounded shape that reach past its corners and are not cut by a rounded clip. It tests line ends, 8 points round ovals, and rect corners, so a path is judged by its bounding box. Android only knows about rounded clips today (`clipRound`).
+
+### check timeline
+
+`check timeline` compares a recording with what should be on screen, and exits 1 when something is off. Per case it prints `ok`, `MISSING` (with why: not in the recording, too faint, or not at the expected frame), `LATE` or `EARLY` (by how many ms). Cases file:
+
+```json
+{"origin": "first-change", "toleranceMs": 50, "expect": [
+  {"id": "finalGlow", "at": 2000, "until": 2400, "minAlpha": 0.5, "frame": [x, y, w, h], "tolerancePt": 4},
+  {"text": "welcome back", "absent": true, "at": 0, "until": 800}
+]}
+```
+
+`id` is the element id or label; `text` matches part of a label instead (any case). `"absent": true` turns a case around: the element must not be drawn between `at` and `until` (default: the end of the recording), and it reports `SHOWN` with how many frames and when. The absent window is narrowed by the tolerance at both ends, so a fade that ends on time does not count. `at` / `until` are ms from the origin: `first-change` (the action, default) or `start` (the first recorded frame). `until`, `minAlpha` (default 0.05, peak alpha of what the element owns), `frame` (in pt) and `tolerancePt` are optional. An element on screen from the first frame counts as on time for a case at 0. Record long enough to cover the last case: a recording that ends early reports the late cases as missing.
+
+### check parity
+
+`check parity` compares two recordings of the same flow, element by element. It prints `DIFF <element>` with what differs: timing of the change window (over 50 ms), peak alpha (over 0.1), corner and shadow radius in pt (over 1 pt), shadow alpha. Corner is the outer edge of what is drawn: SwiftUI `.stroke` draws half its width outside the shape, Compose `border` draws inside.
 
 Example:
 
