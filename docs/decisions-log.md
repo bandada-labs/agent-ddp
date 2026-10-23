@@ -57,3 +57,6 @@ Asked to push and release 0.1.5: "yes". Asked to turn on private vulnerability r
 (I don't want them as ddp options, I want almost an exact copy of CDP.)
 
 After asking what QuickJS is, why not plain Java and why not Rust: "bueno aprobado anota todo, y dale arranca". (Approved, write it all down and start.) QuickJS on Android, JavaScriptCore on iOS, the CDP server in Swift and Kotlin, no Rust core for now. ADR 0007.
+
+### Reference client for CDP
+After a long try to get Chrome DevTools to show the app: "sí, deja ya eso aparte, es bobada". (Yes, leave that aside, it's silly.) agent-browser is the client the CDP work is checked against. Chrome DevTools is not a goal.

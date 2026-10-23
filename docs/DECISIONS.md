@@ -23,6 +23,7 @@ A line leaves this file when the maintainer replaces it or when its work has lan
 - The CLI is Rust. (2026-10-23, "Rust first")
 - The flight recorder ("what happened 15 minutes ago") exists on both platforms. (2026-10-23, "add iOS, I think it is missing for the black box")
 - The library speaks CDP itself (same messages, domains, methods and events), not new ddp options. `Runtime.evaluate` runs JavaScript: JavaScriptCore on iOS, QuickJS on Android in a debug-only artifact. No Rust core for now. ADR 0007. (2026-10-23)
+- CDP work is checked against agent-browser, the client agents use. Making Chrome DevTools panels work is not a goal. (2026-10-23)
 
 ## Distribution
 
