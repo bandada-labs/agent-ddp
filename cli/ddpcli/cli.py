@@ -7,6 +7,7 @@ Start here (for agents): ddp skills get core
   tree | find | get | read | watch | eval  what is drawn, now or over a take (@refs from tree and find)
   record | wait | tap | open | set | logs  take a recording, wait, act, set up the device, read app logs
   check overlap|corners|jank|settle|a11y|timeline|parity|baseline|all
+  history                                  the last 15 minutes: what changed, taps, requests; or one moment as a take
   diff | baseline | annotate | view | explore | net | time
   skills | batch | mcp
 
@@ -24,6 +25,7 @@ from .checks import CHECKS, baseline
 from .queries import diff, find, get, resolve_ref, tree
 from .device import annotate, explore, logs, open_url, record, settings, tap, wait
 from .tools import batch, doctor, mcp, skills, view
+from .history import history
 
 
 def run_check(args):
@@ -164,6 +166,19 @@ def build_parser():
     logs_parser.add_argument("--device")
     logs_parser.add_argument("--app")
     add_file(logs_parser)
+
+    history_parser = command("history", history, help="the last 15 minutes from the app's flight recorder (Android)")
+    history_parser.add_argument("action", nargs="?", default="list", choices=["list", "at"])
+    history_parser.add_argument("time", nargs="?", help="at: a time from the list, e.g. 14:31:02.5")
+    history_parser.add_argument("--since", default="15m", help="list: how far back (90s, 5m); default 15m")
+    history_parser.add_argument("--for", dest="duration", default="2s", help="at: how long the take is")
+    history_parser.add_argument("--limit", type=int, default=60, help="list: the last N lines")
+    history_parser.add_argument("--name", help="at: keep the take under a name")
+    history_parser.add_argument("--ignore", nargs="+", default=[], metavar="ELEMENT",
+                                help="list: elements to leave out (the ones that change in most frames already are)")
+    history_parser.add_argument("--dir", help="read history files from this folder instead of the device")
+    history_parser.add_argument("--device")
+    history_parser.add_argument("--app")
 
     set_parser = command("set", settings, help="device settings: appearance, text size, reduce motion, locale")
     set_parser.add_argument("what", choices=["appearance", "text-size", "reduce-motion", "locale"])

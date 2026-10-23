@@ -120,7 +120,9 @@ def adb_path():
 
 
 def parse_ms(text):
-    """'1.5s' or '1500ms' or '1500' (ms) to milliseconds."""
+    """'5m', '1.5s', '1500ms' or '1500' (ms) to milliseconds."""
     if text.endswith("ms"):
         return float(text[:-2])
+    if text.endswith("m"):
+        return float(text[:-1]) * 60_000
     return float(text[:-1]) * 1000 if text.endswith("s") else float(text)

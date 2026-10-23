@@ -73,6 +73,16 @@ ddp record --on ios,android --for 3s --then "<cmd with {platform}>"   # both pla
 
 Sessions for `--on` are named: `ddp connect <sim> --app ID --session ios` and `... --session android`.
 
+## What happened a while ago (Android)
+
+The app keeps the last 15 minutes by itself: every change, tap and screen. When someone says "a minute ago I saw a flicker", look it up instead of reproducing it:
+
+```
+ddp history --since 5m                   # one line per change, tap, screen and request
+ddp history at 14:31:02.5 --for 2s       # that moment as a take in .ddp/last.jsonl
+ddp check all --file .ddp/last.jsonl
+```
+
 ## Checks
 
 Every check exits 1 when it finds a problem, so any of them works as a gate in a script or CI.

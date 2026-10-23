@@ -408,6 +408,10 @@ JITTER_PT = 1
 def check_jank(args, recording=None):
     """Missed refreshes from the frame timestamps the recorder already writes."""
     recording = recording or recording_for(args)
+    if recording["header"].get("history"):
+        if recording is not getattr(args, "shared_recording", None):
+            print("jank not judged: a history take keeps only the frames that changed; record live for jank")
+        return 0
     times = [f["t"] for f in recording["frames"]]
     intervals = sorted(b - a for a, b in zip(times, times[1:]))
     if not intervals:

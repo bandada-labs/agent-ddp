@@ -58,6 +58,7 @@ class AgentDdpStarter : ContentProvider() {
         TimeControl.installComposeClock()
         val application = context!!.applicationContext as Application
         FrameRecorder.start(application)
+        History.start(application)
         LiveServer.start(application.packageName)
         return true
     }
@@ -84,7 +85,10 @@ internal object FrameRecorder {
     fun start(application: Application) {
         outputDirectory = File(application.filesDir, "agent-ddp").apply { mkdirs() }
         application.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
-            override fun onActivityResumed(activity: Activity) { resumedActivity = activity }
+            override fun onActivityResumed(activity: Activity) {
+                resumedActivity = activity
+                History.onResumed(activity)
+            }
             override fun onActivityPaused(activity: Activity) {
                 if (resumedActivity === activity) resumedActivity = null
             }
@@ -134,6 +138,12 @@ internal class FrameStream(
     private val send: (JSONObject) -> Boolean,
     private val finished: () -> Unit = {},
 ) : Choreographer.FrameCallback {
+    companion object {
+        /** Streams capturing now. History leaves the capturing to them meanwhile. */
+        var active = 0
+            private set
+    }
+
     private var running = false
     private var frameIndex = 0
     private var firstFrameNanos = 0L
@@ -144,12 +154,14 @@ internal class FrameStream(
         val header = FrameCapture.header(frameLimit)
         if (header == null || !send(header)) return finished()
         running = true
+        active++
         Choreographer.getInstance().postFrameCallback(this)
     }
 
     fun stop() {
         if (!running) return
         running = false
+        active--
         Choreographer.getInstance().removeFrameCallback(this)
         send(JSONObject().put("type", "end").put("frames", frameIndex).put("slowestCaptureMs", round2(slowestCaptureMs))
             .put("averageCaptureMs", round2(totalCaptureMs / maxOf(frameIndex, 1))))
@@ -165,7 +177,9 @@ internal class FrameStream(
         slowestCaptureMs = maxOf(slowestCaptureMs, captureMs)
         totalCaptureMs += captureMs
         frameIndex++
-        if (!send(line) || (frameLimit > 0 && frameIndex >= frameLimit)) stop()
+        val sent = send(line)
+        History.offer(line)
+        if (!sent || (frameLimit > 0 && frameIndex >= frameLimit)) stop()
         else Choreographer.getInstance().postFrameCallback(this)
     }
 }

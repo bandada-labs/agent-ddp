@@ -409,6 +409,41 @@ with tempfile.TemporaryDirectory() as directory:
                   "--then", f'{sys.executable} -c "import sys; print(sys.argv[1:])" {{platform}} {{"k": 1}}')
     assert both.returncode == 0 and "['ios', '{k:', '1}']" in both.stdout and "parity" in both.stdout, both.stdout + both.stderr
 
+# History: a closed (gzipped) minute and the open one, cut mid-line as when the app dies.
+import gzip
+import time as clock
+with tempfile.TemporaryDirectory() as directory:
+    history_dir = Path(directory, "history")
+    history_dir.mkdir()
+    start = int(clock.time() * 1000) - 70_000
+
+    def screen(t, label, spinner_w):
+        return {"type": "frame", "t": t, "nodes": [], "elements": [
+            {"id": "pay", "label": "Pay", "frame": [0, 0, 100, 50]},
+            {"label": label, "frame": [0, 100, 200, 30]},
+            {"id": "spinner", "frame": [0, 200, spinner_w, 10]}]}
+
+    first = [{"type": "header", "platform": "android", "unit": "px", "scale": 1, "frames": 0, "startedAt": start,
+              "history": True}]
+    first += [screen(t, "Total 10", 10 + t % 7) for t in range(0, 60_000, 2_000)]
+    first.append({"type": "end", "frames": 30})
+    Path(history_dir, f"{start}.jsonl.gz").write_bytes(gzip.compress("\n".join(map(json.dumps, first)).encode()))
+    second = [{"type": "header", "platform": "android", "unit": "px", "scale": 1, "frames": 0,
+               "startedAt": start + 60_000, "history": True},
+              {"type": "event", "kind": "tap", "t": 1_000, "x": 50, "y": 25},
+              screen(1_100, "Total 12", 3)]
+    Path(history_dir, f"{start + 60_000}.jsonl").write_text("\n".join(map(json.dumps, second)) + '\n{"type": "fr')
+    listed = ddp_in(directory, "history", "--dir", str(history_dir))
+    assert listed.returncode == 0, listed.stdout + listed.stderr
+    assert "tap pay (50,25)" in listed.stdout and '"Total 10" -> "Total 12"' in listed.stdout, listed.stdout
+    assert "left out: spinner" in listed.stdout, listed.stdout
+    tap_time = next(line.split()[0] for line in listed.stdout.splitlines() if "tap pay" in line)
+    taken = ddp_in(directory, "history", "at", tap_time, "--for", "1s", "--dir", str(history_dir))
+    assert taken.returncode == 0 and "3 frames" in taken.stdout, taken.stdout + taken.stderr
+    summary = ddp_in(directory, "read", "--file", ".ddp/last.jsonl").stdout
+    assert "Total 12" in summary, summary
+    assert "jank not judged" in ddp_in(directory, "check", "jank", "--file", ".ddp/last.jsonl").stdout
+
 # --then runs without a shell, so "; touch" is an argument to echo, not a second command.
 from ddpcli import live as ddp
 with tempfile.TemporaryDirectory() as directory:

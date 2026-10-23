@@ -56,6 +56,19 @@ The endpoint is local only. iOS simulator: a TCP port on 127.0.0.1 plus a token 
 
 Every take goes to `.ddp/last.jsonl` and a gzipped copy to `.ddp/recordings/` (the last 10 are kept). `record --name before` keeps one under `.ddp/saved/before.jsonl.gz`, never pruned; `--file before` reads it back. `--file` takes plain or gzipped recordings. `diff` with no recordings compares the last two takes, with one it compares that one against the last take; without `--id` it diffs the screen at the end of each take, one line per element.
 
+## The last 15 minutes (Android)
+
+```
+ddp history [--since 5m] [--limit 60] [--ignore spinner]
+ddp history at 14:31:02.5 --for 2s [--name flicker]
+```
+
+The library keeps a flight recorder in the Debug build: every frame that changed, plus taps, swipes, screen changes and app launches, for the last 15 minutes, in `files/agent-ddp/history/` (one file per minute, gzipped when closed, about 50 KB per minute). Nothing has to be started first, and a run that crashed is still there on the next launch. A still screen costs nothing. While only something that never stops changes (a clock, a spinner), it captures 10 times a second; as soon as anything else changes it captures every frame again. A live `record` or `read` feeds it too, so recording does not capture twice.
+
+`history` prints one line per change: `+name` appeared, `-name` went, `"old" -> "new"` for a text that changed, `changed a, b` for elements that moved or repainted, with how long it took. Taps say which element they hit. Requests show up when the app is connected live. Elements that change in most frames are left out and named in the first line. Times are the host's clock.
+
+`history at` cuts a take from the history: the screen as it was at that time, every change after it, and the screen held until the end. It goes to `.ddp/last.jsonl` like any take, so `read`, `get --curve`, `check all` and the rest work on it with `--file .ddp/last.jsonl`. `check jank` does not judge it, because the frames that did not change are not there. `--dir` reads a pulled copy of the folder instead of the device.
+
 ## Offline mode (recordings)
 
 ```
@@ -170,6 +183,7 @@ A drawn node belongs to the smallest element whose frame holds it (4 pt toleranc
 ## What it does not see yet
 
 - Physical iOS devices: the CLI uses `simctl`.
+- `history` on iOS. On Android it is woken by the activity window only: a dialog that animates while the screen under it is still shows up at the next draw of the screen.
 - The single shapes inside a SwiftUI `Canvas` or `drawingGroup`: one bitmap, read by its pixels.
 - System UI outside the app: iOS alerts like "Open in ...?", Android system dialogs.
 - Compose `drawWithCache` and `drawWithContent`, text drawn inside a Canvas.

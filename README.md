@@ -11,6 +11,7 @@ It works in the style of CDP. A small library inside the Debug build opens a loc
 - Watches a value until a condition, waits for an element or for the screen to settle, and pauses or steps the app's time.
 - Checks: overlap, corners past their radius, jank, animations that never settle, accessibility (touch targets, labels, contrast), an expected timeline, iOS vs Android parity and a saved baseline. Each check exits 1 on a problem, so it works in CI.
 - Taps, deep links, appearance, text size, reduce motion and locale. Logs and network requests from the take, secrets redacted.
+- Keeps the last 15 minutes inside the app (Android): every change, tap and screen. `ddp history` shows them, `ddp history at <time>` turns one moment into a take to check.
 - `explore` taps every control on a screen and runs every check after each tap.
 - Output made for agents: element refs (`@e3`), small trees, a size cap, batches and an MCP server.
 

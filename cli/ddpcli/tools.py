@@ -91,7 +91,7 @@ def view(args):
 
 MCP_PROFILES = {
     "core": ["doctor", "connect", "tree", "find", "get", "read", "check", "wait", "tap", "skills"],
-    "live": ["watch", "eval", "time", "net", "record", "logs", "annotate"],
+    "live": ["watch", "eval", "time", "net", "record", "logs", "annotate", "history"],
     "checks": ["check", "baseline", "diff"],
 }
 
