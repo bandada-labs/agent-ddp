@@ -1,11 +1,18 @@
 package dev.agentddp
 
+import okhttp3.Headers.Companion.toHeaders
 import okhttp3.Interceptor
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.Protocol
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 import okio.Buffer
 import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
+import java.io.IOException
 import java.util.UUID
 
 /**
@@ -25,27 +32,49 @@ object AgentDdpNetwork {
         responseBytes, error, startedAtMillis, durationMillis)
 }
 
-/** OkHttp interceptor for the app's Debug client. Reads at most 16 KB of each body, without consuming it. */
+/**
+ * OkHttp interceptor for the app's Debug client. Add it with `addInterceptor`, not `addNetworkInterceptor`: CDP Fetch
+ * can answer a request without sending it. Reads at most 16 KB of each response body, without consuming it.
+ */
 class AgentDdpInterceptor : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
         val startedAt = System.currentTimeMillis()
-        val requestBody = request.body?.takeUnless { it.isOneShot() || it.isDuplex() }
-            ?.let { body -> Buffer().also(body::writeTo).readByteArray() }
-        val requestHeaders = request.headers.toMultimap().mapValues { it.value.joinToString() }
+        val asked = Fetch.Sent(request.url.toString(), request.method, request.headers.toMultimap().mapValues { it.value.joinToString() },
+            request.body?.takeUnless { it.isOneShot() || it.isDuplex() }?.let { body -> Buffer().also(body::writeTo).readByteArray() })
+        val decision = Fetch.pause(asked)
+        val sent = (decision as? Fetch.Decision.Proceed)?.request ?: asked
         val response = try {
-            chain.proceed(request)
+            when (decision) {
+                is Fetch.Decision.Proceed -> chain.proceed(if (sent === asked) request else changed(request, asked, sent))
+                is Fetch.Decision.Fulfill -> fulfilled(request, decision)
+                is Fetch.Decision.Fail -> throw decision.error
+            }
         } catch (error: Exception) {
-            AgentDdpNetwork.log(request.method, request.url.toString(), requestHeaders, requestBody, null, emptyMap(),
+            AgentDdpNetwork.log(sent.method, sent.url, sent.headers, sent.body, null, emptyMap(),
                 null, 0, error.toString(), startedAt, System.currentTimeMillis() - startedAt)
             throw error
         }
         val peeked = response.peekBody(Redactor.BODY_LIMIT + 1L).bytes()
-        AgentDdpNetwork.log(request.method, request.url.toString(), requestHeaders, requestBody, response.code,
+        AgentDdpNetwork.log(sent.method, sent.url, sent.headers, sent.body, response.code,
             response.headers.toMultimap().mapValues { it.value.joinToString() }, peeked,
             response.body?.contentLength()?.takeIf { it >= 0 } ?: peeked.size.toLong(), null,
             startedAt, System.currentTimeMillis() - startedAt)
         return response
+    }
+
+    /** OkHttp rejects some changes (a GET with a body); the app sees that as a failed request, never a crash. */
+    private fun changed(request: Request, asked: Fetch.Sent, sent: Fetch.Sent): Request = try {
+        val body = if (sent.body === asked.body) request.body else sent.body?.toRequestBody(request.body?.contentType())
+        request.newBuilder().url(sent.url).headers(sent.headers.toHeaders()).method(sent.method, body).build()
+    } catch (invalid: IllegalArgumentException) {
+        throw IOException(invalid.message, invalid)
+    }
+
+    private fun fulfilled(request: Request, answer: Fetch.Decision.Fulfill): Response {
+        val contentType = answer.headers.entries.firstOrNull { it.key.equals("content-type", ignoreCase = true) }?.value
+        return Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(answer.status).message("")
+            .headers(answer.headers.toHeaders()).body(answer.body.toResponseBody(contentType?.toMediaTypeOrNull())).build()
     }
 }
 
@@ -54,7 +83,8 @@ internal object NetworkLog {
     private val entries = ArrayDeque<JSONObject>()
     private val watchers = mutableMapOf<UUID, (JSONObject) -> Boolean>()
     private var nextNumber = 1
-    @Volatile private var redactor = Redactor(emptyList())
+    @Volatile var redactor = Redactor(emptyList())
+        private set
 
     fun redact(values: List<String>) { redactor = Redactor(values) }
 

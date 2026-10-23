@@ -178,20 +178,12 @@ enum SampleNetwork {
     }
 }
 
-/// Debug decorator around URLSession: reports each request to ddp. Release builds would use the
-/// plain session; `AgentDDP.logRequest` is empty there anyway.
+/// Debug decorator around URLSession: ddp sees each request and can pause, answer or fail it. Release builds would
+/// use the plain session; `AgentDDP.send` only calls the session there anyway.
 struct ObservedSession {
     let session: URLSession
 
     func data(for request: URLRequest) async throws -> (Data, URLResponse) {
-        let startedAt = Date()
-        do {
-            let (data, response) = try await session.data(for: request)
-            AgentDDP.logRequest(request, response: response, body: data, error: nil, startedAt: startedAt)
-            return (data, response)
-        } catch {
-            AgentDDP.logRequest(request, response: nil, body: nil, error: error, startedAt: startedAt)
-            throw error
-        }
+        try await AgentDDP.send(request) { try await session.data(for: $0) }
     }
 }

@@ -151,6 +151,38 @@ final class CdpTests: XCTestCase {
         XCTAssertEqual(error?["message"] as? String, "Only mousePressed, mouseMoved and mouseReleased; scroll with Input.dispatchTouchEvent")
     }
 
+    func testAPausedRequestShowsRedactedAndGoesOnWithItsRealSecret() async throws {
+        let paused = expectation(description: "Fetch.requestPaused")
+        var event: [String: Any] = [:]
+        let session = CdpSession(target: CdpTarget(bundleIdentifier: "com.example", title: "Example")) { text in
+            let message = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] ?? [:]
+            guard message["method"] as? String == "Fetch.requestPaused" else { return }
+            event = message["params"] as? [String: Any] ?? [:]
+            paused.fulfill()
+        }
+        defer { session.close() }
+        session.receive(#"{"id":1,"method":"Fetch.enable","params":{"patterns":[{"urlPattern":"*/items\\?*"}]}}"#)
+        var request = URLRequest(url: URL(string: "http://127.0.0.1/items?page=1")!)
+        request.setValue("Bearer real", forHTTPHeaderField: "Authorization")
+        let sent = Task {
+            try await AgentDDP.send(request) { sent in
+                (Data(), HTTPURLResponse(url: sent.url!, statusCode: 200, httpVersion: nil, headerFields: [
+                    "X-Authorization": sent.value(forHTTPHeaderField: "Authorization") ?? "",
+                    "X-Extra": sent.value(forHTTPHeaderField: "X-Extra") ?? "",
+                ])!)
+            }
+        }
+        await fulfillment(of: [paused], timeout: 2)
+        let shownHeaders = (event["request"] as? [String: Any])?["headers"] as? [String: String]
+        XCTAssertEqual(shownHeaders?["Authorization"], "[redacted]")
+        let id = event["requestId"] as? String ?? ""
+        session.receive(#"{"id":2,"method":"Fetch.continueRequest","params":{"requestId":"\#(id)","headers":[{"name":"Authorization","value":"[redacted]"},{"name":"X-Extra","value":"1"}]}}"#)
+        let response = try await sent.value.1 as? HTTPURLResponse
+        XCTAssertEqual(response?.value(forHTTPHeaderField: "X-Authorization"), "Bearer real")
+        XCTAssertEqual(response?.value(forHTTPHeaderField: "X-Extra"), "1")
+        XCTAssertNil(Fetch.wildcard("*/items\\?*").firstMatch(in: "http://a/itemsX", range: NSRange(location: 0, length: 15)))
+    }
+
     private func messages(after input: [String], browserLevel: Bool = true) -> [[String: Any]] {
         var sent: [[String: Any]] = []
         let session = CdpSession(target: CdpTarget(bundleIdentifier: "com.example", title: "Example"),

@@ -167,6 +167,27 @@ class CdpTest {
         assertEquals("Only mousePressed, mouseMoved and mouseReleased; scroll with Input.dispatchTouchEvent", error.getString("message"))
     }
 
+    @Test
+    fun `a paused request shows redacted and goes on with its real secret`() {
+        val paused = java.util.concurrent.ArrayBlockingQueue<JSONObject>(1)
+        val session = CdpSession(CdpTarget("com.example", "Example")) { text ->
+            JSONObject(text).takeIf { it.optString("method") == "Fetch.requestPaused" }?.let { paused.put(it.getJSONObject("params")) }
+        }
+        session.receive("""{"id":1,"method":"Fetch.enable","params":{"patterns":[{"urlPattern":"*/items\\?*"}]}}""")
+        val decision = java.util.concurrent.ArrayBlockingQueue<Fetch.Decision>(1)
+        Thread {
+            decision.put(Fetch.pause(Fetch.Sent("http://127.0.0.1/items?page=1", "GET", mapOf("authorization" to "Bearer real"), null)))
+        }.start()
+        val event = paused.poll(2, java.util.concurrent.TimeUnit.SECONDS)!!
+        assertEquals("[redacted]", event.getJSONObject("request").getJSONObject("headers").getString("authorization"))
+        session.receive("""{"id":2,"method":"Fetch.continueRequest","params":{"requestId":"${event.getString("requestId")}",""" +
+            """"headers":[{"name":"authorization","value":"[redacted]"},{"name":"x-extra","value":"1"}]}}""")
+        val sent = (decision.poll(2, java.util.concurrent.TimeUnit.SECONDS) as Fetch.Decision.Proceed).request
+        assertEquals(mapOf("authorization" to "Bearer real", "x-extra" to "1"), sent.headers)
+        assertFalse(Fetch.wildcard("*/items\\?*").matches("http://a/itemsX"))
+        session.close()
+    }
+
     private fun answerTo(message: String): JSONObject {
         var answer = ""
         CdpSession(CdpTarget("com.example", "Example")) { answer = it }.receive(message)

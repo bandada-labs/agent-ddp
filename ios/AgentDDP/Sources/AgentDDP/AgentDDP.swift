@@ -26,6 +26,33 @@ public enum AgentDDP {
         #endif
     }
 
+    /// Sends `request` with the app's own client, for its Debug network decorator: `ddp net` and CDP Network see it,
+    /// and CDP Fetch can pause, change, answer or fail it before `send` runs. Outside Debug it only calls `send`.
+    public static func send(_ request: URLRequest,
+                            using send: (URLRequest) async throws -> (Data, URLResponse)) async throws -> (Data, URLResponse) {
+        #if DEBUG && canImport(UIKit)
+        let startedAt = Date()
+        var sent = request
+        do {
+            let result: (Data, URLResponse)
+            switch await Fetch.shared.pause(request) {
+            case .proceed(let changed):
+                sent = changed
+                result = try await send(changed)
+            case .fulfill(let body, let response): result = (body, response)
+            case .fail(let error): throw error
+            }
+            logRequest(sent, response: result.1, body: result.0, error: nil, startedAt: startedAt)
+            return result
+        } catch {
+            logRequest(sent, response: nil, body: nil, error: error, startedAt: startedAt)
+            throw error
+        }
+        #else
+        return try await send(request)
+        #endif
+    }
+
     /// Seconds on ddp's controllable clock (`ddp time pause|step|seek|rate`). An app's Debug clock port can read
     /// this instead of the system clock so its own timelines pause, step and rewind with ddp.
     /// Outside Debug it is CACurrentMediaTime().

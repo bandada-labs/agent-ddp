@@ -196,8 +196,8 @@ A drawn node belongs to the smallest element whose frame holds it (4 pt toleranc
 
 Opt-ins from the app's Debug composition root (the app's own ports stay as they are):
 
-- Network, iOS: wrap the app's network port in a decorator that calls `AgentDDP.logRequest(request, response:, body:, error:, startedAt:)` once a request ends, and `AgentDDP.redact(values: [devSecret])` once. See `ObservedSession` in `samples/ios`.
-- Network, Android: add `AgentDdpInterceptor()` to the Debug OkHttp client and call `AgentDdpNetwork.redact(devSecret)`; other clients call `AgentDdpNetwork.log(...)`. See `samples/android/app/src/debug`.
+- Network, iOS: wrap the app's network port in a decorator that sends through `AgentDDP.send(request) { try await session.data(for: $0) }`, and call `AgentDDP.redact(values: [devSecret])` once. `send` logs the request and lets CDP Fetch pause, answer or fail it. A decorator that only calls `AgentDDP.logRequest(...)` when a request ends still logs, without Fetch. See `ObservedSession` in `samples/ios`.
+- Network, Android: add `AgentDdpInterceptor()` to the Debug OkHttp client with `addInterceptor` (not `addNetworkInterceptor`, so Fetch can answer without sending) and call `AgentDdpNetwork.redact(devSecret)`; other clients call `AgentDdpNetwork.log(...)`, without Fetch. See `samples/android/app/src/debug`.
 - Time: let the app's clock port read `AgentDDP.elapsedTime()` (iOS) or `AgentDdpTime.elapsedMillis()` (Android) in Debug, so `ddp time` can pause and rewind the app's own timelines.
 
 The library keeps recordings in `Library/Caches/agent-ddp/` (iOS) or `files/agent-ddp/` (Android) inside the app's own sandbox. On iOS it turns on the private accessibility automation switch that XCTest uses, so SwiftUI builds its accessibility tree.

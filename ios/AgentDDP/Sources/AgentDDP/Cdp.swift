@@ -282,6 +282,17 @@ final class CdpSession {
             return [:]
         },
         "Network.disable": { [unowned self] _ in stopNetwork(); return [:] },
+        "Fetch.enable": { [unowned self] params in
+            let sessionId = currentSessionId
+            try Fetch.shared.enable(owner: self, params: params) { [weak self] paused in
+                self?.event("Fetch.requestPaused", paused, sessionId: sessionId)
+            }
+            return [:]
+        },
+        "Fetch.disable": { [unowned self] _ in Fetch.shared.disable(owner: self); return [:] },
+        "Fetch.continueRequest": { params in try Fetch.shared.continueRequest(params); return [:] },
+        "Fetch.fulfillRequest": { params in try Fetch.shared.fulfillRequest(params); return [:] },
+        "Fetch.failRequest": { params in try Fetch.shared.failRequest(params); return [:] },
         "Log.enable": { [unowned self] _ in
             appLog?.stop()
             let sessionId = currentSessionId
@@ -386,6 +397,7 @@ final class CdpSession {
     /// The connection closed: stop feeding it events.
     func close() {
         stopNetwork()
+        Fetch.shared.disable(owner: self)
         appLog?.stop()
     }
 
@@ -589,7 +601,7 @@ func onMain<T>(_ work: () -> T) -> T { Thread.isMainThread ? work() : DispatchQu
 
 enum Cdp {
     static let protocolVersion = "1.3"
-    static let domains = ["Accessibility", "Browser", "DOM", "Input", "Log", "Network", "Page", "Runtime", "Schema", "Target"]
+    static let domains = ["Accessibility", "Browser", "DOM", "Fetch", "Input", "Log", "Network", "Page", "Runtime", "Schema", "Target"]
     /// Domains whose enable and disable only switch events on and off.
     static let toggledDomains = ["Accessibility", "DOM", "Page", "Runtime"]
 

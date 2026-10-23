@@ -242,6 +242,16 @@ internal class CdpSession(
             JSONObject()
         },
         "Network.disable" to { _ -> stopNetwork(); JSONObject() },
+        "Fetch.enable" to { params ->
+            val sessionId = currentSessionId
+            // Runs on the app's network thread: a closed socket must not throw into the app's request.
+            Fetch.enable(this, params) { paused -> runCatching { event("Fetch.requestPaused", paused, sessionId) } }
+            JSONObject()
+        },
+        "Fetch.disable" to { _ -> Fetch.disable(this); JSONObject() },
+        "Fetch.continueRequest" to Fetch::continueRequest,
+        "Fetch.fulfillRequest" to Fetch::fulfillRequest,
+        "Fetch.failRequest" to Fetch::failRequest,
         "Log.enable" to { _ ->
             appLog?.stop()
             val sessionId = currentSessionId
@@ -309,6 +319,7 @@ internal class CdpSession(
     /** The connection closed: stop feeding it events. */
     fun close() {
         stopNetwork()
+        Fetch.disable(this)
         appLog?.stop()
     }
 
@@ -492,7 +503,7 @@ internal class SimpleSelector(text: String) {
 
 internal object Cdp {
     const val PROTOCOL_VERSION = "1.3"
-    val DOMAINS = listOf("Accessibility", "Browser", "DOM", "Input", "Log", "Network", "Page", "Runtime", "Schema", "Target")
+    val DOMAINS = listOf("Accessibility", "Browser", "DOM", "Fetch", "Input", "Log", "Network", "Page", "Runtime", "Schema", "Target")
     /** Domains whose enable and disable only switch events on and off. */
     val TOGGLED_DOMAINS = listOf("Accessibility", "DOM", "Page", "Runtime")
 

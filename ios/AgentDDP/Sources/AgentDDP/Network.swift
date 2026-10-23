@@ -18,10 +18,16 @@ final class NetworkLog {
         lock.unlock()
     }
 
+    var currentRedactor: Redactor {
+        lock.lock()
+        defer { lock.unlock() }
+        return redactor
+    }
+
     func add(request: URLRequest, response: URLResponse?, body: Data?, error: Error?,
              startedAt: Date, finishedAt: Date) {
+        let redactor = currentRedactor
         lock.lock()
-        let redactor = self.redactor
         let id = "n\(nextNumber)"
         nextNumber += 1
         lock.unlock()

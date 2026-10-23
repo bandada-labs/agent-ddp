@@ -9,6 +9,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 - CDP DOM over the elements: `getDocument`, `querySelector(All)` with `button#saveButton` or `[label='Save']` on both platforms, `getBoxModel`, `getOuterHTML`.
 - CDP Network events and `getResponseBody` for the requests `ddp net` sees, redacted the same way.
 - CDP `Log.entryAdded` with the app's own log lines (os_log on iOS, logcat on Android).
+- CDP Fetch: pause the app's requests, then let them go on changed, answer them or fail them (`continueRequest`, `fulfillRequest`, `failRequest`). New on iOS: `AgentDDP.send(request) { ... }` for the Debug network decorator, which logs the request and lets Fetch reach it.
 - CDP Input: `dispatchMouseEvent`, `dispatchTouchEvent`, `dispatchKeyEvent` and `insertText` touch and type inside the app. Taps, long presses and drags reach gesture recognizers, SwiftUI and Compose as a real finger.
 - Elements have a `role` (`button`, `textbox`, `checkbox` and so on), the same words on iOS and Android.
 
