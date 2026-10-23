@@ -1,0 +1,24 @@
+[package]
+name = "agent-ddp"
+version = "0.1.0"
+edition = "2021"
+description = "ddp: see what a Debug iOS/Android app draws, frame by frame"
+license = "MIT"
+repository = "https://github.com/sebospc/agent-ddp"
+
+[[bin]]
+name = "ddp"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", default-features = false, features = ["std", "help", "usage", "error-context"] }
+flate2 = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

@@ -1,0 +1,5 @@
+# JitPack builds the Android library from a tag: debugImplementation("com.github.sebospc:agent-ddp:<tag>")
+jdk:
+  - openjdk17
+install:
+  - cd samples/android && ./gradlew :agent-ddp:publishReleasePublicationToMavenLocal

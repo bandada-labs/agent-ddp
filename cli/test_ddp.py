@@ -1,12 +1,14 @@
-"""Self-check for the ddp CLI logic on a synthetic recording: python3 cli/test_ddp.py"""
+"""Conformance check for the ddp binary, from the outside: python3 cli/test_ddp.py
+Runs cli/target/release/ddp (cargo build --release), or the program in env DDP_BIN."""
 import json
 import math
+import os
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
-CLI = Path(__file__).with_name("ddp")
+DDP = [os.environ.get("DDP_BIN") or str(Path(__file__).resolve().parent / "target" / "release" / "ddp")]
 
 
 def frame(i, border_width, banner):
@@ -33,14 +35,14 @@ def frame(i, border_width, banner):
 def run(*args, recording):
     # Run inside the recording's folder: ddp keeps refs and history in ./.ddp. Checks that find problems
     # exit 1, so the exit code is not checked here; a crash shows as missing output in the asserts.
-    result = subprocess.run([sys.executable, str(CLI), *args, "--file", str(recording)], cwd=recording.parent,
+    result = subprocess.run([*DDP, *args, "--file", str(recording)], cwd=recording.parent,
                             capture_output=True, text=True)
     assert "Traceback" not in result.stderr, result.stderr
     return result.stdout
 
 
 def ddp_in(directory, *args, stdin=None):
-    return subprocess.run([sys.executable, str(CLI), *args], cwd=directory, input=stdin, capture_output=True, text=True)
+    return subprocess.run([*DDP, *args], cwd=directory, input=stdin, capture_output=True, text=True)
 
 
 with tempfile.TemporaryDirectory() as directory:
@@ -120,7 +122,7 @@ def timeline_recording():
 def timeline(cases, recording):
     cases_file = Path(recording.parent, "cases.json")
     cases_file.write_text(json.dumps({"expect": cases}))
-    return subprocess.run([sys.executable, str(CLI), "check", "timeline", "--expect", str(cases_file),
+    return subprocess.run([*DDP, "check", "timeline", "--expect", str(cases_file),
                            "--file", str(recording)], capture_output=True, text=True)
 
 
@@ -154,7 +156,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert found.startswith("6 matches in 6 frames, t=300..400ms"), found
     other = Path(directory, "other.jsonl")
     other.write_text(timeline_recording().replace("#FFFFFF80", "#FFFFFFFF"))
-    diffed = subprocess.run([sys.executable, str(CLI), "diff", str(recording), str(other), "--id", "glow",
+    diffed = subprocess.run([*DDP, "diff", str(recording), str(other), "--id", "glow",
                              "--ignore", "frame"], cwd=directory, capture_output=True, text=True, check=True).stdout
     assert "alpha 0.5 vs 1.0; fill #FFFFFF80 vs #FFFFFFFF" in diffed, diffed
 
@@ -236,14 +238,19 @@ with tempfile.TemporaryDirectory() as directory:
     take = Path(directory, "move.jsonl")
     times = [i * 16 for i in range(80)]
     # Holds at 0, moves to 100 over 400 ms on the CSS ease-out curve, then holds.
-    sys.path.insert(0, str(CLI.parent))
-    from ddpcli import device as screenshots, summary as curves
-    xs = [0] * 10 + [round(100 * curves.bezier_progress(curves.EASINGS["easeOut"], u / 25), 2) for u in range(1, 26)] + [100] * 45
+    def ease_out(x):
+        """y of the CSS ease-out curve (0, 0, 0.58, 1) at time x, by bisection."""
+        def at(a, b, u):
+            return 3 * a * u * (1 - u) ** 2 + 3 * b * u * u * (1 - u) + u ** 3
+        low, high = 0.0, 1.0
+        for _ in range(30):
+            middle = (low + high) / 2
+            low, high = (middle, high) if at(0, 0.58, middle) < x else (low, middle)
+        return at(0, 1, (low + high) / 2)
+    xs = [0] * 10 + [round(100 * ease_out(u / 25), 2) for u in range(1, 26)] + [100] * 45
     take.write_text(motion_recording(times, xs))
     curve = run("get", "box", "--curve", recording=take)
     assert "x: 0 -> 100.0 over 400ms from 144ms, easeOut" in curve and "loose" not in curve, curve
-    assert curves.sparkline([(0, 0), (50, 4), (100, 0)], width=3) == "▁█▁"
-    assert curves.sparkline([(0, 1), (50, 0.2), (100, 1)], width=3) == "█▁█"  # a dip shows too
     assert "no jank" in run("check", "jank", recording=take)
     assert "everything settled" in run("check", "settle", recording=take)
 
@@ -292,11 +299,6 @@ with tempfile.TemporaryDirectory() as directory:
     assert "contrast not judged (text over a gradient, image or drawing): onGradient" in a11y, a11y
     assert "NO LABEL icon" in a11y and "LOW CONTRAST faint: 1.6:1 at t=0ms" in a11y and "dark:" not in a11y, a11y
     assert "COVERED dark" in ddp_in(directory, "check", "overlap", "--file", "a11y.jsonl").stdout
-
-    rows = [bytearray(b"\x10\x20\x30\xff" * 5) for _ in range(4)]
-    png = screenshots.png_write(5, 4, rows)
-    width, height, back = screenshots.png_read(png)
-    assert (width, height) == (5, 4) and back == rows
 
     page = ddp_in(directory, "view", "page.html", "--file", "a11y.jsonl")
     assert page.returncode == 0 and '"tiny"' in Path(directory, "page.html").read_text(), page.stderr
@@ -385,7 +387,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert "@e1 button" in live.stdout and "@e2 spinner" in live.stdout, live.stdout + live.stderr
     assert "tapped button" in ddp_in(directory, "tap", "@e1").stdout
     app.tapped_at = None
-    then_tap = f"{sys.executable} {CLI} tap button"
+    then_tap = f"{DDP[0]} tap button"
     waited = ddp_in(directory, "wait", "text", "saved", "--timeout", "2s")
     assert waited.returncode == 1 and "next:" in waited.stderr, waited.stderr  # nothing tapped yet: times out
     assert ddp_in(directory, "wait", "--settled", "100ms", "--timeout", "1s").returncode == 1  # the spinner never stops
@@ -408,6 +410,10 @@ with tempfile.TemporaryDirectory() as directory:
     both = ddp_in(directory, "record", "--on", "ios,android", "--for", "300ms",
                   "--then", f'{sys.executable} -c "import sys; print(sys.argv[1:])" {{platform}} {{"k": 1}}')
     assert both.returncode == 0 and "['ios', '{k:', '1}']" in both.stdout and "parity" in both.stdout, both.stdout + both.stderr
+    # --then runs without a shell, so "; touch" is an argument to echo, not a second command.
+    marker = Path(directory, "injected")
+    safe = ddp_in(directory, "read", "--for", "200ms", "--then", f"echo safe ; touch {marker}")
+    assert safe.returncode == 0 and not marker.exists(), safe.stdout + safe.stderr
 
 # History: a closed (gzipped) minute and the open one, cut mid-line as when the app dies.
 import gzip
@@ -443,12 +449,5 @@ with tempfile.TemporaryDirectory() as directory:
     summary = ddp_in(directory, "read", "--file", ".ddp/last.jsonl").stdout
     assert "Total 12" in summary, summary
     assert "jank not judged" in ddp_in(directory, "check", "jank", "--file", ".ddp/last.jsonl").stdout
-
-# --then runs without a shell, so "; touch" is an argument to echo, not a second command.
-from ddpcli import live as ddp
-with tempfile.TemporaryDirectory() as directory:
-    marker = Path(directory, "injected")
-    assert ddp.run_then(f"echo safe ; touch {marker}") and not marker.exists()
-    assert not ddp.run_then("no-such-program-ddp")
 
 print("ok")

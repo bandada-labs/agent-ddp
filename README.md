@@ -22,17 +22,16 @@ Paste this in your agent's chat inside your app's repo:
 ```
 Set up agent-ddp so you can see and check this app's UI: https://github.com/sebospc/agent-ddp
 
-1. Clone it next to this repo and run `python3 agent-ddp/cli/build.py`.
-   Copy agent-ddp/dist/ddp into this repo (for example tools/ddp) and use it as `ddp`.
+1. Install the CLI: npm i -g @bandada-labs/agent-ddp
 2. Add the library to the Debug build only:
-   - iOS: add the Swift package agent-ddp/ios/AgentDDP and call AgentDDP.start() at launch.
-     It does nothing in Release. Simulator only for now.
-   - Android: include agent-ddp/android/agent-ddp as the module ":agent-ddp" in
-     settings.gradle and add debugImplementation(project(":agent-ddp")). It starts by itself.
+   - iOS: add the Swift package https://github.com/sebospc/agent-ddp (from 0.1.0) and call
+     AgentDDP.start() at launch. It does nothing in Release. Simulator only for now.
+   - Android: add maven("https://jitpack.io") to the repositories and
+     debugImplementation("com.github.sebospc:agent-ddp:v0.1.0"). It starts by itself.
 3. Run `ddp skills get core` and follow it. Start with `ddp doctor`.
 ```
 
-The CLI needs Python 3 and nothing else, plus `xcrun simctl` for iOS and `adb` for Android. `samples/ios` and `samples/android` are small apps with the library already wired in.
+The CLI is one native binary (macOS, Linux, Windows), plus `xcrun simctl` for iOS and `adb` for Android. Without npm: `cargo install --git https://github.com/sebospc/agent-ddp agent-ddp`. `samples/ios` and `samples/android` are small apps with the library already wired in.
 
 ## Why native
 

@@ -1,7 +1,7 @@
 ---
 name: ddp
 description: See what a Debug iOS or Android app draws, frame by frame, and check its animations (Device DevTools Protocol). Use to inspect a native app screen, debug or review an animation, find elements covered by others, compare iOS and Android, or watch values while an animation runs.
-allowed-tools: Bash(ddp:*), Bash(cli/ddp:*)
+allowed-tools: Bash(ddp:*)
 ---
 
 # ddp
@@ -15,4 +15,4 @@ ddp skills get core --full   # plus every command and output shape
 ddp skills list
 ```
 
-From a checkout of the repo, run it as `cli/ddp`.
+Not installed? `npm i -g @bandada-labs/agent-ddp`.

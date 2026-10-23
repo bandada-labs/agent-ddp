@@ -11,3 +11,7 @@ ios/AgentDDP/.build/
 ios/AgentDDP/.swiftpm/
 __pycache__/
 dist/
+/cli/target/
+/npm/bin/ddp-*
+/.build/
+/.swiftpm/

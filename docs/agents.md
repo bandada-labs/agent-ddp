@@ -7,31 +7,31 @@ Works only in Debug builds. Release builds contain none of it.
 ## Live mode
 
 ```
-cli/ddp connect <sim UDID | adb serial> --app <bundle or application id>
-cli/ddp doctor [<device> --app <id>]                  what is wrong between the device and a frame, with the fix
-cli/ddp tree [-i] [-c] [--within <el>] [-d N]         what is on screen now, per element, with @refs
-cli/ddp find text <part of a label> | id <id>          elements by name, with @refs
-cli/ddp watch <element> [--until 'border>3'] [--for 5s] [--then "<cmd>"]
-cli/ddp get <element> [--for 2s] [--then "<cmd>"] [--from 0.5s --to 1.5s]
-cli/ddp find --where 'kind=draw and alpha>0' [--for 2s] [--then "<cmd>"] [--between 0.5s 1.5s]
-cli/ddp read | check overlap|corners|timeline ... [--for 2s] [--then "<cmd>"]
-cli/ddp record [--for 5s] [--then "<cmd>"] [--name N] saves .ddp/last.jsonl for offline queries
-cli/ddp eval <element> <path>                          one property, read-only
-cli/ddp time pause | resume | step [frames] | rate 0.1 | seek <time> | status
-cli/ddp net list | get <id> | watch [--until 'status>=400']
-cli/ddp tap <element>                                  Android: a real touch; iOS: the accessibility action
-cli/ddp wait id <id> | text <label> | --settled 300ms [--ignore <el>] [--timeout 10s]
-cli/ddp logs [--grep <text>]                           app log lines during the last take, at their time in it
-cli/ddp set appearance dark | text-size large | reduce-motion on | locale es-ES
-cli/ddp open <deep link or URL>
-cli/ddp annotate [out.png]                             screenshot with numbered boxes, label N is @eN
-cli/ddp explore [--per 2s] [--skip <el> ...]           tap each control once, record, check all on each
-cli/ddp record --on ios,android --for 3s --then "<cmd with {platform}>"   both at once, then parity
-cli/ddp view [out.html] [--file rec]                   a local HTML page of a take, for people
-cli/ddp mcp [--tools core,live,checks,all]             the commands as MCP tools on stdio
-cli/ddp batch [--bail] "<cmd>" ...                    several commands in one call (or one per stdin line)
-cli/ddp skills list | get <name> [--full] [--filter <heading>]
-cli/ddp disconnect
+ddp connect <sim UDID | adb serial> --app <bundle or application id>
+ddp doctor [<device> --app <id>]                  what is wrong between the device and a frame, with the fix
+ddp tree [-i] [-c] [--within <el>] [-d N]         what is on screen now, per element, with @refs
+ddp find text <part of a label> | id <id>          elements by name, with @refs
+ddp watch <element> [--until 'border>3'] [--for 5s] [--then "<cmd>"]
+ddp get <element> [--for 2s] [--then "<cmd>"] [--from 0.5s --to 1.5s]
+ddp find --where 'kind=draw and alpha>0' [--for 2s] [--then "<cmd>"] [--between 0.5s 1.5s]
+ddp read | check overlap|corners|timeline ... [--for 2s] [--then "<cmd>"]
+ddp record [--for 5s] [--then "<cmd>"] [--name N] saves .ddp/last.jsonl for offline queries
+ddp eval <element> <path>                          one property, read-only
+ddp time pause | resume | step [frames] | rate 0.1 | seek <time> | status
+ddp net list | get <id> | watch [--until 'status>=400']
+ddp tap <element>                                  Android: a real touch; iOS: the accessibility action
+ddp wait id <id> | text <label> | --settled 300ms [--ignore <el>] [--timeout 10s]
+ddp logs [--grep <text>]                           app log lines during the last take, at their time in it
+ddp set appearance dark | text-size large | reduce-motion on | locale es-ES
+ddp open <deep link or URL>
+ddp annotate [out.png]                             screenshot with numbered boxes, label N is @eN
+ddp explore [--per 2s] [--skip <el> ...]           tap each control once, record, check all on each
+ddp record --on ios,android --for 3s --then "<cmd with {platform}>"   both at once, then parity
+ddp view [out.html] [--file rec]                   a local HTML page of a take, for people
+ddp mcp [--tools core,live,checks,all]             the commands as MCP tools on stdio
+ddp batch [--bail] "<cmd>" ...                    several commands in one call (or one per stdin line)
+ddp skills list | get <name> [--full] [--filter <heading>]
+ddp disconnect
 ```
 
 An element goes by its id, its label, or an `@ref` from the last `tree` or `find`.
@@ -72,12 +72,12 @@ The library keeps a flight recorder in the Debug build: every frame that changed
 ## Offline mode (recordings)
 
 ```
-cli/ddp record --platform ios|android --app <id> --device <sim UDID | adb serial> [--frames 120] [--then "<cmd>"]
-cli/ddp read [--id <element>] [--json] [--file rec.jsonl]
-cli/ddp tree --at 1.2s | get <element> --from 1s --to 2s | find --where ... --between 1s 2s   [--file rec.jsonl]
-cli/ddp check overlap|corners [--all-frames] | check timeline --expect cases.json   [--file rec.jsonl]
-cli/ddp check parity --file ios.jsonl --against android.jsonl
-cli/ddp diff ios.jsonl android.jsonl --id <element> [--ignore frame]
+ddp record --platform ios|android --app <id> --device <sim UDID | adb serial> [--frames 120] [--then "<cmd>"]
+ddp read [--id <element>] [--json] [--file rec.jsonl]
+ddp tree --at 1.2s | get <element> --from 1s --to 2s | find --where ... --between 1s 2s   [--file rec.jsonl]
+ddp check overlap|corners [--all-frames] | check timeline --expect cases.json   [--file rec.jsonl]
+ddp check parity --file ios.jsonl --against android.jsonl
+ddp diff ios.jsonl android.jsonl --id <element> [--ignore frame]
 ```
 
 Without a session, `record` asks the app by Darwin notification (iOS) or broadcast (Android, needs the DUMP permission adb has) and fetches the file with `simctl` / `run-as`. `--frames` is 1..600 there. Queries read `.ddp/last.jsonl` unless `--file` says otherwise. `--device` can come from env `DDP_DEVICE`.
@@ -138,14 +138,14 @@ Every `check` exits 1 when it finds a problem and 0 when it finds none.
 Example:
 
 ```
-$ cli/ddp connect $UDID --app dev.agentddp.sample
+$ ddp connect $UDID --app dev.agentddp.sample
 connected to dev.agentddp.sample on ios ... (port 59405): 10 elements, 23 nodes on screen
-$ cli/ddp watch flashBox --until 'border>3' --then "agent-device press id=animatedButton"
+$ ddp watch flashBox --until 'border>3' --then "agent-device press id=animatedButton"
 t=0ms present True; x 98.67; y 342.33; w 60.33; h 40.33; alpha 1; fill None; border 0; ...
 t=700ms ... border 0 -> 0.04; borderColor None -> #FF383CFF
 ...
 until met at t=950ms
-$ cli/ddp check overlap
+$ ddp check overlap
 COVERED coveredLabel at t=2000ms: 9/9 sample points, frame [199, 352.33, 104.33, 20.33]
   by z=12 {"kind": "layer", "fill": "#8E8E93FF", "frame": [181.33, 347.67, 140, 30]}
 ```
@@ -190,8 +190,9 @@ A drawn node belongs to the smallest element whose frame holds it (4 pt toleranc
 
 ## Adding it to an app (Debug only)
 
-- iOS: add the Swift package `ios/AgentDDP` (one folder, no dependencies) and call `AgentDDP.start()` at launch. Outside Debug every call is empty. Simulator only for now (the CLI uses `simctl`).
-- Android: `debugImplementation(project(":agent-ddp"))` pointing at `android/agent-ddp`. It starts by itself through a ContentProvider; no app code. Needs a debuggable build. In Debug it installs its own Compose window recomposer factory (for `ddp time`); an app that sets its own factory replaces it.
+- The CLI: `npm i -g @bandada-labs/agent-ddp` (one native binary, no runtime), or `cargo install --git https://github.com/sebospc/agent-ddp agent-ddp`.
+- iOS: add the Swift package `https://github.com/sebospc/agent-ddp` (or the local folder `ios/AgentDDP`; no dependencies) and call `AgentDDP.start()` at launch. Outside Debug every call is empty. Simulator only for now (the CLI uses `simctl`).
+- Android: `debugImplementation("com.github.sebospc:agent-ddp:<tag>")` with `maven("https://jitpack.io")` in the repositories, or `debugImplementation(project(":agent-ddp"))` pointing at `android/agent-ddp`. It starts by itself through a ContentProvider; no app code. Needs a debuggable build. In Debug it installs its own Compose window recomposer factory (for `ddp time`); an app that sets its own factory replaces it.
 
 Opt-ins from the app's Debug composition root (the app's own ports stay as they are):
 
@@ -201,4 +202,4 @@ Opt-ins from the app's Debug composition root (the app's own ports stay as they 
 
 The library keeps recordings in `Library/Caches/agent-ddp/` (iOS) or `files/agent-ddp/` (Android) inside the app's own sandbox. On iOS it turns on the private accessibility automation switch that XCTest uses, so SwiftUI builds its accessibility tree.
 
-Self-check for the CLI logic: `python3 cli/test_ddp.py`.
+Checks for the CLI: `cargo test --manifest-path cli/Cargo.toml`, then `python3 cli/test_ddp.py` runs the built binary from the outside.

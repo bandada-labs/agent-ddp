@@ -1,0 +1,46 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ddp take</title>
+<style>
+:root { --bg: #fafafa; --fg: #1d1d1f; --muted: #6e6e73; --line: #d2d2d7; --pick: #0a66d8; }
+@media (prefers-color-scheme: dark) { :root { --bg: #161617; --fg: #f5f5f7; --muted: #a1a1a6; --line: #3a3a3c; --pick: #4a9eff; } }
+body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 14px/1.4 -apple-system, system-ui, sans-serif; }
+main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 24px; }
+@media (max-width: 720px) { main { grid-template-columns: 1fr; } }
+svg.screen { width: 100%; max-height: 80vh; border: 1px solid var(--line); background: var(--bg); }
+.row { display: grid; grid-template-columns: 9em 1fr; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--line); cursor: pointer; }
+.row.on { color: var(--pick); }
+.track { font: 12px ui-monospace, monospace; color: var(--muted); }
+input[type=range] { width: 100%; }
+h1 { font-size: 16px; margin: 0 0 8px; } .meta { color: var(--muted); margin-bottom: 12px; }
+</style></head><body>
+<h1>ddp take</h1><div class="meta" id="meta"></div>
+<input type="range" id="t" min="0" value="0"><div class="meta" id="now"></div>
+<main><svg class="screen" id="screen"></svg><div id="list"></div></main>
+<script>
+const take = __DATA__;
+const slider = document.getElementById("t"), screen = document.getElementById("screen");
+let picked = null;
+slider.max = take.frames.length - 1;
+document.getElementById("meta").textContent =
+  `${take.platform}, ${take.frames.length} frames over ${Math.round(take.frames.at(-1).t)} ms, unit ${take.unit}`;
+const [width, height] = take.size;
+screen.setAttribute("viewBox", `0 0 ${width} ${height}`);
+function draw() {
+  const frame = take.frames[slider.value];
+  document.getElementById("now").textContent = `t=${Math.round(frame.t)} ms (frame ${slider.value})`;
+  screen.innerHTML = frame.boxes.map(([key, x, y, w, h, fill, border, alpha]) =>
+    `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill || "none"}" fill-opacity="${fill ? alpha : 0}"
+      stroke="${key === picked ? "var(--pick)" : (border ? "#e5484d" : "var(--muted)")}"
+      stroke-width="${key === picked ? 4 : 1 + border}"><title>${key}</title></rect>`).join("");
+}
+document.getElementById("list").innerHTML = take.tracks.map(([key, lines]) =>
+  `<div class="row" data-key="${key}"><div>${key}</div><div class="track">${lines.join("<br>") || "no change"}</div></div>`).join("");
+document.querySelectorAll(".row").forEach(row => row.onclick = () => {
+  picked = picked === row.dataset.key ? null : row.dataset.key;
+  document.querySelectorAll(".row").forEach(r => r.classList.toggle("on", r.dataset.key === picked));
+  draw();
+});
+slider.oninput = draw;
+draw();
+</script></body></html>

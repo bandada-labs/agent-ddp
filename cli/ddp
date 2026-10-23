@@ -1,9 +1,0 @@
-#!/usr/bin/env python3
-"""ddp from a checkout of the repo. The code is in cli/ddpcli; `python3 cli/build.py` makes a single file to vendor."""
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from ddpcli.cli import main  # noqa: E402
-
-main()

@@ -1,0 +1,62 @@
+name: release
+
+# Push a tag like v0.1.0: builds ddp for every platform, attaches the binaries to a GitHub release
+# and publishes the npm package (needs the NPM_TOKEN secret).
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - { os: macos-14, target: aarch64-apple-darwin, npm: darwin-arm64 }
+          - { os: macos-14, target: x86_64-apple-darwin, npm: darwin-x64 }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, npm: linux-x64 }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl, npm: linux-arm64 }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, npm: win32-x64, exe: .exe }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - if: contains(matrix.target, 'musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - run: cargo build --release --manifest-path cli/Cargo.toml --target ${{ matrix.target }}
+      - shell: bash
+        run: cp cli/target/${{ matrix.target }}/release/ddp${{ matrix.exe }} ddp-${{ matrix.npm }}${{ matrix.exe }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ddp-${{ matrix.npm }}
+          path: ddp-${{ matrix.npm }}${{ matrix.exe }}
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: npm/bin
+          merge-multiple: true
+      - run: chmod +x npm/bin/ddp-*
+      - name: Version from the tag
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          grep -q "^version = \"$version\"" cli/Cargo.toml || { echo "cli/Cargo.toml is not at $version"; exit 1; }
+          (cd npm && npm version "$version" --no-git-tag-version --allow-same-version)
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+      - run: npm publish --access public
+        working-directory: npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - run: gh release create "$GITHUB_REF_NAME" npm/bin/ddp-* --title "$GITHUB_REF_NAME" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
