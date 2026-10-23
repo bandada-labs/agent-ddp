@@ -295,6 +295,105 @@ with tempfile.TemporaryDirectory() as directory:
     assert any(tool["name"] == "ddp_tree" for tool in answers[1]["result"]["tools"])
     assert "@e1 tiny" in answers[2]["result"]["content"][0]["text"] and not answers[2]["result"]["isError"]
 
+# Live commands against a fake app: a socket server that speaks the recorder's protocol.
+import socket
+import threading
+import time as clock
+
+
+class FakeApp:
+    """Serves frames like the in-app library: a button; after a tap a toast fades in over 5 frames;
+    a spinner that never stops. Frames are 16 ms apart in app time and sent in real time."""
+
+    def __init__(self):
+        self.tapped_at = None
+        self.server = socket.socket()
+        self.server.bind(("127.0.0.1", 0))
+        self.server.listen()
+        self.port = self.server.getsockname()[1]
+        threading.Thread(target=self.serve, daemon=True).start()
+
+    def frame(self, i):
+        elements = [{"id": "button", "label": "Go", "tap": True, "frame": [0, 0, 100, 50]},
+                    {"id": "spinner", "frame": [0, 100, 20, 20]}]
+        nodes = [{"z": 0, "kind": "layer", "fill": "#0000FFFF", "frame": [0, 0, 100, 50]},
+                 {"z": 1, "kind": "layer", "fill": "#000000FF", "frame": [0, 100, 20 + i % 3, 20]}]
+        if self.tapped_at is not None:
+            alpha = min(1, (i - self.tapped_at) / 5)
+            if alpha > 0:
+                elements.append({"id": "toast", "label": "Saved", "frame": [0, 200, 100, 30]})
+                nodes.append({"z": 2, "kind": "layer", "fill": f"#00FF00{round(alpha * 255):02X}", "frame": [0, 200, 100, 30]})
+        return {"type": "frame", "i": i, "t": i * 16, "elements": elements, "nodes": nodes}
+
+    def serve(self):
+        while True:
+            connection, _ = self.server.accept()
+            threading.Thread(target=self.session, args=(connection,), daemon=True).start()
+
+    def session(self, connection):
+        lines = connection.makefile("r")
+        lines.readline()
+        command = json.loads(lines.readline())
+
+        def send(message):
+            connection.sendall((json.dumps(message) + "\n").encode())
+        header = {"type": "header", "platform": "ios", "unit": "pt", "scale": 3, "frames": 0}
+        try:
+            if command["cmd"] == "snapshot":
+                for message in (header, self.frame(0), {"type": "end"}):
+                    send(message)
+            elif command["cmd"] == "tap":
+                self.tapped_at = self.stream_index
+                send({"type": "value", "path": "tap", "value": command["id"] == "button"})
+                send({"type": "end"})
+            elif command["cmd"] == "stream":
+                send(header)
+                self.stream_index = 0
+                while True:
+                    send(self.frame(self.stream_index))
+                    self.stream_index += 1
+                    clock.sleep(0.016)
+        except OSError:
+            pass  # the client hung up, as it does when it has enough
+        finally:
+            connection.close()
+
+    stream_index = 0
+
+
+with tempfile.TemporaryDirectory() as directory:
+    app = FakeApp()
+    Path(directory, ".ddp").mkdir()
+    Path(directory, ".ddp", "session.json").write_text(json.dumps(
+        {"platform": "ios", "app": "fake", "device": "fake", "port": app.port, "token": "t"}))
+    live = ddp_in(directory, "tree", "-i")
+    assert "@e1 button" in live.stdout and "@e2 spinner" in live.stdout, live.stdout + live.stderr
+    assert "tapped button" in ddp_in(directory, "tap", "@e1").stdout
+    app.tapped_at = None
+    then_tap = f"{sys.executable} {CLI} tap button"
+    waited = ddp_in(directory, "wait", "text", "saved", "--timeout", "2s")
+    assert waited.returncode == 1 and "next:" in waited.stderr, waited.stderr  # nothing tapped yet: times out
+    assert ddp_in(directory, "wait", "--settled", "100ms", "--timeout", "1s").returncode == 1  # the spinner never stops
+    settled = ddp_in(directory, "wait", "--settled", "100ms", "--ignore", "spinner", "--timeout", "1s")
+    assert settled.returncode == 0 and "settled" in settled.stdout, settled.stdout + settled.stderr
+    watched = ddp_in(directory, "watch", "toast", "--until", "alpha>0.9", "--then", then_tap, "--for", "2s")
+    assert "until met" in watched.stdout and "present False -> True" in watched.stdout, watched.stdout + watched.stderr
+    app.tapped_at = None
+    recorded = ddp_in(directory, "read", "--for", "1s", "--then", then_tap)
+    assert "toast" in recorded.stdout and recorded.returncode == 0, recorded.stdout + recorded.stderr
+    app.tapped_at = None
+    explored = ddp_in(directory, "explore", "--per", "1s")
+    assert "exploring 1 controls: button" in explored.stdout and "button: changed" in explored.stdout and \
+        "toast" in explored.stdout, explored.stdout + explored.stderr
+    # Two sessions at once, a placeholder and a JSON-looking argument in --then.
+    for name in ("ios", "android"):
+        Path(directory, ".ddp", "sessions", name).mkdir(parents=True)
+        Path(directory, ".ddp", "sessions", name, "session.json").write_text(json.dumps(
+            {"platform": name, "app": "fake", "device": "fake", "port": app.port, "token": "t"}))
+    both = ddp_in(directory, "record", "--on", "ios,android", "--for", "300ms",
+                  "--then", f'{sys.executable} -c "import sys; print(sys.argv[1:])" {{platform}} {{"k": 1}}')
+    assert both.returncode == 0 and "['ios', '{k:', '1}']" in both.stdout and "parity" in both.stdout, both.stdout + both.stderr
+
 # --then runs without a shell, so "; touch" is an argument to echo, not a second command.
 from importlib.machinery import SourceFileLoader
 ddp = SourceFileLoader("ddp", str(CLI)).load_module()

@@ -403,7 +403,8 @@ def watch(args):
         assign_owners(message, tolerance)
         state = watch_state(message, args.id)
         if previous is None:
-            print(f"t={message['t']:.0f}ms " + "; ".join(f"{k} {v}" for k, v in state.items()), flush=True)
+            print(f"t={message['t']:.0f}ms " + "; ".join(f"{k} {v}" for k, v in state.items()
+                                                          if v is not None or state["present"]), flush=True)
         elif changes := [f"{k} {previous.get(k)} -> {v}" for k, v in state.items() if previous.get(k) != v]:
             print(f"t={message['t']:.0f}ms " + "; ".join(changes), flush=True)
         previous = state
@@ -412,10 +413,14 @@ def watch(args):
             return
 
 
+WATCH_FIELDS = ("x", "y", "w", "h", "alpha", "fill", "border", "borderColor", "opacity", "draws", "pixels")
+
+
 def watch_state(frame, key):
     state = element_state(frame, key)
     if state is None:
-        return {"present": False}
+        # Every field, empty: `--until 'alpha>0.9'` is simply false until the element shows up.
+        return {"present": False, **dict.fromkeys(WATCH_FIELDS)}
     x, y, w, h = state["frame"]
     return {"present": True, "x": x, "y": y, "w": w, "h": h, "alpha": round(element_alpha(frame, key), 2),
             "fill": state["fill"], "border": state["border"], "borderColor": state["borderColor"],
@@ -1782,7 +1787,11 @@ def record_on(args):
         command = [sys.executable, __file__, "record", "--session", name, "--name", f"take-{name}",
                    "--for", args.duration or "2s"]
         if args.then:
-            command += ["--then", args.then.format(**session)]
+            # Only these three placeholders: a command may hold other braces (JSON).
+            then = args.then
+            for field in ("platform", "device", "app"):
+                then = then.replace("{" + field + "}", str(session[field]))
+            command += ["--then", then]
         processes[name] = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     for name, process in processes.items():
         print(f"{name}: {process.communicate()[0].strip()}")

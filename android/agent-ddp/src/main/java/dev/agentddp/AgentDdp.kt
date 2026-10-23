@@ -203,11 +203,9 @@ internal object FrameCapture {
      * WindowManagerGlobal is hidden API; Debug builds may use it. Falls back to the activity window alone.
      */
     private fun windowRoots(decor: View): List<View> = runCatching {
-        val global = Class.forName("android.view.WindowManagerGlobal")
-        val instance = global.getMethod("getInstance").invoke(null)
+        val (instance, getNames, getRootView) = Hidden.windowManager ?: return listOf(decor)
         @Suppress("UNCHECKED_CAST")
-        val names = global.getMethod("getViewRootNames").invoke(instance) as Array<String>
-        val getRootView = global.getMethod("getRootView", String::class.java)
+        val names = getNames.invoke(instance) as Array<String>
         names.mapNotNull { getRootView.invoke(instance, it) as? View }
             .filter { it.isAttachedToWindow && it.windowVisibility == View.VISIBLE && it.width > 0 }
             .ifEmpty { null }
@@ -281,8 +279,7 @@ private class Capture(private val density: Float) {
 
     /** GradientDrawable has no public stroke getter; its stroke Paint is a hidden field. Null when it can't be read. */
     private fun strokeOf(drawable: GradientDrawable): JSONObject? = runCatching {
-        val field = GradientDrawable::class.java.getDeclaredField("mStrokePaint").apply { isAccessible = true }
-        val paint = field.get(drawable) as? Paint ?: return null
+        val paint = Hidden.strokePaint?.get(drawable) as? Paint ?: return null
         val color = hex(paint.color) ?: return null
         if (paint.strokeWidth <= 0f) return null
         JSONObject().put("width", round2(paint.strokeWidth.toDouble())).put("color", color)
@@ -321,9 +318,9 @@ private class Capture(private val density: Float) {
 
     /** A layout node's children in draw order (zIndex, then placement order). The getter is public on an internal class. */
     private fun zSortedChildren(node: LayoutInfo): List<LayoutInfo> = runCatching {
-        val vector = node.javaClass.getMethod("getZSortedChildren").invoke(node)
+        val (getChildren, asList) = Hidden.layoutChildren(node) ?: return emptyList()
         @Suppress("UNCHECKED_CAST")
-        (vector!!.javaClass.getMethod("asMutableList").invoke(vector) as List<LayoutInfo>)
+        asList.invoke(getChildren.invoke(node)) as List<LayoutInfo>
     }.getOrDefault(emptyList())
 
     // Walks every Compose layout node, not only the ones with semantics, so a plain Box with a background is
@@ -472,6 +469,36 @@ private class Capture(private val density: Float) {
         if (visible != frame) node.put("visible", rectArray(visible))
         if (alpha < 0.999f) node.put("opacity", round2(alpha.toDouble()))
         nodes.put(node)
+    }
+}
+
+/**
+ * Hidden or internal members, looked up once: reflection lookups per node per frame cost more than the reads.
+ * Null when a platform or Compose version does not have them; the recorder then reads less, it does not fail.
+ */
+private object Hidden {
+    val windowManager: Triple<Any, java.lang.reflect.Method, java.lang.reflect.Method>? by lazy {
+        runCatching {
+            val global = Class.forName("android.view.WindowManagerGlobal")
+            Triple(global.getMethod("getInstance").invoke(null)!!, global.getMethod("getViewRootNames"),
+                global.getMethod("getRootView", String::class.java))
+        }.getOrNull()
+    }
+
+    val strokePaint: java.lang.reflect.Field? by lazy {
+        runCatching { GradientDrawable::class.java.getDeclaredField("mStrokePaint").apply { isAccessible = true } }.getOrNull()
+    }
+
+    private var children: Pair<java.lang.reflect.Method, java.lang.reflect.Method>? = null
+
+    /** LayoutNode.getZSortedChildren and MutableVector.asMutableList; LayoutNode is internal, so found from an instance. */
+    fun layoutChildren(node: LayoutInfo): Pair<java.lang.reflect.Method, java.lang.reflect.Method>? {
+        children?.let { return it }
+        return runCatching {
+            val getChildren = node.javaClass.getMethod("getZSortedChildren")
+            val asList = getChildren.returnType.getMethod("asMutableList")
+            (getChildren to asList).also { children = it }
+        }.getOrNull()
     }
 }
 
