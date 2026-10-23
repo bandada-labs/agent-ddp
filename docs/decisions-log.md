@@ -60,3 +60,7 @@ After asking what QuickJS is, why not plain Java and why not Rust: "bueno aproba
 
 ### Reference client for CDP
 After a long try to get Chrome DevTools to show the app: "sí, deja ya eso aparte, es bobada". (Yes, leave that aside, it's silly.) agent-browser is the client the CDP work is checked against. Chrome DevTools is not a goal.
+
+### Phases in order, and what the CDP work is for
+"sigamos en orden con las fases, y recuerda que la idea también es ahorrar tokens, optimizar memoria y todo, por eso usamos Rust, adicionalmente debemos ser capaces de ofrecer mejores cosas que agent-device".
+(Let's keep the phases in order. Remember the idea is also to save tokens and memory, that's why we use Rust. And we must offer better things than agent-device.)
