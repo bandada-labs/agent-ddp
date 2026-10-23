@@ -1,6 +1,6 @@
 #!/bin/sh
 # Publishes agent-ddp to npm from the binaries of a GitHub release. npm asks for your 2FA code.
-# Usage: npm/publish.sh 0.1.1 [--otp=123456]
+# Usage: npm/publish.sh 0.1.2 [--otp=123456]
 set -eu
 version="$1"
 shift

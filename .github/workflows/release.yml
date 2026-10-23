@@ -1,7 +1,7 @@
 name: release
 
-# Push a tag like v0.1.1: builds ddp for every platform and attaches the binaries to a GitHub release.
-# npm is published by hand with 2FA from those binaries: npm/publish.sh 0.1.1
+# Push a tag like v0.1.2: builds ddp for every platform and attaches the binaries to a GitHub release.
+# npm is published by hand with 2FA from those binaries: npm/publish.sh 0.1.2
 on:
   push:
     tags: ["v*"]

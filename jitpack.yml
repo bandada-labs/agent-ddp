@@ -1,5 +1,6 @@
 # JitPack builds the Android library from a tag: debugImplementation("com.github.bandada-labs:agent-ddp:<tag>")
+# No `cd` here: JitPack finds nothing when the install command changes directory.
 jdk:
   - openjdk17
 install:
-  - cd samples/android && ./gradlew :agent-ddp:publishReleasePublicationToMavenLocal -PpublishVersion="${VERSION:-$(git describe --tags)}"
+  - ./samples/android/gradlew -p samples/android :agent-ddp:publishReleasePublicationToMavenLocal -PpublishVersion="$VERSION"
