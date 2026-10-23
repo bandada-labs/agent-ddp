@@ -16,7 +16,11 @@ pub fn float(value: f64) -> String {
     let exponent: i32 = exponent.parse().unwrap();
     if (-4..16).contains(&exponent) {
         let plain = format!("{value}");
-        if plain.contains('.') { plain } else { format!("{plain}.0") }
+        if plain.contains('.') {
+            plain
+        } else {
+            format!("{plain}.0")
+        }
     } else {
         format!("{mantissa}e{}{:02}", if exponent < 0 { '-' } else { '+' }, exponent.abs())
     }

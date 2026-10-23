@@ -2,8 +2,10 @@
 use crate::args::Args;
 use crate::checks::{comparable_state, state_differences};
 use crate::live::{live_session, record_live, recording_for, snapshot_live};
-use crate::model::{self, area, contains, element_alpha, element_key, element_keys, element_state, frame_at, frames_between,
-                   load, node_alpha, normalize_label, read_text, recording_path, rect, with_origin, Frame, Recording};
+use crate::model::{
+    self, area, contains, element_alpha, element_key, element_keys, element_state, frame_at, frames_between, load,
+    node_alpha, normalize_label, read_text, recording_path, rect, with_origin, Frame, Recording,
+};
 use crate::py::{self, obj};
 use crate::state::{ctx, parse_ms, write_file, Result};
 use crate::{fail, say};
@@ -12,9 +14,14 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 pub fn describe_node(node: &Value) -> String {
-    let mut parts = vec![format!("z={}", py::str(&node["z"])),
-                         format!("{}{}", py::str(&node["kind"]),
-                                 if py::truthy(node.get("op")) { format!("/{}", py::str(&node["op"])) } else { String::new() })];
+    let mut parts = vec![
+        format!("z={}", py::str(&node["z"])),
+        format!(
+            "{}{}",
+            py::str(&node["kind"]),
+            if py::truthy(node.get("op")) { format!("/{}", py::str(&node["op"])) } else { String::new() }
+        ),
+    ];
     if py::truthy(node.get("fill")) {
         parts.push(format!("fill {}", py::str(&node["fill"])));
     }
@@ -27,7 +34,9 @@ pub fn describe_node(node: &Value) -> String {
         }
     }
     if py::truthy(node.get("pixels")) {
-        let colors: Vec<Value> = node["pixels"]["colors"].as_array().map(|c| c.iter().map(|c| c["color"].clone()).collect())
+        let colors: Vec<Value> = node["pixels"]["colors"]
+            .as_array()
+            .map(|c| c.iter().map(|c| c["color"].clone()).collect())
             .unwrap_or_default();
         parts.push(format!("pixels {} peakAlpha {}", py::repr(&json!(colors)), py::str(&node["pixels"]["peakAlpha"])));
     }
@@ -62,18 +71,32 @@ pub fn resolve_ref(text: &str) -> Result<String> {
 /// elements in tree order, so a parent always comes first; a popup listed later never adopts the screen below.
 pub fn parents_by_containment(frame: &Frame, tolerance: f64) -> HashMap<String, Option<String>> {
     let elements = frame.elements();
-    elements.iter().enumerate().map(|(index, element)| {
-        let inner = rect(&element["frame"]);
-        let holder = py::min_first(elements[..index].iter().filter(|o| contains(rect(&o["frame"]), inner, tolerance)),
-                                   |o| area(rect(&o["frame"])));
-        (element_key(element), holder.map(element_key))
-    }).collect()
+    elements
+        .iter()
+        .enumerate()
+        .map(|(index, element)| {
+            let inner = rect(&element["frame"]);
+            let holder = py::min_first(
+                elements[..index].iter().filter(|o| contains(rect(&o["frame"]), inner, tolerance)),
+                |o| area(rect(&o["frame"])),
+            );
+            (element_key(element), holder.map(element_key))
+        })
+        .collect()
 }
 
 pub fn changing_keys(frames: &[Frame]) -> Vec<String> {
-    element_keys(frames).into_iter().filter(|key| {
-        frames.iter().map(|f| py::dumps_sorted(&element_state(f, key).unwrap_or(Value::Null))).collect::<HashSet<_>>().len() > 1
-    }).collect()
+    element_keys(frames)
+        .into_iter()
+        .filter(|key| {
+            frames
+                .iter()
+                .map(|f| py::dumps_sorted(&element_state(f, key).unwrap_or(Value::Null)))
+                .collect::<HashSet<_>>()
+                .len()
+                > 1
+        })
+        .collect()
 }
 
 /// A node as the recorder wrote it, plus the owner the CLI worked out.
@@ -87,12 +110,21 @@ fn public_node(node: &Value) -> Value {
 
 pub fn tree(args: &mut Args) -> Result<i32> {
     let recording = match live_session(args) {
-        Some(session) => if args.changed { record_live(args)? } else { snapshot_live(&session)? },
+        Some(session) => {
+            if args.changed {
+                record_live(args)?
+            } else {
+                snapshot_live(&session)?
+            }
+        }
         None => load(args.file.as_deref().unwrap_or(&ctx().last))?,
     };
     let frame = match &args.at {
         Some(at) => frame_at(&recording.frames, parse_ms(at)?),
-        None => recording.frames.last().ok_or_else(|| crate::state::failure("no frames in the recording", "bad_recording", None))?,
+        None => recording
+            .frames
+            .last()
+            .ok_or_else(|| crate::state::failure("no frames in the recording", "bad_recording", None))?,
     };
     let refs = save_refs(&recording.frames)?;
     let parents = parents_by_containment(frame, recording.tolerance);
@@ -100,7 +132,8 @@ pub fn tree(args: &mut Args) -> Result<i32> {
     for element in frame.elements() {
         children.entry(parents[&element_key(element)].clone()).or_default().push(element);
     }
-    let mut shown: Option<HashSet<String>> = args.changed.then(|| changing_keys(&recording.frames).into_iter().collect());
+    let mut shown: Option<HashSet<String>> =
+        args.changed.then(|| changing_keys(&recording.frames).into_iter().collect());
     if let Some(shown) = &mut shown {
         // Keep the ancestors of what changes, so its place in the screen stays readable.
         for key in shown.clone() {
@@ -118,8 +151,11 @@ pub fn tree(args: &mut Args) -> Result<i32> {
     let mut rows: Vec<(&Value, usize)> = Vec::new();
     if let Some(root_id) = &root_id {
         let Some(root) = frame.elements().iter().find(|e| &element_key(e) == root_id) else {
-            fail!(format!("no element '{root_id}' at t={}ms", py::str(frame.t_value())), "unknown_element",
-                  "ddp tree (without --within)");
+            fail!(
+                format!("no element '{root_id}' at t={}ms", py::str(frame.t_value())),
+                "unknown_element",
+                "ddp tree (without --within)"
+            );
         };
         if args.id.is_some() && args.within.is_none() {
             children.clear(); // --id: that element alone
@@ -130,32 +166,49 @@ pub fn tree(args: &mut Args) -> Result<i32> {
             collect(element, 0, &children, &shown, args.depth, &mut rows);
         }
     }
-    let unowned: Vec<&Value> = if args.interactive || shown.is_some() || root_id.is_some() { Vec::new() } else { frame.owned(None) };
+    let unowned: Vec<&Value> =
+        if args.interactive || shown.is_some() || root_id.is_some() { Vec::new() } else { frame.owned(None) };
 
     if ctx().json {
-        let elements: Vec<Value> = rows.iter().map(|(e, depth)| {
-            let key = element_key(e);
-            let mut row = obj(vec![("ref", refs[&key].clone().into()), ("key", key.clone().into()), ("depth", json!(depth)),
-                                   ("parent", parents[&key].clone().map(Value::from).unwrap_or(Value::Null))]);
-            for field in ["id", "label", "frame", "tap", "touch"] {
-                if let Some(value) = e.get(field).filter(|v| !v.is_null()) {
-                    row[field] = value.clone();
+        let elements: Vec<Value> = rows
+            .iter()
+            .map(|(e, depth)| {
+                let key = element_key(e);
+                let mut row = obj(vec![
+                    ("ref", refs[&key].clone().into()),
+                    ("key", key.clone().into()),
+                    ("depth", json!(depth)),
+                    ("parent", parents[&key].clone().map(Value::from).unwrap_or(Value::Null)),
+                ]);
+                for field in ["id", "label", "frame", "tap", "touch"] {
+                    if let Some(value) = e.get(field).filter(|v| !v.is_null()) {
+                        row[field] = value.clone();
+                    }
                 }
-            }
-            if !args.interactive {
-                row["nodes"] = json!(frame.owned(Some(&key)).into_iter().map(public_node).collect::<Vec<_>>());
-            }
-            row
-        }).collect();
-        let mut out = obj(vec![("t", frame.t_value().clone()), ("unit", recording.header["unit"].clone()), ("elements", json!(elements))]);
+                if !args.interactive {
+                    row["nodes"] = json!(frame.owned(Some(&key)).into_iter().map(public_node).collect::<Vec<_>>());
+                }
+                row
+            })
+            .collect();
+        let mut out = obj(vec![
+            ("t", frame.t_value().clone()),
+            ("unit", recording.header["unit"].clone()),
+            ("elements", json!(elements)),
+        ]);
         if !unowned.is_empty() {
             out["unowned"] = json!(unowned.into_iter().map(public_node).collect::<Vec<_>>());
         }
         say!("{}", py::dumps(&out));
         return Ok(0);
     }
-    say!("t={}ms (frame {} of {}), unit {}", py::str(frame.t_value()), py::str(&frame.v["i"]), recording.frames.len(),
-         recording.unit());
+    say!(
+        "t={}ms (frame {} of {}), unit {}",
+        py::str(frame.t_value()),
+        py::str(&frame.v["i"]),
+        recording.frames.len(),
+        recording.unit()
+    );
     for (element, depth) in &rows {
         let key = element_key(element);
         let label = if py::truthy(element.get("label")) && py::truthy(element.get("id")) {
@@ -180,17 +233,29 @@ pub fn tree(args: &mut Args) -> Result<i32> {
     Ok(0)
 }
 
-fn subtree_has(element: &Value, children: &HashMap<Option<String>, Vec<&Value>>, shown: &Option<HashSet<String>>) -> bool {
+fn subtree_has(
+    element: &Value,
+    children: &HashMap<Option<String>, Vec<&Value>>,
+    shown: &Option<HashSet<String>>,
+) -> bool {
     let key = element_key(element);
     match shown {
         None => true,
-        Some(set) => set.contains(&key)
-            || children.get(&Some(key)).is_some_and(|list| list.iter().any(|c| subtree_has(c, children, shown))),
+        Some(set) => {
+            set.contains(&key)
+                || children.get(&Some(key)).is_some_and(|list| list.iter().any(|c| subtree_has(c, children, shown)))
+        }
     }
 }
 
-fn collect<'a>(element: &'a Value, depth: usize, children: &HashMap<Option<String>, Vec<&'a Value>>,
-               shown: &Option<HashSet<String>>, max_depth: Option<i64>, rows: &mut Vec<(&'a Value, usize)>) {
+fn collect<'a>(
+    element: &'a Value,
+    depth: usize,
+    children: &HashMap<Option<String>, Vec<&'a Value>>,
+    shown: &Option<HashSet<String>>,
+    max_depth: Option<i64>,
+    rows: &mut Vec<(&'a Value, usize)>,
+) {
     if !subtree_has(element, children, shown) || max_depth.is_some_and(|d| depth as i64 > d) {
         return;
     }
@@ -210,8 +275,11 @@ pub fn get(args: &mut Args) -> Result<i32> {
     let id = args.id.clone().unwrap_or_default();
     let known = element_keys(&recording.frames);
     if !known.contains(&id) {
-        fail!(format!("no element '{id}'. Known: {}", known.join(", ")), "unknown_element",
-              "ddp tree, or ddp find text <part of a label>");
+        fail!(
+            format!("no element '{id}'. Known: {}", known.join(", ")),
+            "unknown_element",
+            "ddp tree, or ddp find text <part of a label>"
+        );
     }
     if args.curve {
         crate::summary::print_curves(&recording, &frames, &id);
@@ -242,13 +310,27 @@ fn node_fields(node: &Value, frame: &Frame) -> Map<String, Value> {
     let r = &node["frame"];
     let border = node.get("border").filter(|b| b.is_object()).cloned().unwrap_or(json!({}));
     let get = |field: &str, default: Value| node.get(field).cloned().unwrap_or(default);
-    obj(vec![("t", frame.t_value().clone()), ("z", node["z"].clone()), ("kind", node["kind"].clone()),
-             ("op", get("op", Value::Null)), ("owner", node["owner"].clone()), ("source", get("source", Value::Null)),
-             ("fill", get("fill", Value::Null)), ("border", border.get("width").cloned().unwrap_or(json!(0))),
-             ("borderColor", border.get("color").cloned().unwrap_or(Value::Null)), ("corner", get("corner", json!(0))),
-             ("opacity", get("opacity", json!(1))), ("alpha", py::round(&node_alpha(node), 2)),
-             ("x", r[0].clone()), ("y", r[1].clone()), ("w", r[2].clone()), ("h", r[3].clone())])
-        .as_object().unwrap().clone()
+    obj(vec![
+        ("t", frame.t_value().clone()),
+        ("z", node["z"].clone()),
+        ("kind", node["kind"].clone()),
+        ("op", get("op", Value::Null)),
+        ("owner", node["owner"].clone()),
+        ("source", get("source", Value::Null)),
+        ("fill", get("fill", Value::Null)),
+        ("border", border.get("width").cloned().unwrap_or(json!(0))),
+        ("borderColor", border.get("color").cloned().unwrap_or(Value::Null)),
+        ("corner", get("corner", json!(0))),
+        ("opacity", get("opacity", json!(1))),
+        ("alpha", py::round(&node_alpha(node), 2)),
+        ("x", r[0].clone()),
+        ("y", r[1].clone()),
+        ("w", r[2].clone()),
+        ("h", r[3].clone()),
+    ])
+    .as_object()
+    .unwrap()
+    .clone()
 }
 
 /// Elements whose id is `value` (by id) or whose label holds it, any case (by text).
@@ -277,12 +359,21 @@ fn find_elements(recording: &Recording, by: &str, value: &str) -> Result<()> {
     }
     let refs = save_refs(&recording.frames)?;
     if ctx().json {
-        let rows: Vec<Value> = found.iter().map(|(key, seen)| {
-            let last = seen[seen.len() - 1].1;
-            obj(vec![("ref", refs[key].clone().into()), ("key", key.clone().into()),
-                     ("label", last.get("label").cloned().unwrap_or(Value::Null)), ("frame", last["frame"].clone()),
-                     ("first", seen[0].0.clone()), ("last", seen[seen.len() - 1].0.clone()), ("frames", json!(seen.len()))])
-        }).collect();
+        let rows: Vec<Value> = found
+            .iter()
+            .map(|(key, seen)| {
+                let last = seen[seen.len() - 1].1;
+                obj(vec![
+                    ("ref", refs[key].clone().into()),
+                    ("key", key.clone().into()),
+                    ("label", last.get("label").cloned().unwrap_or(Value::Null)),
+                    ("frame", last["frame"].clone()),
+                    ("first", seen[0].0.clone()),
+                    ("last", seen[seen.len() - 1].0.clone()),
+                    ("frames", json!(seen.len())),
+                ])
+            })
+            .collect();
         say!("{}", py::dumps(&json!(rows)));
         return Ok(());
     }
@@ -293,8 +384,15 @@ fn find_elements(recording: &Recording, by: &str, value: &str) -> Result<()> {
         } else {
             String::new()
         };
-        say!("{} {key}{label} {} present {}..{}ms ({} of {} frames)", refs[key], py::str(&last["frame"]),
-             py::str(seen[0].0), py::str(seen[seen.len() - 1].0), seen.len(), recording.frames.len());
+        say!(
+            "{} {key}{label} {} present {}..{}ms ({} of {} frames)",
+            refs[key],
+            py::str(&last["frame"]),
+            py::str(seen[0].0),
+            py::str(seen[seen.len() - 1].0),
+            seen.len(),
+            recording.frames.len()
+        );
     }
     Ok(())
 }
@@ -309,7 +407,11 @@ pub fn find(args: &mut Args) -> Result<i32> {
         return Ok(0);
     }
     let Some(where_text) = &args.where_ else {
-        fail!("find needs `text <label>`, `id <id>` or --where", "missing_option", "ddp find --where 'kind=draw and alpha>0'");
+        fail!(
+            "find needs `text <label>`, `id <id>` or --where",
+            "missing_option",
+            "ddp find --where 'kind=draw and alpha>0'"
+        );
     };
     let (start, end) = match &args.between {
         Some((a, b)) => (Some(parse_ms(a)?), Some(parse_ms(b)?)),
@@ -341,7 +443,13 @@ pub fn find(args: &mut Args) -> Result<i32> {
         }
     }
     times.sort_by(|a, b| py::compare(a, b));
-    say!("{} matches in {} frames, t={}..{}ms", found.len(), times.len(), py::str(times[0]), py::str(times[times.len() - 1]));
+    say!(
+        "{} matches in {} frames, t={}..{}ms",
+        found.len(),
+        times.len(),
+        py::str(times[0]),
+        py::str(times[times.len() - 1])
+    );
     for (frame, node) in found.iter().take(limit) {
         say!("  t={} owner={} {}", py::str(frame.t_value()), py::str(&node["owner"]), describe_node(node));
     }
@@ -353,11 +461,16 @@ pub fn find(args: &mut Args) -> Result<i32> {
 
 fn tree_text(recording: &Recording) -> Vec<String> {
     let frame = recording.frames.last().unwrap();
-    frame.elements().iter().map(|e| {
-        let key = element_key(e);
-        let nodes: Vec<String> = frame.nodes().iter().filter(|n| n["owner"].as_str() == Some(&key)).map(describe_node).collect();
-        format!("{key} {} {}", py::str(&e["frame"]), nodes.join(" "))
-    }).collect()
+    frame
+        .elements()
+        .iter()
+        .map(|e| {
+            let key = element_key(e);
+            let nodes: Vec<String> =
+                frame.nodes().iter().filter(|n| n["owner"].as_str() == Some(&key)).map(describe_node).collect();
+            format!("{key} {} {}", py::str(&e["frame"]), nodes.join(" "))
+        })
+        .collect()
 }
 
 /// Two recordings; one against the last one; none: the last two takes in the history.
@@ -396,7 +509,8 @@ pub fn diff(args: &mut Args) -> Result<i32> {
     for frame in &left.frames {
         let t = frame.t - left.origin;
         let other = frame_at(&right.frames, t + right.origin);
-        let differences = state_differences(&comparable_state(&left, frame, id), &comparable_state(&right, other, id), &args.ignore);
+        let differences =
+            state_differences(&comparable_state(&left, frame, id), &comparable_state(&right, other, id), &args.ignore);
         let row = if differences.is_empty() { "same".to_string() } else { differences.join("; ") };
         if previous.as_ref() != Some(&row) {
             say!("  t={t:.0}ms {row}");

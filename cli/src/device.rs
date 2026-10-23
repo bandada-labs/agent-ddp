@@ -1,9 +1,13 @@
 //! Acting on the device and the app: record, tap, wait, logs, settings, deep links, annotate, explore.
 use crate::args::Args;
 use crate::checks::{check_parity, RECORDING_CHECKS};
-use crate::live::{live_session, platform_of, record_live, require_session, run_then, snapshot_live, stream_frames,
-                  AndroidDevice, IosDevice, LiveClient, OfflineDevice};
-use crate::model::{self, element_alpha, element_key, load, normalize_label, rect, save_recording, warn_if_empty, Frame};
+use crate::live::{
+    live_session, platform_of, record_live, require_session, run_then, snapshot_live, stream_frames, AndroidDevice,
+    IosDevice, LiveClient, OfflineDevice,
+};
+use crate::model::{
+    self, element_alpha, element_key, load, normalize_label, rect, save_recording, warn_if_empty, Frame,
+};
 use crate::py::{self, f};
 use crate::queries::{changing_keys, save_refs};
 use crate::state::{self, adb_path, capture, ctx, failure, parse_ms, read_json, write_file, Result, MAX_FRAMES};
@@ -21,8 +25,12 @@ pub fn record(args: &mut Args) -> Result<i32> {
     let context = ctx();
     if live_session(args).is_some() {
         let recording = record_live(args)?;
-        say!("recorded {} frames live -> {}{}", recording.frames.len(), context.last.display(),
-             args.name.as_ref().map(|n| format!(" (saved as {n})")).unwrap_or_default());
+        say!(
+            "recorded {} frames live -> {}{}",
+            recording.frames.len(),
+            context.last.display(),
+            args.name.as_ref().map(|n| format!(" (saved as {n})")).unwrap_or_default()
+        );
         warn_if_empty(&recording);
         return Ok(0);
     }
@@ -61,27 +69,41 @@ pub fn record(args: &mut Args) -> Result<i32> {
             }
             let path = args.file.clone().unwrap_or(context.last.clone());
             let recording = load(&path)?;
-            say!("recorded {} frames -> {} (capture cost per frame: average {} ms, slowest {} ms)", recording.frames.len(),
-                 path.display(), py::str(recording.end.get("averageCaptureMs").unwrap_or(&Value::Null)),
-                 py::str(recording.end.get("slowestCaptureMs").unwrap_or(&Value::Null)));
+            say!(
+                "recorded {} frames -> {} (capture cost per frame: average {} ms, slowest {} ms)",
+                recording.frames.len(),
+                path.display(),
+                py::str(recording.end.get("averageCaptureMs").unwrap_or(&Value::Null)),
+                py::str(recording.end.get("slowestCaptureMs").unwrap_or(&Value::Null))
+            );
             warn_if_empty(&recording);
             return Ok(0);
         }
         std::thread::sleep(Duration::from_millis(250));
     }
-    fail!("no recording arrived", "no_recording", format!("is the app in the foreground? ddp doctor {device_id} --app {app}"))
+    fail!(
+        "no recording arrived",
+        "no_recording",
+        format!("is the app in the foreground? ddp doctor {device_id} --app {app}")
+    )
 }
 
 /// (platform, device, app) from the flags or the session.
 pub fn target(args: &Args) -> Result<(String, String, Option<String>)> {
     let session = read_json(&ctx().session_file).unwrap_or(json!({}));
-    let device = args.device.clone().or_else(|| session["device"].as_str().map(String::from))
+    let device = args
+        .device
+        .clone()
+        .or_else(|| session["device"].as_str().map(String::from))
         .or_else(|| std::env::var("DDP_DEVICE").ok());
     let Some(device) = device else {
         fail!("no device", "missing_device", "ddp connect DEVICE --app ID, or pass --device");
     };
     let app = args.app.clone().or_else(|| session["app"].as_str().map(String::from));
-    let platform = args.platform.clone().or_else(|| session["platform"].as_str().map(String::from))
+    let platform = args
+        .platform
+        .clone()
+        .or_else(|| session["platform"].as_str().map(String::from))
         .unwrap_or_else(|| platform_of(None, &device));
     Ok((platform, device, app))
 }
@@ -102,14 +124,26 @@ pub fn tap(args: &mut Args) -> Result<i32> {
     };
     let [x, y, w, h] = rect(&element["frame"]);
     if session["platform"] == "android" {
-        let result = adb(&py::str(&session["device"]), &["shell", "input", "tap", &format!("{}", (x + w / 2.0).round_ties_even() as i64),
-                                                          &format!("{}", (y + h / 2.0).round_ties_even() as i64)])?;
+        let result = adb(
+            &py::str(&session["device"]),
+            &[
+                "shell",
+                "input",
+                "tap",
+                &format!("{}", (x + w / 2.0).round_ties_even() as i64),
+                &format!("{}", (y + h / 2.0).round_ties_even() as i64),
+            ],
+        )?;
         if result.code != 0 {
             fail!(format!("adb input tap failed: {}", result.stderr.trim()), "tap_failed");
         }
     } else {
-        let name = [element.get("id"), element.get("label")].into_iter().find(|v| py::truthy(*v)).flatten()
-            .map(py::str).unwrap_or_default();
+        let name = [element.get("id"), element.get("label")]
+            .into_iter()
+            .find(|v| py::truthy(*v))
+            .flatten()
+            .map(py::str)
+            .unwrap_or_default();
         let mut client = LiveClient::new(&session, json!({"cmd": "tap", "id": name}))?;
         let activated = client.next_message()?.map(|m| py::truthy(m.get("value"))).unwrap_or(false);
         client.close();
@@ -148,7 +182,11 @@ pub fn wait(args: &mut Args) -> Result<i32> {
                 let hit = if by == "id" {
                     element_key(e) == value || e.get("id").and_then(Value::as_str) == Some(&value)
                 } else {
-                    e.get("label").and_then(Value::as_str).unwrap_or("").to_lowercase().contains(&normalize_label(&value).to_lowercase())
+                    e.get("label")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_lowercase()
+                        .contains(&normalize_label(&value).to_lowercase())
                 };
                 hit && f(&element_alpha(&frame, &element_key(e))) >= 0.05
             });
@@ -158,14 +196,18 @@ pub fn wait(args: &mut Args) -> Result<i32> {
                 return Ok(false);
             }
         } else {
-            let elements: Vec<&Value> = frame.elements().iter().filter(|e| !ignored.contains(&element_key(e))).collect();
-            let nodes: Vec<Value> = frame.nodes().iter()
+            let elements: Vec<&Value> =
+                frame.elements().iter().filter(|e| !ignored.contains(&element_key(e))).collect();
+            let nodes: Vec<Value> = frame
+                .nodes()
+                .iter()
                 .filter(|n| !n["owner"].as_str().is_some_and(|o| ignored.contains(o)))
                 .map(|n| {
                     let mut copy = n.clone();
                     copy.as_object_mut().unwrap().shift_remove("z");
                     copy
-                }).collect();
+                })
+                .collect();
             let state = py::dumps_sorted(&json!([elements, nodes]));
             if previous.as_ref() != Some(&state) {
                 previous = Some(state);
@@ -185,7 +227,11 @@ pub fn wait(args: &mut Args) -> Result<i32> {
         Some(by) => format!("{by} {value}"),
         None => format!("{} without change", args.settled.clone().unwrap_or_default()),
     };
-    fail!(format!("timed out after {} waiting for {what}", args.timeout), "timeout", "ddp tree -i to see what is there, or a longer --timeout")
+    fail!(
+        format!("timed out after {} waiting for {what}", args.timeout),
+        "timeout",
+        "ddp tree -i to see what is there, or a longer --timeout"
+    )
 }
 
 /// The app's log lines during the last take (or --file), at their time in the take.
@@ -202,12 +248,28 @@ pub fn logs(args: &mut Args) -> Result<i32> {
     let mut lines: Vec<(f64, String)> = Vec::new();
     if platform == "ios" {
         let info = state::run(&["xcrun", "simctl", "appinfo", &device, &app])?;
-        let executable = info.lines().find(|l| l.contains("CFBundleExecutable"))
-            .and_then(|l| l.split_once('=')).map(|(_, v)| v.trim().trim_matches(|c| c == '"' || c == ';').to_string())
+        let executable = info
+            .lines()
+            .find(|l| l.contains("CFBundleExecutable"))
+            .and_then(|l| l.split_once('='))
+            .map(|(_, v)| v.trim().trim_matches(|c| c == '"' || c == ';').to_string())
             .unwrap_or_else(|| app.rsplit('.').next().unwrap_or(&app).to_string());
         let start_text = state::local_time("%Y-%m-%d %H:%M:%S", started / 1000.0 - 1.0);
-        let output = state::run(&["xcrun", "simctl", "spawn", &device, "log", "show", "--info", "--style", "compact", "--start",
-                                  &start_text, "--predicate", &format!("process == \"{executable}\"")])?;
+        let output = state::run(&[
+            "xcrun",
+            "simctl",
+            "spawn",
+            &device,
+            "log",
+            "show",
+            "--info",
+            "--style",
+            "compact",
+            "--start",
+            &start_text,
+            "--predicate",
+            &format!("process == \"{executable}\""),
+        ])?;
         for line in output.lines() {
             let Some(seconds) = line.get(..19).and_then(state::parse_local) else { continue };
             let fraction: f64 = line.get(19..23).filter(|s| !s.is_empty()).and_then(|s| s.parse().ok()).unwrap_or(0.0);
@@ -252,26 +314,54 @@ pub fn settings(args: &mut Args) -> Result<i32> {
     let what = args.what.clone().unwrap_or_default();
     let value = args.value.clone().unwrap_or_default();
     let commands: Vec<Vec<String>> = if platform == "ios" {
-        let base = |rest: &[&str]| -> Vec<String> { ["xcrun", "simctl"].iter().chain(rest).map(|s| s.to_string()).collect() };
+        let base =
+            |rest: &[&str]| -> Vec<String> { ["xcrun", "simctl"].iter().chain(rest).map(|s| s.to_string()).collect() };
         match what.as_str() {
             "appearance" => vec![base(&["ui", &device, "appearance", &value])],
             "text-size" => vec![base(&["ui", &device, "content_size", &value])],
-            "reduce-motion" => vec![base(&["spawn", &device, "defaults", "write", "com.apple.Accessibility", "ReduceMotionEnabled",
-                                           "-bool", if value == "on" { "YES" } else { "NO" }])],
-            _ => vec![base(&["spawn", &device, "defaults", "write", app.as_deref().unwrap_or("-g"), "AppleLanguages", "-array", &value])],
+            "reduce-motion" => vec![base(&[
+                "spawn",
+                &device,
+                "defaults",
+                "write",
+                "com.apple.Accessibility",
+                "ReduceMotionEnabled",
+                "-bool",
+                if value == "on" { "YES" } else { "NO" },
+            ])],
+            _ => vec![base(&[
+                "spawn",
+                &device,
+                "defaults",
+                "write",
+                app.as_deref().unwrap_or("-g"),
+                "AppleLanguages",
+                "-array",
+                &value,
+            ])],
         }
     } else {
         let adb = adb_path()?;
-        let base = |rest: &[&str]| -> Vec<String> { [adb.as_str(), "-s", &device, "shell"].iter().chain(rest).map(|s| s.to_string()).collect() };
+        let base = |rest: &[&str]| -> Vec<String> {
+            [adb.as_str(), "-s", &device, "shell"].iter().chain(rest).map(|s| s.to_string()).collect()
+        };
         let scale = if value == "on" { "0" } else { "1" };
         match what.as_str() {
             "appearance" => vec![base(&["cmd", "uimode", "night", if value == "dark" { "yes" } else { "no" }])],
             "text-size" => {
-                let factor = match value.as_str() { "small" => "0.85", "default" => "1.0", "large" => "1.15", "largest" => "1.3", other => other };
+                let factor = match value.as_str() {
+                    "small" => "0.85",
+                    "default" => "1.0",
+                    "large" => "1.15",
+                    "largest" => "1.3",
+                    other => other,
+                };
                 vec![base(&["settings", "put", "system", "font_scale", factor])]
             }
-            "reduce-motion" => ["animator_duration_scale", "transition_animation_scale", "window_animation_scale"].iter()
-                .map(|name| base(&["settings", "put", "global", name, scale])).collect(),
+            "reduce-motion" => ["animator_duration_scale", "transition_animation_scale", "window_animation_scale"]
+                .iter()
+                .map(|name| base(&["settings", "put", "global", name, scale]))
+                .collect(),
             _ => vec![base(&["cmd", "locale", "set-app-locales", app.as_deref().unwrap_or(""), "--locales", &value])],
         }
     };
@@ -279,7 +369,10 @@ pub fn settings(args: &mut Args) -> Result<i32> {
         let parts: Vec<&str> = command.iter().map(String::as_str).collect();
         let result = capture(parts[0], &parts[1..]);
         if result.code != 0 {
-            fail!(format!("{} failed: {}", parts[parts.len().saturating_sub(4)..].join(" "), result.stderr.trim()), "set_failed");
+            fail!(
+                format!("{} failed: {}", parts[parts.len().saturating_sub(4)..].join(" "), result.stderr.trim()),
+                "set_failed"
+            );
         }
     }
     let relaunch = what == "locale" || (what == "reduce-motion" && platform == "ios");
@@ -293,7 +386,8 @@ pub fn open_url(args: &mut Args) -> Result<i32> {
     let result = if platform == "ios" {
         capture("xcrun", &["simctl", "openurl", &device, &url])
     } else {
-        let mut command = vec!["-s", device.as_str(), "shell", "am", "start", "-W", "-a", "android.intent.action.VIEW", "-d", &url];
+        let mut command =
+            vec!["-s", device.as_str(), "shell", "am", "start", "-W", "-a", "android.intent.action.VIEW", "-d", &url];
         if let Some(app) = &app {
             command.extend(["-p", app.as_str()]);
         }
@@ -318,11 +412,25 @@ fn record_on(args: &mut Args) -> Result<i32> {
     for name in &names {
         let session_file = Path::new(".ddp").join("sessions").join(name).join("session.json");
         let Some(session) = read_json(&session_file) else {
-            fail!(format!("no session '{name}'"), "not_connected", format!("ddp connect DEVICE --app ID --session {name}"));
+            fail!(
+                format!("no session '{name}'"),
+                "not_connected",
+                format!("ddp connect DEVICE --app ID --session {name}")
+            );
         };
         let mut command = state::self_command();
-        command.extend(["record", "--session", name, "--name", &format!("take-{name}"), "--for",
-                        args.duration.as_deref().unwrap_or("2s")].map(String::from));
+        command.extend(
+            [
+                "record",
+                "--session",
+                name,
+                "--name",
+                &format!("take-{name}"),
+                "--for",
+                args.duration.as_deref().unwrap_or("2s"),
+            ]
+            .map(String::from),
+        );
         if let Some(then) = &args.then {
             // Only these three placeholders: a command may hold other braces (JSON).
             let mut then = then.clone();
@@ -331,7 +439,11 @@ fn record_on(args: &mut Args) -> Result<i32> {
             }
             command.extend(["--then".to_string(), then]);
         }
-        let child = Command::new(&command[0]).args(&command[1..]).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()
+        let child = Command::new(&command[0])
+            .args(&command[1..])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
             .map_err(|e| failure(format!("can't start {}: {e}", command[0]), "command_failed", None))?;
         processes.push((name.clone(), child));
     }
@@ -346,7 +458,9 @@ fn record_on(args: &mut Args) -> Result<i32> {
         return Ok(1);
     }
     if names.len() >= 2 {
-        let take = |name: &str| Path::new(".ddp").join("sessions").join(name).join("saved").join(format!("take-{name}.jsonl.gz"));
+        let take = |name: &str| {
+            Path::new(".ddp").join("sessions").join(name).join("saved").join(format!("take-{name}.jsonl.gz"))
+        };
         args.file = Some(take(&names[0]));
         args.against = Some(take(&names[1]));
         check_parity(args)?;
@@ -355,9 +469,20 @@ fn record_on(args: &mut Args) -> Result<i32> {
 }
 
 // 3x5 digits, one row per string, for labels that match @eN refs.
-const DIGITS: [&str; 10] = ["111101101101111", "010110010010111", "111001111100111", "111001111001111", "101101111001001",
-                            "111100111001111", "111100111101111", "111001001001001", "111101111101111", "111101111001111"];
-const BOX_COLORS: [[u8; 3]; 6] = [[230, 25, 75], [60, 180, 75], [0, 130, 200], [245, 130, 48], [145, 30, 180], [240, 50, 230]];
+const DIGITS: [&str; 10] = [
+    "111101101101111",
+    "010110010010111",
+    "111001111100111",
+    "111001111001111",
+    "101101111001001",
+    "111100111001111",
+    "111100111101111",
+    "111001001001001",
+    "111101111101111",
+    "111101111001111",
+];
+const BOX_COLORS: [[u8; 3]; 6] =
+    [[230, 25, 75], [60, 180, 75], [0, 130, 200], [245, 130, 48], [145, 30, 180], [240, 50, 230]];
 
 /// 8-bit RGB or RGBA, not interlaced (what simctl and screencap write) to (width, height, rows of RGBA).
 pub fn png_read(data: &[u8]) -> Result<(usize, usize, Vec<Vec<u8>>)> {
@@ -399,13 +524,23 @@ pub fn png_read(data: &[u8]) -> Result<(usize, usize, Vec<Vec<u8>>)> {
                 4 => {
                     let guess = left + up - up_left;
                     let (pa, pb, pc) = ((guess - left).abs(), (guess - up).abs(), (guess - up_left).abs());
-                    if pa <= pb && pa <= pc { left } else if pb <= pc { up } else { up_left }
+                    if pa <= pb && pa <= pc {
+                        left
+                    } else if pb <= pc {
+                        up
+                    } else {
+                        up_left
+                    }
                 }
                 _ => 0,
             };
             line[i] = (line[i] as i32 + add) as u8;
         }
-        rows.push(if channels == 4 { line.clone() } else { line.chunks(3).flat_map(|p| [p[0], p[1], p[2], 255]).collect() });
+        rows.push(if channels == 4 {
+            line.clone()
+        } else {
+            line.chunks(3).flat_map(|p| [p[0], p[1], p[2], 255]).collect()
+        });
         previous = line;
     }
     Ok((width, height, rows))
@@ -463,7 +598,9 @@ pub fn annotate(args: &mut Args) -> Result<i32> {
         state::run(&["xcrun", "simctl", "io", &device, "screenshot", "--type=png", &out.display().to_string()])?;
         recording.header.get("scale").map(f).unwrap_or(1.0)
     } else {
-        let output = Command::new(adb_path()?).args(["-s", &device, "exec-out", "screencap", "-p"]).output()
+        let output = Command::new(adb_path()?)
+            .args(["-s", &device, "exec-out", "screencap", "-p"])
+            .output()
             .map_err(|e| failure(e.to_string(), "command_failed", None))?;
         write_file(&out, output.stdout)?;
         1.0
@@ -476,7 +613,12 @@ pub fn annotate(args: &mut Args) -> Result<i32> {
     for (index, element) in frame.elements().iter().enumerate() {
         let color = BOX_COLORS[index % BOX_COLORS.len()];
         let [x, y, w, h] = rect(&element["frame"]).map(|v| v * scale);
-        for (a, b, c, d) in [(x, y, x + w, y + thick), (x, y + h - thick, x + w, y + h), (x, y, x + thick, y + h), (x + w - thick, y, x + w, y + h)] {
+        for (a, b, c, d) in [
+            (x, y, x + w, y + thick),
+            (x, y + h - thick, x + w, y + h),
+            (x, y, x + thick, y + h),
+            (x + w - thick, y, x + w, y + h),
+        ] {
             paint(&mut rows, a, b, c, d, color);
         }
         let number = refs[&element_key(element)][2..].to_string();
@@ -508,14 +650,19 @@ pub fn explore(args: &mut Args) -> Result<i32> {
     let start = snapshot_live(&session)?;
     let start_frame = start.frames.last().unwrap();
     let start_keys: HashSet<String> = start_frame.keys().into_iter().collect();
-    let tappable: Vec<String> = start_frame.elements().iter()
-        .filter(|e| py::truthy(e.get("tap")) && !args.skip.contains(&element_key(e))).map(element_key).collect();
+    let tappable: Vec<String> = start_frame
+        .elements()
+        .iter()
+        .filter(|e| py::truthy(e.get("tap")) && !args.skip.contains(&element_key(e)))
+        .map(element_key)
+        .collect();
     if tappable.is_empty() {
         fail!("nothing tappable on screen", "nothing_to_explore", "ddp tree -i (the recorder marks controls with tap)");
     }
     say!("exploring {} controls: {}", tappable.len(), tappable.join(", "));
     for key in &tappable {
-        let name = format!("explore-{}", key.chars().map(|c| if c.is_alphanumeric() { c } else { '-' }).collect::<String>());
+        let name =
+            format!("explore-{}", key.chars().map(|c| if c.is_alphanumeric() { c } else { '-' }).collect::<String>());
         let mut take_args = args.clone();
         take_args.duration = Some(args.per.clone());
         take_args.frames = None;
@@ -546,10 +693,15 @@ pub fn explore(args: &mut Args) -> Result<i32> {
         state::pop_capture();
         outcome?;
         let changed: Vec<String> = changing_keys(&recording.frames).into_iter().filter(|k| k != key).take(6).collect();
-        say!("{key}: changed {}; {} (ddp check all --file {name})",
-             if changed.is_empty() { "nothing else".to_string() } else { changed.join(", ") },
-             if problems.is_empty() { "no problems".to_string() }
-             else { problems.iter().map(|(n, c)| format!("{n} {c}")).collect::<Vec<_>>().join(", ") });
+        say!(
+            "{key}: changed {}; {} (ddp check all --file {name})",
+            if changed.is_empty() { "nothing else".to_string() } else { changed.join(", ") },
+            if problems.is_empty() {
+                "no problems".to_string()
+            } else {
+                problems.iter().map(|(n, c)| format!("{n} {c}")).collect::<Vec<_>>().join(", ")
+            }
+        );
         let now: HashSet<String> = recording.frames.last().unwrap().keys().into_iter().collect();
         if (start_keys.intersection(&now).count() as f64) < start_keys.len() as f64 / 2.0 {
             let mut new: Vec<&String> = now.difference(&start_keys).collect();

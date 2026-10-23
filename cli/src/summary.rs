@@ -9,25 +9,42 @@ use serde_json::{json, Value};
 
 pub fn describe_track(name: &str, states: &[Option<Value>], times: &[Value]) -> Option<String> {
     // Frames where the element is absent are skipped; a value of None (no fill) is a real value.
-    let present: Vec<(&Value, &Value)> = times.iter().zip(states)
-        .filter_map(|(t, s)| s.as_ref().map(|s| (t, &s[name]))).collect();
+    let present: Vec<(&Value, &Value)> =
+        times.iter().zip(states).filter_map(|(t, s)| s.as_ref().map(|s| (t, &s[name]))).collect();
     let texts: Vec<String> = present.iter().map(|(_, v)| py::dumps(v)).collect();
     if texts.iter().collect::<std::collections::HashSet<_>>().len() <= 1 {
         return None;
     }
     let (first, last) = (present[0].1, present[present.len() - 1].1);
-    let note = if texts[0] == texts[texts.len() - 1] { "  TRANSIENT (same at start and end, different in between)" } else { "" };
-    let change_times: Vec<&Value> = (1..present.len()).filter(|&i| texts[i] != texts[i - 1]).map(|i| present[i].0).collect();
+    let note = if texts[0] == texts[texts.len() - 1] {
+        "  TRANSIENT (same at start and end, different in between)"
+    } else {
+        ""
+    };
+    let change_times: Vec<&Value> =
+        (1..present.len()).filter(|&i| texts[i] != texts[i - 1]).map(|i| present[i].0).collect();
     let window = format!("changing {}..{}ms", py::str(change_times[0]), py::str(change_times[change_times.len() - 1]));
     if present.iter().all(|(_, v)| v.is_number()) {
         let (peak_t, peak) = py::max_first(present.iter().copied(), |p| f(p.1)).unwrap();
         let (low_t, low) = py::min_first(present.iter().copied(), |p| f(p.1)).unwrap();
         let points: Vec<(f64, f64)> = present.iter().map(|(t, v)| (f(t), f(v))).collect();
-        return Some(format!("  {name}: {} -> {} {}, {window}, min {} @{}ms, max {} @{}ms{note}",
-                            py::str(first), py::str(last), sparkline(&points, 12), py::str(low), py::str(low_t),
-                            py::str(peak), py::str(peak_t)));
+        return Some(format!(
+            "  {name}: {} -> {} {}, {window}, min {} @{}ms, max {} @{}ms{note}",
+            py::str(first),
+            py::str(last),
+            sparkline(&points, 12),
+            py::str(low),
+            py::str(low_t),
+            py::str(peak),
+            py::str(peak_t)
+        ));
     }
-    Some(format!("  {name}: {} -> {}, {} values, {window}{note}", py::str(first), py::str(last), change_times.len() + 1))
+    Some(format!(
+        "  {name}: {} -> {}, {} values, {window}{note}",
+        py::str(first),
+        py::str(last),
+        change_times.len() + 1
+    ))
 }
 
 const SPARK: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
@@ -46,13 +63,16 @@ pub fn sparkline(points: &[(f64, f64)], width: usize) -> String {
     }
     let range = if high - low != 0.0 { high - low } else { 1.0 };
     let mut last = points[0].1;
-    slices.iter().map(|values| {
-        // An empty slice repeats the last.
-        if let Some(&v) = py::max_first(values.iter(), |v| (**v - points[0].1).abs()) {
-            last = v;
-        }
-        SPARK[((last - low) / range * (SPARK.len() - 1) as f64).round_ties_even() as usize]
-    }).collect()
+    slices
+        .iter()
+        .map(|values| {
+            // An empty slice repeats the last.
+            if let Some(&v) = py::max_first(values.iter(), |v| (**v - points[0].1).abs()) {
+                last = v;
+            }
+            SPARK[((last - low) / range * (SPARK.len() - 1) as f64).round_ties_even() as usize]
+        })
+        .collect()
 }
 
 pub fn read(args: &mut Args) -> Result<i32> {
@@ -62,8 +82,11 @@ pub fn read(args: &mut Args) -> Result<i32> {
     let known = element_keys(frames);
     if let Some(id) = &args.id {
         if !known.contains(id) {
-            fail!(format!("no element '{id}'. Known: {}", known.join(", ")), "unknown_element",
-                  "ddp tree, or ddp find text <part of a label>");
+            fail!(
+                format!("no element '{id}'. Known: {}", known.join(", ")),
+                "unknown_element",
+                "ddp tree, or ddp find text <part of a label>"
+            );
         }
     }
     let keys = args.id.clone().map(|id| vec![id]).unwrap_or(known);
@@ -78,8 +101,13 @@ pub fn read(args: &mut Args) -> Result<i32> {
         return Ok(0);
     }
     let header = &recording.header;
-    say!("{} {} frames over {} ms, unit {}", py::str(&header["platform"]), frames.len(),
-         py::fixed(times.last().unwrap_or(&json!(0)), 0), py::str(&header["unit"]));
+    say!(
+        "{} {} frames over {} ms, unit {}",
+        py::str(&header["platform"]),
+        frames.len(),
+        py::fixed(times.last().unwrap_or(&json!(0)), 0),
+        py::str(&header["unit"])
+    );
     for key in &keys {
         let states: Vec<Option<Value>> = frames.iter().map(|f| element_state(f, key)).collect();
         if args.id.is_some() {
@@ -93,9 +121,15 @@ pub fn read(args: &mut Args) -> Result<i32> {
             String::new()
         };
         let kinds: Vec<String> = last["kinds"].as_array().unwrap().iter().map(py::str).collect();
-        say!("{key}: frame {} fill {} border {}{draws} kinds {}", py::str(&last["frame"]), py::str(&last["fill"]),
-             py::str(&last["border"]), if kinds.is_empty() { "none".into() } else { kinds.join(",") });
-        for name in ["frame", "drawn", "fill", "border", "borderColor", "opacity", "draws", "pixels", "label", "kinds"] {
+        say!(
+            "{key}: frame {} fill {} border {}{draws} kinds {}",
+            py::str(&last["frame"]),
+            py::str(&last["fill"]),
+            py::str(&last["border"]),
+            if kinds.is_empty() { "none".into() } else { kinds.join(",") }
+        );
+        for name in ["frame", "drawn", "fill", "border", "borderColor", "opacity", "draws", "pixels", "label", "kinds"]
+        {
             if let Some(line) = describe_track(name, &states, &times) {
                 say!("{line}");
             }
@@ -112,9 +146,18 @@ pub fn print_timeline(key: &str, frames: &[&Frame], states: &[Option<Value>]) {
             None => "absent".to_string(),
             Some(s) => {
                 let pixels = if py::truthy(Some(&s["pixels"])) { py::str(&s["pixels"]) } else { String::new() };
-                format!("{} {} {} {} {} {} {} {pixels}", py::str(&s["drawn"]), py::fixed(&element_alpha(frame, key), 2),
-                        py::str(&s["fill"]), py::str(&s["border"]), py::str(&s["borderColor"]), py::str(&s["opacity"]),
-                        py::str(&s["draws"])).trim_end().to_string()
+                format!(
+                    "{} {} {} {} {} {} {} {pixels}",
+                    py::str(&s["drawn"]),
+                    py::fixed(&element_alpha(frame, key), 2),
+                    py::str(&s["fill"]),
+                    py::str(&s["border"]),
+                    py::str(&s["borderColor"]),
+                    py::str(&s["opacity"]),
+                    py::str(&s["draws"])
+                )
+                .trim_end()
+                .to_string()
             }
         };
         if previous.as_ref() != Some(&row) {
@@ -125,8 +168,13 @@ pub fn print_timeline(key: &str, frames: &[&Frame], states: &[Option<Value>]) {
 }
 
 /// CSS / SwiftUI / Compose named timing curves as cubic Bezier control points.
-pub const EASINGS: [(&str, [f64; 4]); 5] = [("linear", [0.0, 0.0, 1.0, 1.0]), ("easeIn", [0.42, 0.0, 1.0, 1.0]),
-    ("easeOut", [0.0, 0.0, 0.58, 1.0]), ("easeInOut", [0.42, 0.0, 0.58, 1.0]), ("fastOutSlowIn", [0.4, 0.0, 0.2, 1.0])];
+pub const EASINGS: [(&str, [f64; 4]); 5] = [
+    ("linear", [0.0, 0.0, 1.0, 1.0]),
+    ("easeIn", [0.42, 0.0, 1.0, 1.0]),
+    ("easeOut", [0.0, 0.0, 0.58, 1.0]),
+    ("easeInOut", [0.42, 0.0, 0.58, 1.0]),
+    ("fastOutSlowIn", [0.4, 0.0, 0.2, 1.0]),
+];
 
 /// y of a timing curve at time x (0..1), found by bisection on the curve's x.
 pub fn bezier_progress(control: [f64; 4], x: f64) -> f64 {
@@ -135,7 +183,11 @@ pub fn bezier_progress(control: [f64; 4], x: f64) -> f64 {
     let (mut low, mut high) = (0.0, 1.0);
     for _ in 0..30 {
         let middle = (low + high) / 2.0;
-        if at(x1, x2, middle) < x { low = middle } else { high = middle }
+        if at(x1, x2, middle) < x {
+            low = middle
+        } else {
+            high = middle
+        }
     }
     at(y1, y2, (low + high) / 2.0)
 }
@@ -154,7 +206,8 @@ fn segments(points: &[Point]) -> Vec<Vec<Point>> {
             }
             current.push(points[index].clone());
         } else if !current.is_empty()
-            && (index..(index + 3).min(points.len())).all(|j| py::equal(&points[j].1, &points[index].1)) {
+            && (index..(index + 3).min(points.len())).all(|j| py::equal(&points[j].1, &points[index].1))
+        {
             runs.push(std::mem::take(&mut current));
         }
     }
@@ -185,17 +238,26 @@ fn describe_move(run: &[Point]) -> String {
     if distance == 0.0 || duration <= 0.0 || run.len() < 4 {
         return text;
     }
-    let progress: Vec<(f64, f64)> = run.iter().map(|(t, v)| ((f(t) - f(t0)) / duration, (f(v) - f(v0)) / distance)).collect();
+    let progress: Vec<(f64, f64)> =
+        run.iter().map(|(t, v)| ((f(t) - f(t0)) / duration, (f(v) - f(v0)) / distance)).collect();
     let overshoot = progress.iter().map(|p| p.1).fold(f64::NEG_INFINITY, f64::max) - 1.0;
     if overshoot > 0.02 {
         return format!("{text}, spring (overshoot {})", py::percent(overshoot));
     }
-    let fits: Vec<(&str, f64)> = EASINGS.iter().map(|(name, control)| {
-        let error = progress.iter().map(|(x, y)| (bezier_progress(*control, *x) - y).powi(2)).sum::<f64>() / progress.len() as f64;
-        (*name, error.sqrt())
-    }).collect();
+    let fits: Vec<(&str, f64)> = EASINGS
+        .iter()
+        .map(|(name, control)| {
+            let error = progress.iter().map(|(x, y)| (bezier_progress(*control, *x) - y).powi(2)).sum::<f64>()
+                / progress.len() as f64;
+            (*name, error.sqrt())
+        })
+        .collect();
     let (best, fit) = py::min_first(fits, |p| p.1).unwrap();
-    if fit < 0.05 { format!("{text}, {best}") } else { format!("{text}, {best} (loose fit {fit:.2})") }
+    if fit < 0.05 {
+        format!("{text}, {best}")
+    } else {
+        format!("{text}, {best} (loose fit {fit:.2})")
+    }
 }
 
 pub const TRACKS: [&str; 7] = ["x", "y", "w", "h", "alpha", "border", "opacity"];
@@ -205,9 +267,15 @@ pub fn numeric_tracks(frames: &[&Frame], key: &str) -> Vec<(&'static str, Vec<Po
     let mut tracks: Vec<(&str, Vec<Point>)> = TRACKS.iter().map(|n| (*n, Vec::new())).collect();
     for frame in frames {
         let Some(state) = element_state(frame, key) else { continue };
-        let values = [state["frame"][0].clone(), state["frame"][1].clone(), state["frame"][2].clone(),
-                      state["frame"][3].clone(), py::round(&element_alpha(frame, key), 3), state["border"].clone(),
-                      state["opacity"].clone()];
+        let values = [
+            state["frame"][0].clone(),
+            state["frame"][1].clone(),
+            state["frame"][2].clone(),
+            state["frame"][3].clone(),
+            py::round(&element_alpha(frame, key), 3),
+            state["border"].clone(),
+            state["opacity"].clone(),
+        ];
         for ((_, track), value) in tracks.iter_mut().zip(values) {
             track.push((frame.t_value().clone(), value));
         }

@@ -18,20 +18,31 @@ pub fn view(args: &mut Args) -> Result<i32> {
     let frames = &recording.frames;
     let times: Vec<Value> = frames.iter().map(|f| f.t_value().clone()).collect();
     let keys = element_keys(frames);
-    let boxes: Vec<Value> = frames.iter().map(|frame| {
-        let rows: Vec<Value> = frame.elements().iter().map(|element| {
-            let key = element_key(element);
-            let state = element_state(frame, &key).unwrap();
-            let fill = state["fill"].as_str().filter(|s| !s.is_empty()).map(|s| Value::from(format!("#{}", &s[1..7.min(s.len())])))
-                .unwrap_or(state["fill"].clone());
-            let mut row = vec![Value::from(key.clone())];
-            row.extend(element["frame"].as_array().cloned().unwrap_or_default());
-            row.extend([fill, state["border"].clone(), py::round(&element_alpha(frame, &key), 2)]);
-            Value::Array(row)
-        }).collect();
-        json!({"t": frame.t_value(), "boxes": rows})
-    }).collect();
-    let edges: Vec<[f64; 4]> = frames.iter().flat_map(|f| f.elements().iter().map(|e| crate::model::rect(&e["frame"]))).collect();
+    let boxes: Vec<Value> = frames
+        .iter()
+        .map(|frame| {
+            let rows: Vec<Value> = frame
+                .elements()
+                .iter()
+                .map(|element| {
+                    let key = element_key(element);
+                    let state = element_state(frame, &key).unwrap();
+                    let fill = state["fill"]
+                        .as_str()
+                        .filter(|s| !s.is_empty())
+                        .map(|s| Value::from(format!("#{}", &s[1..7.min(s.len())])))
+                        .unwrap_or(state["fill"].clone());
+                    let mut row = vec![Value::from(key.clone())];
+                    row.extend(element["frame"].as_array().cloned().unwrap_or_default());
+                    row.extend([fill, state["border"].clone(), py::round(&element_alpha(frame, &key), 2)]);
+                    Value::Array(row)
+                })
+                .collect();
+            json!({"t": frame.t_value(), "boxes": rows})
+        })
+        .collect();
+    let edges: Vec<[f64; 4]> =
+        frames.iter().flat_map(|f| f.elements().iter().map(|e| crate::model::rect(&e["frame"]))).collect();
     let size = if edges.is_empty() {
         json!([400, 800])
     } else {
@@ -39,12 +50,18 @@ pub fn view(args: &mut Args) -> Result<i32> {
         let height = edges.iter().map(|r| r[1] + r[3]).fold(f64::NEG_INFINITY, f64::max);
         json!([py::fnum(width), py::fnum(height)])
     };
-    let tracks: Vec<Value> = keys.iter().map(|key| {
-        let states: Vec<Option<Value>> = frames.iter().map(|f| element_state(f, key)).collect();
-        let lines: Vec<String> = ["frame", "fill", "border", "opacity", "draws", "label"].iter()
-            .filter_map(|name| describe_track(name, &states, &times)).map(|l| l.trim().to_string()).collect();
-        json!([key, lines])
-    }).collect();
+    let tracks: Vec<Value> = keys
+        .iter()
+        .map(|key| {
+            let states: Vec<Option<Value>> = frames.iter().map(|f| element_state(f, key)).collect();
+            let lines: Vec<String> = ["frame", "fill", "border", "opacity", "draws", "label"]
+                .iter()
+                .filter_map(|name| describe_track(name, &states, &times))
+                .map(|l| l.trim().to_string())
+                .collect();
+            json!([key, lines])
+        })
+        .collect();
     let data = json!({"platform": recording.header["platform"], "unit": recording.header["unit"], "size": size,
                       "frames": boxes, "tracks": tracks});
     // "</" inside the JSON would end the script tag early.
@@ -106,10 +123,14 @@ pub fn mcp(args: &mut Args) -> Result<i32> {
         let method = message["method"].as_str().unwrap_or("");
         let id = message.get("id").cloned().unwrap_or(Value::Null);
         match method {
-            "initialize" => reply(&id, Some(json!({
-                "protocolVersion": message["params"].get("protocolVersion").cloned().unwrap_or(json!("2025-06-18")),
-                "capabilities": {"tools": {}}, "serverInfo": {"name": "ddp", "version": env!("CARGO_PKG_VERSION")},
-            })), None),
+            "initialize" => reply(
+                &id,
+                Some(json!({
+                    "protocolVersion": message["params"].get("protocolVersion").cloned().unwrap_or(json!("2025-06-18")),
+                    "capabilities": {"tools": {}}, "serverInfo": {"name": "ddp", "version": env!("CARGO_PKG_VERSION")},
+                })),
+                None,
+            ),
             "tools/list" => reply(&id, Some(json!({"tools": tools})), None),
             "tools/call" => {
                 let full = py::str(&message["params"]["name"]);
@@ -128,10 +149,13 @@ pub fn mcp(args: &mut Args) -> Result<i32> {
                     }
                 };
                 let captured = state::pop_capture();
-                let text = if captured.trim().is_empty() { "(no output)".to_string() } else { captured.trim().to_string() };
+                let text =
+                    if captured.trim().is_empty() { "(no output)".to_string() } else { captured.trim().to_string() };
                 reply(&id, Some(json!({"content": [{"type": "text", "text": text}], "isError": code != 0})), None);
             }
-            _ if !id.is_null() => reply(&id, None, Some(json!({"code": -32601, "message": format!("no method {method}")}))),
+            _ if !id.is_null() => {
+                reply(&id, None, Some(json!({"code": -32601, "message": format!("no method {method}")})))
+            }
             _ => {}
         }
     }
@@ -159,7 +183,8 @@ fn sections(text: &str, wanted: &str) -> String {
     let (mut kept, mut keep_level, mut in_code) = (Vec::new(), None::<usize>, false);
     for line in text.lines() {
         in_code ^= line.starts_with("```");
-        let level = if line.starts_with("##") && !in_code { line.len() - line.trim_start_matches('#').len() } else { 0 };
+        let level =
+            if line.starts_with("##") && !in_code { line.len() - line.trim_start_matches('#').len() } else { 0 };
         if level > 0 && keep_level.is_some_and(|k| level <= k) {
             keep_level = None;
         }
@@ -177,7 +202,8 @@ pub fn skills(args: &mut Args) -> Result<i32> {
     let action = args.action.clone().unwrap_or_else(|| "list".into());
     if action == "list" {
         for (name, text) in SKILLS {
-            let description = frontmatter(text).0.into_iter().find(|(k, _)| k == "description").map(|(_, v)| v).unwrap_or_default();
+            let description =
+                frontmatter(text).0.into_iter().find(|(k, _)| k == "description").map(|(_, v)| v).unwrap_or_default();
             say!("{name:10} {description}");
         }
         return Ok(0);
@@ -215,12 +241,21 @@ fn doctor_checks(platform: &str, device: &str, app: &str) -> Result<Vec<Step>> {
             steps.push((false, "xcrun".into(), "install Xcode and its command line tools".into()));
             return Ok(steps);
         }
-        let listing: Value = serde_json::from_str(&state::run(&["xcrun", "simctl", "list", "devices", "-j"])?).unwrap_or(json!({}));
-        let state = listing["devices"].as_object().into_iter().flat_map(|groups| groups.values())
+        let listing: Value =
+            serde_json::from_str(&state::run(&["xcrun", "simctl", "list", "devices", "-j"])?).unwrap_or(json!({}));
+        let state = listing["devices"]
+            .as_object()
+            .into_iter()
+            .flat_map(|groups| groups.values())
             .flat_map(|group| group.as_array().cloned().unwrap_or_default())
-            .find(|d| d["udid"] == device).map(|d| py::str(&d["state"]));
+            .find(|d| d["udid"] == device)
+            .map(|d| py::str(&d["state"]));
         let booted = state.as_deref() == Some("Booted");
-        steps.push((booted, format!("simulator {device} {}", state.unwrap_or_else(|| "not found".into())), format!("xcrun simctl boot {device}")));
+        steps.push((
+            booted,
+            format!("simulator {device} {}", state.unwrap_or_else(|| "not found".into())),
+            format!("xcrun simctl boot {device}"),
+        ));
         if !booted {
             return Ok(steps);
         }
@@ -230,29 +265,43 @@ fn doctor_checks(platform: &str, device: &str, app: &str) -> Result<Vec<Step>> {
             return Ok(steps);
         }
         let endpoint = read_json(&Path::new(result.stdout.trim()).join(IOS_DIR).join("live.json"));
-        steps.push((endpoint.is_some(), "live endpoint written by AgentDDP.start()".into(),
-                    "launch the app (xcrun simctl launch); it must be a Debug build that calls AgentDDP.start() at launch".into()));
+        steps.push((
+            endpoint.is_some(),
+            "live endpoint written by AgentDDP.start()".into(),
+            "launch the app (xcrun simctl launch); it must be a Debug build that calls AgentDDP.start() at launch"
+                .into(),
+        ));
         let Some(endpoint) = endpoint else { return Ok(steps) };
         json!({"platform": "ios", "app": app, "device": device, "port": endpoint["port"], "token": endpoint["token"]})
     } else {
         let adb = adb_path()?;
         let state = capture(&adb, &["-s", device, "get-state"]).stdout.trim().to_string();
-        steps.push((state == "device", format!("emulator or device {device} {}", if state.is_empty() { "not found" } else { &state }),
-                    "boot it, then adb devices".into()));
+        steps.push((
+            state == "device",
+            format!("emulator or device {device} {}", if state.is_empty() { "not found" } else { &state }),
+            "boot it, then adb devices".into(),
+        ));
         if state != "device" {
             return Ok(steps);
         }
         let installed = capture(&adb, &["-s", device, "shell", "pm", "path", app]);
         let is_installed = installed.stdout.starts_with("package:");
-        steps.push((installed.code == 0 && is_installed, format!("app {app} installed"), "install the debug APK (./gradlew installDebug)".into()));
+        steps.push((
+            installed.code == 0 && is_installed,
+            format!("app {app} installed"),
+            "install the debug APK (./gradlew installDebug)".into(),
+        ));
         if !is_installed {
             return Ok(steps);
         }
         let debuggable = capture(&adb, &["-s", device, "shell", "run-as", app, "true"]);
         steps.push((debuggable.code == 0, "debuggable build".into(), "install the debug variant, not release".into()));
         let package = capture(&adb, &["-s", device, "shell", "dumpsys", "package", app]).stdout;
-        steps.push((package.contains("dev.agentddp"), "agent-ddp library in the build".into(),
-                    "add debugImplementation(project(\":agent-ddp\")) and reinstall".into()));
+        steps.push((
+            package.contains("dev.agentddp"),
+            "agent-ddp library in the build".into(),
+            "add debugImplementation(project(\":agent-ddp\")) and reinstall".into(),
+        ));
         let running = capture(&adb, &["-s", device, "shell", "pidof", app]).stdout.trim().to_string();
         steps.push((!running.is_empty(), "app running".into(), format!("adb -s {device} shell monkey -p {app} 1")));
         if running.is_empty() {
@@ -268,24 +317,40 @@ fn doctor_checks(platform: &str, device: &str, app: &str) -> Result<Vec<Step>> {
     let messages = match answer {
         Ok(messages) => messages,
         Err(failure) => {
-            steps.push((false, format!("live endpoint answers ({})", failure.message), "restart the app; then ddp connect".into()));
+            steps.push((
+                false,
+                format!("live endpoint answers ({})", failure.message),
+                "restart the app; then ddp connect".into(),
+            ));
             return Ok(steps);
         }
     };
     steps.push((true, "live endpoint answers".into(), String::new()));
-    let count = messages.iter().find(|m| m["type"] == "frame").and_then(|m| m["elements"].as_array().map(Vec::len)).unwrap_or(0);
-    steps.push((count > 0, format!("{count} elements on screen"), if platform == "ios" {
-        "iOS: the accessibility tree is empty, restart the app; Android: give what you need a testTag".into()
-    } else {
-        "give the elements you need a testTag, text or contentDescription".into()
-    }));
+    let count = messages
+        .iter()
+        .find(|m| m["type"] == "frame")
+        .and_then(|m| m["elements"].as_array().map(Vec::len))
+        .unwrap_or(0);
+    steps.push((
+        count > 0,
+        format!("{count} elements on screen"),
+        if platform == "ios" {
+            "iOS: the accessibility tree is empty, restart the app; Android: give what you need a testTag".into()
+        } else {
+            "give the elements you need a testTag, text or contentDescription".into()
+        },
+    ));
     Ok(steps)
 }
 
 pub fn doctor(args: &mut Args) -> Result<i32> {
     let context = ctx();
     let session = read_json(&context.session_file).unwrap_or(json!({}));
-    let device = args.device.clone().or_else(|| session["device"].as_str().map(String::from)).or_else(|| std::env::var("DDP_DEVICE").ok());
+    let device = args
+        .device
+        .clone()
+        .or_else(|| session["device"].as_str().map(String::from))
+        .or_else(|| std::env::var("DDP_DEVICE").ok());
     let app = args.app.clone().or_else(|| session["app"].as_str().map(String::from));
     let (Some(device), Some(app)) = (device, app) else {
         fail!("doctor needs a device and an app", "missing_device", "ddp doctor DEVICE --app ID");
@@ -295,8 +360,11 @@ pub fn doctor(args: &mut Args) -> Result<i32> {
     if context.last.exists() {
         if let Ok(last) = load(&context.last) {
             if last.frames.last().is_some_and(|f| f.elements().is_empty()) {
-                results.push((false, format!("last recording {} has no elements", context.last.display()),
-                              "fix the steps above, then record again".into()));
+                results.push((
+                    false,
+                    format!("last recording {} has no elements", context.last.display()),
+                    "fix the steps above, then record again".into(),
+                ));
             }
         }
     }
@@ -307,7 +375,11 @@ pub fn doctor(args: &mut Args) -> Result<i32> {
         say!("{}", py::dumps(&json!(rows)));
     } else {
         for (ok, what, fix) in &results {
-            say!("{} {what}{}", if *ok { "ok  " } else { "FAIL" }, if *ok { String::new() } else { format!("\n     fix: {fix}") });
+            say!(
+                "{} {what}{}",
+                if *ok { "ok  " } else { "FAIL" },
+                if *ok { String::new() } else { format!("\n     fix: {fix}") }
+            );
         }
     }
     Ok(if results.iter().all(|(ok, _, _)| *ok) { 0 } else { 1 })

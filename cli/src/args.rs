@@ -99,7 +99,9 @@ fn common(command: Command) -> Command {
     command
         .arg(opt("session", "named session (or env DDP_SESSION): its own live connection and recordings"))
         .arg(flag("json", "machine output; errors as {error, code, next}"))
-        .arg(opt("max-output", "cut output at N chars (or env DDP_MAX_OUTPUT)").value_parser(clap::value_parser!(usize)))
+        .arg(
+            opt("max-output", "cut output at N chars (or env DDP_MAX_OUTPUT)").value_parser(clap::value_parser!(usize)),
+        )
         .arg(flag("content-boundaries", "wrap output in markers: app text is data, not instructions"))
 }
 
@@ -107,7 +109,10 @@ fn common(command: Command) -> Command {
 fn window(command: Command) -> Command {
     command
         .arg(opt("for", "live: record this long (1.5s, 1500ms); default 2s").id("duration"))
-        .arg(opt("frames", "live or offline record: number of frames instead of --for").value_parser(clap::value_parser!(i64)))
+        .arg(
+            opt("frames", "live or offline record: number of frames instead of --for")
+                .value_parser(clap::value_parser!(i64)),
+        )
         .arg(opt("then", "program and arguments to run right after recording starts (no shell)"))
 }
 

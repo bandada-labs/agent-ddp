@@ -70,7 +70,11 @@ pub fn run_command(argv: Vec<String>) -> i32 {
         Ok(args) => args,
         Err(error) => {
             let text = error.render().to_string();
-            if error.use_stderr() { state::write_err(&text) } else { state::write_out(&text) }
+            if error.use_stderr() {
+                state::write_err(&text)
+            } else {
+                state::write_out(&text)
+            }
             return error.exit_code();
         }
     };

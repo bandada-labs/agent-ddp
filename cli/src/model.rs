@@ -1,7 +1,7 @@
 //! Recordings: loading, naming elements, which element owns each drawn node, and per-element state.
+use crate::fail;
 use crate::py::{self, f, obj, truthy};
 use crate::state::{ctx, failure, local_time, now_ms, write_file, Result, KEPT_RECORDINGS, OWNER_TOLERANCE_PT};
-use crate::fail;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::io::Read;
@@ -43,7 +43,10 @@ impl Frame {
 
     pub fn owned(&self, key: Option<&str>) -> Vec<&Value> {
         let nodes = self.nodes();
-        self.by_owner.get(&key.map(String::from)).map(|list| list.iter().map(|&i| &nodes[i]).collect()).unwrap_or_default()
+        self.by_owner
+            .get(&key.map(String::from))
+            .map(|list| list.iter().map(|&i| &nodes[i]).collect())
+            .unwrap_or_default()
     }
 
     pub fn keys(&self) -> Vec<String> {
@@ -71,7 +74,11 @@ impl Recording {
 }
 
 pub fn to_pt(header: &Value) -> f64 {
-    if header["unit"] == "px" { 1.0 / header.get("scale").map(f).unwrap_or(1.0) } else { 1.0 }
+    if header["unit"] == "px" {
+        1.0 / header.get("scale").map(f).unwrap_or(1.0)
+    } else {
+        1.0
+    }
 }
 
 pub fn tolerance_for(header: &Value) -> f64 {
@@ -90,8 +97,11 @@ pub fn app_container(udid: &str, app: &str) -> Result<String> {
     }
     let result = crate::state::capture("xcrun", &["simctl", "get_app_container", udid, app, "data"]);
     if result.code != 0 {
-        fail!(format!("no app {app} on simulator {udid}: {}", result.stderr.trim()), "app_not_installed",
-              format!("ddp doctor {udid} --app {app}"));
+        fail!(
+            format!("no app {app} on simulator {udid}: {}", result.stderr.trim()),
+            "app_not_installed",
+            format!("ddp doctor {udid} --app {app}")
+        );
     }
     let path = result.stdout.trim().to_string();
     cache[&key] = path.clone().into();
@@ -108,8 +118,11 @@ pub fn save_recording(text: &str, name: Option<&str>) -> Result<PathBuf> {
         Some(name) => context.dir.join("saved").join(format!("{name}.jsonl.gz")),
         None => {
             let now = now_ms();
-            context.dir.join("recordings").join(format!("{}-{:03}.jsonl.gz", local_time("%Y%m%d-%H%M%S", now / 1000.0),
-                                                        (now as i64) % 1000))
+            context.dir.join("recordings").join(format!(
+                "{}-{:03}.jsonl.gz",
+                local_time("%Y%m%d-%H%M%S", now / 1000.0),
+                (now as i64) % 1000
+            ))
         }
     };
     write_file(&target, gzip(text.as_bytes()))?;
@@ -147,8 +160,12 @@ pub fn decode(data: &[u8]) -> String {
 /// Kept recordings, oldest first.
 pub fn history() -> Vec<PathBuf> {
     let mut found: Vec<PathBuf> = std::fs::read_dir(ctx().dir.join("recordings"))
-        .map(|entries| entries.filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|p| p.to_string_lossy().ends_with(".jsonl.gz")).collect())
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| p.to_string_lossy().ends_with(".jsonl.gz"))
+                .collect()
+        })
         .unwrap_or_default();
     found.sort();
     found
@@ -158,7 +175,11 @@ pub fn history() -> Vec<PathBuf> {
 pub fn recording_path(text: &str) -> PathBuf {
     let path = PathBuf::from(text);
     let saved = ctx().dir.join("saved").join(format!("{text}.jsonl.gz"));
-    if !path.exists() && saved.exists() { saved } else { path }
+    if !path.exists() && saved.exists() {
+        saved
+    } else {
+        path
+    }
 }
 
 pub fn read_text(path: &Path) -> Result<String> {
@@ -167,15 +188,26 @@ pub fn read_text(path: &Path) -> Result<String> {
 }
 
 pub fn normalize_label(label: &str) -> String {
-    label.chars().filter(|c| !matches!(c, '\u{feff}' | '\u{200b}' | '\u{200c}' | '\u{200d}' | '\u{2060}'))
-        .map(|c| if c == '\u{a0}' { ' ' } else { c }).collect()
+    label
+        .chars()
+        .filter(|c| !matches!(c, '\u{feff}' | '\u{200b}' | '\u{200c}' | '\u{200d}' | '\u{2060}'))
+        .map(|c| if c == '\u{a0}' { ' ' } else { c })
+        .collect()
 }
 
 pub fn parse_lines(text: &str, path: &Path) -> Result<Vec<Value>> {
-    text.lines().filter(|line| !line.trim().is_empty()).map(|line| {
-        serde_json::from_str(line).map_err(|e| failure(format!("{}: not a recording line ({e})", path.display()),
-                                                       "bad_recording", Some("ddp record again")))
-    }).collect()
+    text.lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| {
+            serde_json::from_str(line).map_err(|e| {
+                failure(
+                    format!("{}: not a recording line ({e})", path.display()),
+                    "bad_recording",
+                    Some("ddp record again"),
+                )
+            })
+        })
+        .collect()
 }
 
 pub fn load(path: &Path) -> Result<Recording> {
@@ -189,7 +221,11 @@ pub fn load(path: &Path) -> Result<Recording> {
 
 pub fn from_lines(lines: Vec<Value>, path: PathBuf) -> Result<Recording> {
     let Some(header) = lines.iter().find(|l| l["type"] == "header").cloned() else {
-        fail!(format!("{} has no recording in it (no header line)", path.display()), "bad_recording", "ddp record again");
+        fail!(
+            format!("{} has no recording in it (no header line)", path.display()),
+            "bad_recording",
+            "ddp record again"
+        );
     };
     let end = lines.iter().find(|l| l["type"] == "end").cloned().unwrap_or_else(|| json!({}));
     let tolerance = tolerance_for(&header);
@@ -207,8 +243,11 @@ fn name_elements(frame: &mut Value) {
                 Some(other) => other.clone(),
                 None => Value::Null,
             };
-            let name = [element.get("id"), element.get("label")].into_iter()
-                .find(|v| truthy(*v)).map(|v| py::str(v.unwrap())).unwrap_or_else(|| "?".into());
+            let name = [element.get("id"), element.get("label")]
+                .into_iter()
+                .find(|v| truthy(*v))
+                .map(|v| py::str(v.unwrap()))
+                .unwrap_or_else(|| "?".into());
             let count = seen.entry(name.clone()).or_insert(0);
             *count += 1;
             element["key"] = if *count == 1 { name.into() } else { format!("{name} [{count}]").into() };
@@ -217,8 +256,11 @@ fn name_elements(frame: &mut Value) {
 }
 
 pub fn element_key(element: &Value) -> String {
-    [element.get("key"), element.get("id"), element.get("label")].into_iter()
-        .find(|v| truthy(*v)).map(|v| py::str(v.unwrap())).unwrap_or_else(|| "?".into())
+    [element.get("key"), element.get("id"), element.get("label")]
+        .into_iter()
+        .find(|v| truthy(*v))
+        .map(|v| py::str(v.unwrap()))
+        .unwrap_or_else(|| "?".into())
 }
 
 pub fn rect(value: &Value) -> [f64; 4] {
@@ -248,7 +290,8 @@ fn assign_owners(frame: &mut Value, tolerance: f64) -> (HashMap<String, usize>, 
     let elements: Vec<Value> = frame["elements"].as_array().cloned().unwrap_or_default();
     let keys: Vec<String> = elements.iter().map(element_key).collect();
     let mut by_area: Vec<usize> = (0..elements.len()).collect();
-    by_area.sort_by(|&a, &b| area(rect(&elements[a]["frame"])).partial_cmp(&area(rect(&elements[b]["frame"]))).unwrap());
+    by_area
+        .sort_by(|&a, &b| area(rect(&elements[a]["frame"])).partial_cmp(&area(rect(&elements[b]["frame"]))).unwrap());
     let mut by_owner: HashMap<Option<String>, Vec<usize>> = HashMap::new();
     if let Some(nodes) = frame["nodes"].as_array_mut() {
         for (index, node) in nodes.iter_mut().enumerate() {
@@ -257,7 +300,10 @@ fn assign_owners(frame: &mut Value, tolerance: f64) -> (HashMap<String, usize>, 
                 (0..keys.len() as i64).contains(&own).then(|| keys[own as usize].clone())
             } else {
                 let frame = rect(&node["frame"]);
-                by_area.iter().find(|&&e| contains(rect(&elements[e]["frame"]), frame, tolerance)).map(|&e| keys[e].clone())
+                by_area
+                    .iter()
+                    .find(|&&e| contains(rect(&elements[e]["frame"]), frame, tolerance))
+                    .map(|&e| keys[e].clone())
             };
             node["owner"] = owner.clone().map(Value::from).unwrap_or(Value::Null);
             by_owner.entry(owner).or_default().push(index);
@@ -286,10 +332,18 @@ pub fn element_state(frame: &Frame, key: &str) -> Option<Value> {
         ("frame", element["frame"].clone()),
         ("drawn", drawn),
         ("label", element.get("label").cloned().unwrap_or(Value::Null)),
-        ("fill", py::max_first(filled.iter().copied(), |n| area(rect(&n["frame"]))).map(|n| n["fill"].clone()).unwrap_or(Value::Null)),
+        (
+            "fill",
+            py::max_first(filled.iter().copied(), |n| area(rect(&n["frame"])))
+                .map(|n| n["fill"].clone())
+                .unwrap_or(Value::Null),
+        ),
         ("border", widest.map(|n| n["border"]["width"].clone()).unwrap_or(json!(0))),
         ("borderColor", widest.map(|n| n["border"]["color"].clone()).unwrap_or(Value::Null)),
-        ("opacity", py::min_first(owned.iter().map(|n| n.get("opacity").cloned().unwrap_or(json!(1))), f).unwrap_or(json!(1))),
+        (
+            "opacity",
+            py::min_first(owned.iter().map(|n| n.get("opacity").cloned().unwrap_or(json!(1))), f).unwrap_or(json!(1)),
+        ),
         ("kinds", json!(kinds)),
         ("draws", json!(owned.iter().filter(|n| n["kind"] == "draw").count())),
         ("pixels", pixels.unwrap_or(Value::Null)),
@@ -305,7 +359,12 @@ pub fn union(rects: &[Value]) -> Value {
     let top = py::min_first(pick(1), f).unwrap();
     let right = py::max_first(rects.iter().map(|r| py::add(&r[0], &r[2])), f).unwrap();
     let bottom = py::max_first(rects.iter().map(|r| py::add(&r[1], &r[3])), f).unwrap();
-    json!([py::round(&left, 2), py::round(&top, 2), py::round(&py::sub(&right, &left), 2), py::round(&py::sub(&bottom, &top), 2)])
+    json!([
+        py::round(&left, 2),
+        py::round(&top, 2),
+        py::round(&py::sub(&right, &left), 2),
+        py::round(&py::sub(&bottom, &top), 2)
+    ])
 }
 
 pub fn element_keys(frames: &[Frame]) -> Vec<String> {
@@ -341,8 +400,10 @@ pub fn color_alpha(color: &Value) -> Value {
 
 /// How strongly a node shows: its opacity times the strongest color it paints.
 pub fn node_alpha(node: &Value) -> Value {
-    let mut colors = vec![node.get("fill").cloned().unwrap_or(Value::Null),
-                          node.get("border").and_then(|b| b.get("color")).cloned().unwrap_or(Value::Null)];
+    let mut colors = vec![
+        node.get("fill").cloned().unwrap_or(Value::Null),
+        node.get("border").and_then(|b| b.get("color")).cloned().unwrap_or(Value::Null),
+    ];
     if let Some(gradient) = node.get("gradient").and_then(Value::as_array) {
         colors.extend(gradient.iter().cloned());
     }
@@ -396,14 +457,19 @@ pub type Clause = (String, String, String);
 
 /// 'kind=draw and alpha>0' to [(field, operator, value)].
 pub fn parse_where(text: &str) -> Result<Vec<Clause>> {
-    text.split(" and ").map(|clause| {
-        let Some(operator) = QUERY_OPERATORS.iter().find(|op| clause.contains(*op)) else {
-            fail!(format!("can't read '{clause}'"), "bad_where",
-                  format!("use field{}value joined by ' and '", QUERY_OPERATORS.join("|")));
-        };
-        let (field, value) = clause.split_once(operator).unwrap();
-        Ok((field.trim().to_string(), operator.to_string(), value.trim().to_string()))
-    }).collect()
+    text.split(" and ")
+        .map(|clause| {
+            let Some(operator) = QUERY_OPERATORS.iter().find(|op| clause.contains(*op)) else {
+                fail!(
+                    format!("can't read '{clause}'"),
+                    "bad_where",
+                    format!("use field{}value joined by ' and '", QUERY_OPERATORS.join("|"))
+                );
+            };
+            let (field, value) = clause.split_once(operator).unwrap();
+            Ok((field.trim().to_string(), operator.to_string(), value.trim().to_string()))
+        })
+        .collect()
 }
 
 fn as_float(value: &Value) -> Option<f64> {
@@ -419,8 +485,10 @@ fn as_float(value: &Value) -> Option<f64> {
 pub fn matches(fields: &serde_json::Map<String, Value>, clauses: &[Clause]) -> Result<bool> {
     for (field, operator, expected) in clauses {
         let Some(actual) = fields.get(field) else {
-            fail!(format!("unknown field '{field}'. Fields: {}", fields.keys().cloned().collect::<Vec<_>>().join(", ")),
-                  "unknown_field");
+            fail!(
+                format!("unknown field '{field}'. Fields: {}", fields.keys().cloned().collect::<Vec<_>>().join(", ")),
+                "unknown_field"
+            );
         };
         let ok = if operator == "~" {
             py::str(actual).to_lowercase().contains(&expected.to_lowercase())

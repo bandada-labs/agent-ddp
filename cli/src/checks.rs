@@ -1,8 +1,10 @@
 //! Checks over a take. Each returns how many problems it found; `run_check` turns that into exit 1.
 use crate::args::Args;
 use crate::live::recording_for;
-use crate::model::{area, color_alpha, contains, element_alpha, element_key, element_keys, element_state, frame_at, load,
-                   node_alpha, paints_at, read_text, recording_path, rect, with_origin, Frame, Recording};
+use crate::model::{
+    area, color_alpha, contains, element_alpha, element_key, element_keys, element_state, frame_at, load, node_alpha,
+    paints_at, read_text, recording_path, rect, with_origin, Frame, Recording,
+};
 use crate::py::{self, f, obj, truthy};
 use crate::state::{ctx, failure, write_file, Result, OWNER_TOLERANCE_PT};
 use crate::summary::numeric_tracks;
@@ -19,9 +21,13 @@ type Point = (f64, f64);
 fn coverage<'a>(frame: &'a Frame, element: &Value, tolerance: f64) -> Option<(usize, Vec<&'a Value>)> {
     let key = element_key(element);
     let outer = rect(&element["frame"]);
-    let inner_keys: HashSet<String> = frame.elements().iter().filter(|e| contains(outer, rect(&e["frame"]), tolerance))
-        .map(element_key).collect();
-    let own_top = frame.nodes().iter().filter(|n| n["owner"].as_str() == Some(&key)).map(|n| f(&n["z"]))
+    let inner_keys: HashSet<String> =
+        frame.elements().iter().filter(|e| contains(outer, rect(&e["frame"]), tolerance)).map(element_key).collect();
+    let own_top = frame
+        .nodes()
+        .iter()
+        .filter(|n| n["owner"].as_str() == Some(&key))
+        .map(|n| f(&n["z"]))
         .fold(None, |best: Option<f64>, z| Some(best.map_or(z, |b| b.max(z))))?;
     let [x, y, w, h] = outer;
     let mut covered = 0;
@@ -29,9 +35,15 @@ fn coverage<'a>(frame: &'a Frame, element: &Value, tolerance: f64) -> Option<(us
     for fy in [0.2, 0.5, 0.8] {
         for fx in [0.2, 0.5, 0.8] {
             let point = (x + w * fx, y + h * fy);
-            let above: Vec<&Value> = frame.nodes().iter().filter(|n| {
-                f(&n["z"]) > own_top && !n["owner"].as_str().is_some_and(|o| inner_keys.contains(o)) && paints_at(n, point)
-            }).collect();
+            let above: Vec<&Value> = frame
+                .nodes()
+                .iter()
+                .filter(|n| {
+                    f(&n["z"]) > own_top
+                        && !n["owner"].as_str().is_some_and(|o| inner_keys.contains(o))
+                        && paints_at(n, point)
+                })
+                .collect();
             if let Some(top) = py::max_first(above.iter().copied(), |n| f(&n["z"])) {
                 covered += 1;
                 let z = f(&top["z"]);
@@ -56,7 +68,11 @@ fn pick(node: &Value, fields: &[&str]) -> Value {
 }
 
 pub fn check_overlap(args: &Args, recording: &Recording) -> Result<usize> {
-    let frames = if args.all_frames { &recording.frames[..] } else { &recording.frames[recording.frames.len().saturating_sub(1)..] };
+    let frames = if args.all_frames {
+        &recording.frames[..]
+    } else {
+        &recording.frames[recording.frames.len().saturating_sub(1)..]
+    };
     let mut reported: Vec<String> = Vec::new();
     for frame in frames {
         for element in frame.elements() {
@@ -66,9 +82,17 @@ pub fn check_overlap(args: &Args, recording: &Recording) -> Result<usize> {
                 continue;
             }
             reported.push(key.clone());
-            say!("COVERED {key} at t={}ms: {covered}/9 sample points, frame {}", py::str(frame.t_value()), py::str(&element["frame"]));
+            say!(
+                "COVERED {key} at t={}ms: {covered}/9 sample points, frame {}",
+                py::str(frame.t_value()),
+                py::str(&element["frame"])
+            );
             for node in coverers {
-                say!("  by z={} {}", py::str(&node["z"]), py::dumps(&pick(node, &["kind", "source", "fill", "frame", "owner"])));
+                say!(
+                    "  by z={} {}",
+                    py::str(&node["z"]),
+                    py::dumps(&pick(node, &["kind", "source", "fill", "frame", "owner"]))
+                );
             }
         }
     }
@@ -95,10 +119,12 @@ fn outline_points(node: &Value) -> Vec<Point> {
     }
     let [x, y, w, h] = rect(&node["frame"]);
     if matches!(node.get("op").and_then(Value::as_str), Some("circle" | "oval" | "arc")) {
-        return (0..8).map(|i| {
-            let a = i as f64 * PI / 4.0;
-            (x + w / 2.0 + w / 2.0 * a.cos(), y + h / 2.0 + h / 2.0 * a.sin())
-        }).collect();
+        return (0..8)
+            .map(|i| {
+                let a = i as f64 * PI / 4.0;
+                (x + w / 2.0 + w / 2.0 * a.cos(), y + h / 2.0 + h / 2.0 * a.sin())
+            })
+            .collect();
     }
     // A rounded node's own corner is cut too: take the point on its arc at 45 degrees.
     let inset = node.get("corner").map(f).unwrap_or(0.0).min(w / 2.0).min(h / 2.0) * (1.0 - 0.5f64.sqrt());
@@ -114,7 +140,9 @@ fn clamp(point: Point, r: [f64; 4]) -> Point {
 fn corner_breaks<'a>(frame: &'a Frame, element: &Value, tolerance: f64) -> Vec<(&'a Value, Point)> {
     let key = element_key(element);
     let shapes = frame.nodes().iter().filter(|n| {
-        n["owner"].as_str() == Some(&key) && truthy(n.get("corner")) && (truthy(n.get("fill")) || truthy(n.get("border")))
+        n["owner"].as_str() == Some(&key)
+            && truthy(n.get("corner"))
+            && (truthy(n.get("fill")) || truthy(n.get("border")))
     });
     let Some(shape) = py::max_first(shapes, |n| area(rect(&n["frame"]))) else { return Vec::new() };
     let shape_rect = rect(&shape["frame"]);
@@ -125,15 +153,25 @@ fn corner_breaks<'a>(frame: &'a Frame, element: &Value, tolerance: f64) -> Vec<(
         let [x, y, w, h] = r;
         let center_inside = sx <= x + w / 2.0 && x + w / 2.0 <= sx + sw && sy <= y + h / 2.0 && y + h / 2.0 <= sy + sh;
         // The shape's own stroke, or anything as big as the shape (a page background), is not a draw inside it.
-        if std::ptr::eq(node, shape) || node["kind"] == "bitmap" || !center_inside
-            || contains(rect(&node["frame"]), shape_rect, tolerance) || area(rect(&node["frame"])) > area(shape_rect) * 1.5 {
+        if std::ptr::eq(node, shape)
+            || node["kind"] == "bitmap"
+            || !center_inside
+            || contains(rect(&node["frame"]), shape_rect, tolerance)
+            || area(rect(&node["frame"])) > area(shape_rect) * 1.5
+        {
             continue;
         }
         let clip = node.get("clipRound").filter(|c| truthy(Some(c))).and_then(Value::as_array);
-        let outside: Vec<Point> = outline_points(node).into_iter().map(|p| clamp(p, r)).filter(|&p| {
-            !inside_rounded(p, shape_rect, f(&shape["corner"]), tolerance)
-                && !clip.is_some_and(|c| !inside_rounded(p, [f(&c[0]), f(&c[1]), f(&c[2]), f(&c[3])], f(&c[4]), tolerance))
-        }).collect();
+        let outside: Vec<Point> = outline_points(node)
+            .into_iter()
+            .map(|p| clamp(p, r))
+            .filter(|&p| {
+                !inside_rounded(p, shape_rect, f(&shape["corner"]), tolerance)
+                    && !clip.is_some_and(|c| {
+                        !inside_rounded(p, [f(&c[0]), f(&c[1]), f(&c[2]), f(&c[3])], f(&c[4]), tolerance)
+                    })
+            })
+            .collect();
         if let Some(&first) = outside.first() {
             breaks.push((node, first));
         }
@@ -142,7 +180,11 @@ fn corner_breaks<'a>(frame: &'a Frame, element: &Value, tolerance: f64) -> Vec<(
 }
 
 pub fn check_corners(args: &Args, recording: &Recording) -> Result<usize> {
-    let frames = if args.all_frames { &recording.frames[..] } else { &recording.frames[recording.frames.len().saturating_sub(1)..] };
+    let frames = if args.all_frames {
+        &recording.frames[..]
+    } else {
+        &recording.frames[recording.frames.len().saturating_sub(1)..]
+    };
     let mut reported: Vec<String> = Vec::new();
     for frame in frames {
         for element in frame.elements() {
@@ -155,13 +197,26 @@ pub fn check_corners(args: &Args, recording: &Recording) -> Result<usize> {
                 continue;
             }
             reported.push(key.clone());
-            let shape = py::max_first(frame.nodes().iter().filter(|n| n["owner"].as_str() == Some(&key) && truthy(n.get("corner"))),
-                                      |n| area(rect(&n["frame"]))).unwrap();
-            say!("OUTSIDE CORNERS {key} at t={}ms: {} nodes reach past corner radius {} of {}", py::str(frame.t_value()),
-                 breaks.len(), py::str(&shape["corner"]), py::str(&shape["frame"]));
+            let shape = py::max_first(
+                frame.nodes().iter().filter(|n| n["owner"].as_str() == Some(&key) && truthy(n.get("corner"))),
+                |n| area(rect(&n["frame"])),
+            )
+            .unwrap();
+            say!(
+                "OUTSIDE CORNERS {key} at t={}ms: {} nodes reach past corner radius {} of {}",
+                py::str(frame.t_value()),
+                breaks.len(),
+                py::str(&shape["corner"]),
+                py::str(&shape["frame"])
+            );
             for (node, point) in breaks.iter().take(5) {
-                say!("  z={} at ({:.1}, {:.1}) {}", py::str(&node["z"]), point.0, point.1,
-                     py::dumps(&pick(node, &["kind", "op", "fill", "border", "frame", "points"])));
+                say!(
+                    "  z={} at ({:.1}, {:.1}) {}",
+                    py::str(&node["z"]),
+                    point.0,
+                    point.1,
+                    py::dumps(&pick(node, &["kind", "op", "fill", "border", "frame", "points"]))
+                );
             }
         }
     }
@@ -184,13 +239,17 @@ struct Profile {
 fn parity_profile(recording: &Recording, key: &str) -> Profile {
     let to_pt = recording.to_pt();
     let frames = &recording.frames;
-    let states: Vec<String> = frames.iter().map(|f| py::dumps_sorted(&element_state(f, key).unwrap_or(Value::Null))).collect();
+    let states: Vec<String> =
+        frames.iter().map(|f| py::dumps_sorted(&element_state(f, key).unwrap_or(Value::Null))).collect();
     let changes: Vec<f64> = (1..frames.len()).filter(|&i| states[i] != states[i - 1]).map(|i| frames[i].t).collect();
     let owned: Vec<&Value> = frames.iter().flat_map(|f| f.owned(Some(key))).collect();
     let shadows: Vec<&Value> = owned.iter().filter_map(|n| n.get("shadow").filter(|s| truthy(Some(s)))).collect();
-    let max = |values: Vec<f64>| values.into_iter().fold(None, |b: Option<f64>, v| Some(b.map_or(v, |b| b.max(v)))).unwrap_or(0.0);
+    let max = |values: Vec<f64>| {
+        values.into_iter().fold(None, |b: Option<f64>, v| Some(b.map_or(v, |b| b.max(v)))).unwrap_or(0.0)
+    };
     Profile {
-        changes: (!changes.is_empty()).then(|| (changes[0] - recording.origin, changes[changes.len() - 1] - recording.origin)),
+        changes: (!changes.is_empty())
+            .then(|| (changes[0] - recording.origin, changes[changes.len() - 1] - recording.origin)),
         fields: [
             max(owned.iter().map(|n| f(&node_alpha(n))).collect()),
             max(owned.iter().map(|n| n.get("corner").map(f).unwrap_or(0.0)).collect()) * to_pt,
@@ -210,11 +269,20 @@ fn parity_differences(a: &Profile, b: &Profile, names: (&str, &str)) -> Vec<Stri
         }
         _ => {}
     }
-    for (index, (label, tolerance, unit)) in [("peak alpha", PARITY_ALPHA, ""), ("corner", PARITY_PT, "pt"),
-                                               ("shadow", PARITY_PT, "pt radius"), ("shadow alpha", PARITY_ALPHA, "")]
-        .into_iter().enumerate() {
+    for (index, (label, tolerance, unit)) in [
+        ("peak alpha", PARITY_ALPHA, ""),
+        ("corner", PARITY_PT, "pt"),
+        ("shadow", PARITY_PT, "pt radius"),
+        ("shadow alpha", PARITY_ALPHA, ""),
+    ]
+    .into_iter()
+    .enumerate()
+    {
         if (a.fields[index] - b.fields[index]).abs() > tolerance {
-            found.push(format!("{label}: {} {:.2}{unit}, {} {:.2}{unit}", names.0, a.fields[index], names.1, b.fields[index]));
+            found.push(format!(
+                "{label}: {} {:.2}{unit}, {} {:.2}{unit}",
+                names.0, a.fields[index], names.1, b.fields[index]
+            ));
         }
     }
     found
@@ -265,7 +333,12 @@ fn case_matches(case: &Value, element: &Value) -> bool {
     if let Some(id) = case.get("id") {
         return element_key(element) == py::str(id);
     }
-    element.get("label").and_then(Value::as_str).unwrap_or("").to_lowercase().contains(&py::str(&case["text"]).to_lowercase())
+    element
+        .get("label")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_lowercase()
+        .contains(&py::str(&case["text"]).to_lowercase())
 }
 
 /// Times (from the origin) of frames where the element is there, strong enough and in place,
@@ -275,7 +348,9 @@ fn shown_times(recording: &Recording, case: &Value, to_pt: f64) -> (Vec<f64>, Op
     let tolerance_pt = case.get("tolerancePt").map(f).unwrap_or(4.0);
     let (mut times, mut present, mut strong) = (Vec::new(), false, false);
     for frame in &recording.frames {
-        let element = frame.elements().iter()
+        let element = frame
+            .elements()
+            .iter()
             .find(|e| case_matches(case, e) && f(&element_alpha(frame, &element_key(e))) >= min_alpha);
         let Some(element) = element else {
             present = present || frame.elements().iter().any(|e| case_matches(case, e));
@@ -299,8 +374,11 @@ fn shown_times(recording: &Recording, case: &Value, to_pt: f64) -> (Vec<f64>, Op
     } else if !strong {
         format!("there but never at alpha {} or more", case.get("minAlpha").map(py::str).unwrap_or("0.05".into()))
     } else {
-        format!("there but never at {} (within {} pt)", py::str(&case["frame"]),
-                case.get("tolerancePt").map(py::str).unwrap_or("4".into()))
+        format!(
+            "there but never at {} (within {} pt)",
+            py::str(&case["frame"]),
+            case.get("tolerancePt").map(py::str).unwrap_or("4".into())
+        )
     };
     (times, Some(why))
 }
@@ -317,7 +395,13 @@ fn absent_verdict(case: &Value, times: &[f64], tolerance: f64, recording_end: f6
     ("SHOWN", format!("{} frames, {:.0}..{:.0}ms", inside.len(), inside[0], inside[inside.len() - 1]))
 }
 
-fn timeline_verdict(case: &Value, times: &[f64], why: Option<String>, tolerance: f64, recording_start: f64) -> (&'static str, String) {
+fn timeline_verdict(
+    case: &Value,
+    times: &[f64],
+    why: Option<String>,
+    tolerance: f64,
+    recording_start: f64,
+) -> (&'static str, String) {
     if times.is_empty() {
         return ("MISSING", why.unwrap_or_default());
     }
@@ -362,7 +446,11 @@ pub fn check_timeline(args: &Args) -> Result<usize> {
     let to_pt = recording.to_pt();
     let tolerance_value = expected.get("toleranceMs").cloned().unwrap_or(json!(50));
     let tolerance = f(&tolerance_value);
-    say!("timeline: times from the recording's {origin_name} (t={:.0}ms), tolerance {}ms", recording.origin, py::str(&tolerance_value));
+    say!(
+        "timeline: times from the recording's {origin_name} (t={:.0}ms), tolerance {}ms",
+        recording.origin,
+        py::str(&tolerance_value)
+    );
     let mut failed = 0;
     let recording_start = recording.frames[0].t - recording.origin;
     let recording_end = recording.frames[recording.frames.len() - 1].t - recording.origin;
@@ -375,7 +463,9 @@ pub fn check_timeline(args: &Args) -> Result<usize> {
             timeline_verdict(&case, &times, why, tolerance, recording_start)
         };
         if !absent && verdict == "MISSING" && f(&case["at"]) > recording_end {
-            detail += &format!("; the recording ends at {recording_end:.0}ms, before this case (next: record longer with --for)");
+            detail += &format!(
+                "; the recording ends at {recording_end:.0}ms, before this case (next: record longer with --for)"
+            );
         }
         if verdict != "ok" {
             failed += 1;
@@ -394,18 +484,31 @@ fn channel(color: &str, at: usize) -> f64 {
 }
 
 fn luminance(color: &str) -> f64 {
-    let linear: Vec<f64> = [1, 3, 5].iter().map(|&i| {
-        let c = channel(color, i) / 255.0;
-        if c <= 0.03928 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
-    }).collect();
+    let linear: Vec<f64> = [1, 3, 5]
+        .iter()
+        .map(|&i| {
+            let c = channel(color, i) / 255.0;
+            if c <= 0.03928 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
+        })
+        .collect();
     0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
 }
 
 /// A translucent color composited over an opaque background.
 fn over(color: &str, background: &str) -> String {
     let alpha = channel(color, 7) / 255.0;
-    let mixed: String = [1, 3, 5].iter()
-        .map(|&i| format!("{:02X}", (channel(color, i) * alpha + channel(background, i) * (1.0 - alpha)).round_ties_even() as u8))
+    let mixed: String = [1, 3, 5]
+        .iter()
+        .map(|&i| {
+            format!(
+                "{:02X}",
+                (channel(color, i) * alpha + channel(background, i) * (1.0 - alpha)).round_ties_even() as u8
+            )
+        })
         .collect();
     format!("#{mixed}FF")
 }
@@ -445,11 +548,12 @@ pub fn check_a11y(args: &Args, recording: &Recording) -> Result<usize> {
     let to_pt = recording.to_pt();
     let minimum = if recording.header["platform"] == "android" { 48.0 } else { 44.0 }; // pt / dp: Apple HIG and Material
     let mut problems: Vec<(String, String)> = Vec::new();
-    let set = |problems: &mut Vec<(String, String)>, key: String, line: String| {
-        match problems.iter_mut().find(|(k, _)| *k == key) {
-            Some(slot) => slot.1 = line,
-            None => problems.push((key, line)),
-        }
+    let set = |problems: &mut Vec<(String, String)>, key: String, line: String| match problems
+        .iter_mut()
+        .find(|(k, _)| *k == key)
+    {
+        Some(slot) => slot.1 = line,
+        None => problems.push((key, line)),
     };
     let last = recording.frames.last().unwrap();
     for element in last.elements() {
@@ -470,7 +574,10 @@ pub fn check_a11y(args: &Args, recording: &Recording) -> Result<usize> {
     for frame in &recording.frames {
         for node in frame.nodes() {
             let text = node.get("text").filter(|t| t.is_object()).cloned().unwrap_or(json!({}));
-            let key = node["owner"].as_str().filter(|o| !o.is_empty()).map(String::from)
+            let key = node["owner"]
+                .as_str()
+                .filter(|o| !o.is_empty())
+                .map(String::from)
                 .unwrap_or_else(|| format!("text at {}", py::str(&node["frame"])));
             let has_problem = problems.iter().any(|(k, _)| *k == key);
             if !truthy(text.get("color")) || (has_problem && !worst.contains_key(&key)) {
@@ -488,8 +595,15 @@ pub fn check_a11y(args: &Args, recording: &Recording) -> Result<usize> {
             if ratio < needed && ratio < *worst.get(&key).unwrap_or(&needed) {
                 worst.insert(key.clone(), ratio);
                 let estimated = if truthy(text.get("estimated")) { " (color read from pixels)" } else { "" };
-                set(&mut problems, key.clone(), format!("LOW CONTRAST {key}: {ratio:.1}:1 at t={:.0}ms, {color} on {background}, needs {}:1{estimated}",
-                                                        frame.t, if large { "3" } else { "4.5" }));
+                set(
+                    &mut problems,
+                    key.clone(),
+                    format!(
+                        "LOW CONTRAST {key}: {ratio:.1}:1 at t={:.0}ms, {color} on {background}, needs {}:1{estimated}",
+                        frame.t,
+                        if large { "3" } else { "4.5" }
+                    ),
+                );
             }
         }
     }
@@ -531,15 +645,26 @@ pub fn check_jank(args: &Args, recording: &Recording) -> Result<usize> {
     }
     intervals.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let usual = intervals[intervals.len() / 2];
-    let hitches: Vec<(f64, f64)> = times.windows(2).filter(|w| w[1] - w[0] > usual * JANK_FACTOR).map(|w| (w[0], w[1] - w[0])).collect();
+    let hitches: Vec<(f64, f64)> =
+        times.windows(2).filter(|w| w[1] - w[0] > usual * JANK_FACTOR).map(|w| (w[0], w[1] - w[0])).collect();
     if let Some(worst) = py::max_first(hitches.iter(), |h| h.1) {
         let listed: Vec<String> = hitches.iter().take(8).map(|(t, gap)| format!("{t:.0}ms+{gap:.0}")).collect();
-        say!("JANK {} hitches over {:.0}ms (usual frame {usual:.1}ms), worst {:.0}ms at t={:.0}ms: {}{}", hitches.len(),
-             times[times.len() - 1] - times[0], worst.1, worst.0, listed.join(", "), if hitches.len() > 8 { " ..." } else { "" });
+        say!(
+            "JANK {} hitches over {:.0}ms (usual frame {usual:.1}ms), worst {:.0}ms at t={:.0}ms: {}{}",
+            hitches.len(),
+            times[times.len() - 1] - times[0],
+            worst.1,
+            worst.0,
+            listed.join(", "),
+            if hitches.len() > 8 { " ..." } else { "" }
+        );
         if let Some(average) = recording.end.get("averageCaptureMs").filter(|v| !v.is_null()) {
             // Live takes end without the recorder's numbers.
-            say!("  capture cost per frame: average {} ms, slowest {} ms (the recorder's own share)", py::str(average),
-                 py::str(recording.end.get("slowestCaptureMs").unwrap_or(&Value::Null)));
+            say!(
+                "  capture cost per frame: average {} ms, slowest {} ms (the recorder's own share)",
+                py::str(average),
+                py::str(recording.end.get("slowestCaptureMs").unwrap_or(&Value::Null))
+            );
         }
     } else if !args.shared {
         say!("no jank: {} frames, usual frame {usual:.1}ms", times.len());
@@ -563,16 +688,21 @@ pub fn check_settle(args: &Args, recording: &Recording) -> Result<usize> {
     for key in element_keys(&recording.frames) {
         for (name, points) in numeric_tracks(&frames, &key) {
             let tail: Vec<&Value> = points.iter().filter(|(t, _)| f(t) >= window_start).map(|(_, v)| v).collect();
-            let steps: Vec<f64> = tail.windows(2).filter(|w| !py::equal(w[0], w[1])).map(|w| f(w[1]) - f(w[0])).collect();
+            let steps: Vec<f64> =
+                tail.windows(2).filter(|w| !py::equal(w[0], w[1])).map(|w| f(w[1]) - f(w[0])).collect();
             if steps.len() < 3 {
                 continue;
             }
             let turns = steps.windows(2).filter(|w| (w[0] > 0.0) != (w[1] > 0.0)).count();
             let values: Vec<f64> = tail.iter().map(|v| f(v)).collect();
-            let spread = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max) - values.iter().cloned().fold(f64::INFINITY, f64::min);
+            let spread = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max)
+                - values.iter().cloned().fold(f64::INFINITY, f64::min);
             let amplitude = spread * if ["x", "y", "w", "h", "border"].contains(&name) { to_pt } else { 1.0 };
             if turns >= 2 && amplitude <= JITTER_PT && ["x", "y", "w", "h"].contains(&name) {
-                say!("JITTER {key}: {name} shakes by {amplitude:.2}pt, {turns} turns in the last {}ms", SETTLE_WINDOW_MS);
+                say!(
+                    "JITTER {key}: {name} shakes by {amplitude:.2}pt, {turns} turns in the last {}ms",
+                    SETTLE_WINDOW_MS
+                );
             } else {
                 say!("NOT SETTLED {key}: {name} still changes in the last {}ms ({} changes, {} -> {}). A loop, or record longer to tell",
                      SETTLE_WINDOW_MS, steps.len(), py::str(tail[0]), py::str(tail[tail.len() - 1]));
@@ -608,7 +738,11 @@ pub fn baseline(args: &mut Args) -> Result<i32> {
 
 pub fn check_baseline(args: &Args) -> Result<usize> {
     let Some(against) = &args.against else {
-        fail!("check baseline needs --against <baseline name>", "missing_option", "ddp baseline save NAME, then --against NAME");
+        fail!(
+            "check baseline needs --against <baseline name>",
+            "missing_option",
+            "ddp baseline save NAME, then --against NAME"
+        );
     };
     let name = against.display().to_string();
     let stored = Path::new(BASELINE_DIR).join(format!("{name}.jsonl.gz"));
@@ -630,33 +764,52 @@ pub fn check_baseline(args: &Args) -> Result<usize> {
         for frame in &actual.frames {
             let t = frame.t - actual.origin;
             let other = frame_at(&expected.frames, t + expected.origin);
-            let found = state_differences(&comparable_state(&expected, other, &key), &comparable_state(&actual, frame, &key), &[]);
+            let found = state_differences(
+                &comparable_state(&expected, other, &key),
+                &comparable_state(&actual, frame, &key),
+                &[],
+            );
             if !found.is_empty() {
                 first = Some((t, found));
                 break;
             }
         }
         if let Some((t, found)) = &first {
-            say!("CHANGED {key} from t={t:.0}ms: {} (baseline vs now)", found.iter().take(3).cloned().collect::<Vec<_>>().join("; "));
+            say!(
+                "CHANGED {key} from t={t:.0}ms: {} (baseline vs now)",
+                found.iter().take(3).cloned().collect::<Vec<_>>().join("; ")
+            );
         }
         results.push((key, first));
     }
     let changed = results.iter().filter(|(_, first)| first.is_some()).count();
     say!("baseline {name}: {changed} of {} elements changed", results.len());
     if let Some(junit) = &args.junit {
-        let cases: Vec<(String, Option<String>)> = results.iter().map(|(key, first)| {
-            (key.clone(), first.as_ref().map(|(t, found)| format!("from t={t:.0}ms: {}", found.join("; "))))
-        }).collect();
+        let cases: Vec<(String, Option<String>)> = results
+            .iter()
+            .map(|(key, first)| {
+                (key.clone(), first.as_ref().map(|(t, found)| format!("from t={t:.0}ms: {}", found.join("; "))))
+            })
+            .collect();
         write_junit(junit, &format!("ddp baseline {name}"), &cases)?;
     }
     Ok(changed)
 }
 
 fn quote_attribute(text: &str) -> String {
-    let escaped = text.replace('&', "&amp;").replace('>', "&gt;").replace('<', "&lt;")
-        .replace('\n', "&#10;").replace('\r', "&#13;").replace('\t', "&#9;");
+    let escaped = text
+        .replace('&', "&amp;")
+        .replace('>', "&gt;")
+        .replace('<', "&lt;")
+        .replace('\n', "&#10;")
+        .replace('\r', "&#13;")
+        .replace('\t', "&#9;");
     if escaped.contains('"') {
-        if escaped.contains('\'') { format!("\"{}\"", escaped.replace('"', "&quot;")) } else { format!("'{escaped}'") }
+        if escaped.contains('\'') {
+            format!("\"{}\"", escaped.replace('"', "&quot;"))
+        } else {
+            format!("'{escaped}'")
+        }
     } else {
         format!("\"{escaped}\"")
     }
@@ -665,10 +818,15 @@ fn quote_attribute(text: &str) -> String {
 /// cases: (name, failure message or None).
 fn write_junit(path: &Path, suite: &str, cases: &[(String, Option<String>)]) -> Result<()> {
     let failures = cases.iter().filter(|(_, m)| m.is_some()).count();
-    let mut lines = vec![format!("<testsuite name={} tests=\"{}\" failures=\"{failures}\">", quote_attribute(suite), cases.len())];
+    let mut lines =
+        vec![format!("<testsuite name={} tests=\"{}\" failures=\"{failures}\">", quote_attribute(suite), cases.len())];
     for (name, message) in cases {
         lines.push(match message {
-            Some(message) => format!("  <testcase name={}><failure message={}/></testcase>", quote_attribute(name), quote_attribute(message)),
+            Some(message) => format!(
+                "  <testcase name={}><failure message={}/></testcase>",
+                quote_attribute(name),
+                quote_attribute(message)
+            ),
             None => format!("  <testcase name={}/>", quote_attribute(name)),
         });
     }
@@ -689,9 +847,16 @@ pub fn check_all(args: &Args) -> Result<usize> {
         }
     }
     let ran: Vec<&str> = RECORDING_CHECKS.iter().map(|(n, _)| *n).collect();
-    say!("check all over {} frames: {} (ran {})", recording.frames.len(),
-         if found.is_empty() { "no problems".to_string() } else { found.iter().map(|(n, c)| format!("{n} {c}")).collect::<Vec<_>>().join(", ") },
-         ran.join(", "));
+    say!(
+        "check all over {} frames: {} (ran {})",
+        recording.frames.len(),
+        if found.is_empty() {
+            "no problems".to_string()
+        } else {
+            found.iter().map(|(n, c)| format!("{n} {c}")).collect::<Vec<_>>().join(", ")
+        },
+        ran.join(", ")
+    );
     Ok(found.iter().map(|(_, c)| c).sum())
 }
 
@@ -705,10 +870,19 @@ pub fn comparable_state(recording: &Recording, frame: &Frame, key: &str) -> Map<
     let to_pt = recording.to_pt();
     let in_pt = |v: &Value| if px { py::fnum(py::round_f(f(v) * to_pt, 1)) } else { py::round(v, 1) };
     let frame_pt: Vec<Value> = state["frame"].as_array().unwrap().iter().map(in_pt).collect();
-    obj(vec![("present", json!(true)), ("frame", json!(frame_pt)), ("alpha", py::round(&element_alpha(frame, key), 2)),
-             ("fill", state["fill"].clone()), ("border", in_pt(&state["border"])),
-             ("borderColor", state["borderColor"].clone()), ("opacity", state["opacity"].clone()), ("draws", state["draws"].clone())])
-        .as_object().unwrap().clone()
+    obj(vec![
+        ("present", json!(true)),
+        ("frame", json!(frame_pt)),
+        ("alpha", py::round(&element_alpha(frame, key), 2)),
+        ("fill", state["fill"].clone()),
+        ("border", in_pt(&state["border"])),
+        ("borderColor", state["borderColor"].clone()),
+        ("opacity", state["opacity"].clone()),
+        ("draws", state["draws"].clone()),
+    ])
+    .as_object()
+    .unwrap()
+    .clone()
 }
 
 pub fn state_differences(a: &Map<String, Value>, b: &Map<String, Value>, ignored: &[String]) -> Vec<String> {
@@ -724,7 +898,9 @@ pub fn state_differences(a: &Map<String, Value>, b: &Map<String, Value>, ignored
         let tolerance = if field == "alpha" || field == "opacity" { PARITY_ALPHA } else { PARITY_PT };
         let differs = match (left, right) {
             (Value::Array(x), Value::Array(y)) => x.iter().zip(y).any(|(p, q)| (f(p) - f(q)).abs() > tolerance),
-            (Value::Number(_), Value::Number(_)) => (f(left) - f(right)).abs() > if field == "draws" { 0.0 } else { tolerance },
+            (Value::Number(_), Value::Number(_)) => {
+                (f(left) - f(right)).abs() > if field == "draws" { 0.0 } else { tolerance }
+            }
             _ => !py::equal(left, right),
         };
         if differs {
@@ -737,10 +913,16 @@ pub fn state_differences(a: &Map<String, Value>, b: &Map<String, Value>, ignored
 
 type RecordingCheck = fn(&Args, &Recording) -> Result<usize>;
 
-pub const RECORDING_CHECKS: [(&str, RecordingCheck); 5] = [("overlap", check_overlap), ("corners", check_corners),
-    ("jank", check_jank), ("settle", check_settle), ("a11y", check_a11y)];
+pub const RECORDING_CHECKS: [(&str, RecordingCheck); 5] = [
+    ("overlap", check_overlap),
+    ("corners", check_corners),
+    ("jank", check_jank),
+    ("settle", check_settle),
+    ("a11y", check_a11y),
+];
 
-pub const CHECK_NAMES: [&str; 9] = ["overlap", "corners", "jank", "settle", "a11y", "parity", "timeline", "baseline", "all"];
+pub const CHECK_NAMES: [&str; 9] =
+    ["overlap", "corners", "jank", "settle", "a11y", "parity", "timeline", "baseline", "all"];
 
 /// One check by name: how many problems it found.
 pub fn run_named(args: &Args) -> Result<usize> {
