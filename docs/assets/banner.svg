@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="360" viewBox="0 0 1280 360" role="img" aria-label="agent-ddp: see and check native iOS and Android UI from your coding agent, frame by frame">
+  <rect width="1280" height="360" rx="28" fill="#26231C"/>
+  <g font-family="ui-rounded, 'SF Pro Rounded', Nunito, 'Varela Round', system-ui, -apple-system, 'Segoe UI', sans-serif">
+    <text x="72" y="168" font-size="96" font-weight="800" fill="#F4F4F2" letter-spacing="-2">agent-ddp<tspan fill="#F5C22E">.</tspan></text>
+    <text x="74" y="222" font-size="28" font-weight="600" fill="#F4F4F2" fill-opacity="0.72">See and check native iOS and Android UI</text>
+    <text x="74" y="260" font-size="28" font-weight="600" fill="#F4F4F2" fill-opacity="0.72">from your coding agent, frame by frame.</text>
+  </g>
+  <g font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="18" fill="#F4F4F2" fill-opacity="0.5">
+    <text x="74" y="312">$ npm i -g agent-ddp</text>
+  </g>
+  <!-- Five frames of one button whose border grows, the way ddp reads an animation. -->
+  <g transform="translate(700 52)">
+    <g fill="none" stroke="#F4F4F2" stroke-opacity="0.18" stroke-width="2">
+      <rect x="0" y="0" width="88" height="160" rx="14"/>
+      <rect x="104" y="0" width="88" height="160" rx="14"/>
+      <rect x="208" y="0" width="88" height="160" rx="14"/>
+      <rect x="312" y="0" width="88" height="160" rx="14"/>
+      <rect x="416" y="0" width="88" height="160" rx="14"/>
+    </g>
+    <g fill="#F4F4F2" fill-opacity="0.9">
+      <rect x="16" y="64" width="56" height="28" rx="8"/>
+      <rect x="120" y="64" width="56" height="28" rx="8"/>
+      <rect x="224" y="64" width="56" height="28" rx="8"/>
+      <rect x="328" y="64" width="56" height="28" rx="8"/>
+      <rect x="432" y="64" width="56" height="28" rx="8"/>
+    </g>
+    <g fill="none" stroke="#F5C22E">
+      <rect x="15" y="63" width="58" height="30" rx="9" stroke-width="1"/>
+      <rect x="117" y="61" width="62" height="34" rx="10" stroke-width="2"/>
+      <rect x="219" y="59" width="66" height="38" rx="12" stroke-width="3.5"/>
+      <rect x="322" y="58" width="68" height="40" rx="13" stroke-width="5"/>
+      <rect x="425" y="57" width="70" height="42" rx="14" stroke-width="6"/>
+    </g>
+    <g font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="15" fill="#F4F4F2" fill-opacity="0.45" text-anchor="middle">
+      <text x="44" y="190">0ms</text>
+      <text x="148" y="190">16</text>
+      <text x="252" y="190">33</text>
+      <text x="356" y="190">50</text>
+      <text x="460" y="190">66</text>
+    </g>
+    <polyline points="44,264 148,256 252,240 356,228 460,222" fill="none" stroke="#F5C22E" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="460" cy="222" r="7" fill="#F5C22E"/>
+    <text x="0" y="269" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="15" fill="#F4F4F2" fill-opacity="0.45" text-anchor="end" transform="translate(-14 0)">border</text>
+  </g>
+</svg>

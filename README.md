@@ -1,8 +1,16 @@
-# agent-ddp
+<p align="center">
+  <img alt="agent-ddp: see and check native iOS and Android UI from your coding agent, frame by frame" src="https://raw.githubusercontent.com/bandada-labs/agent-ddp/main/docs/assets/banner.svg" width="100%">
+</p>
 
-[![npm version](https://img.shields.io/npm/v/agent-ddp.svg)](https://www.npmjs.com/package/agent-ddp)
-[![CI](https://github.com/bandada-labs/agent-ddp/actions/workflows/ci.yml/badge.svg)](https://github.com/bandada-labs/agent-ddp/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-black.svg)](LICENSE)
+<p align="center">
+  <a href="https://github.com/bandada-labs"><img alt="Bandada Labs" src="https://img.shields.io/badge/BANDADA-LABS-F5C22E.svg?style=for-the-badge&labelColor=26231C" height="28"></a>
+  <a href="https://www.npmjs.com/package/agent-ddp"><img alt="npm version: agent-ddp" src="https://img.shields.io/npm/v/agent-ddp.svg?style=for-the-badge&labelColor=26231C&color=F5C22E" height="28"></a>
+  <a href="https://github.com/bandada-labs/agent-ddp/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/bandada-labs/agent-ddp/ci.yml?branch=main&style=for-the-badge&labelColor=26231C&label=CI" height="28"></a>
+  <a href="https://github.com/bandada-labs/agent-ddp/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/github/license/bandada-labs/agent-ddp.svg?style=for-the-badge&labelColor=26231C&color=F4F4F2" height="28"></a>
+  <img alt="Platforms: iOS and Android" src="https://img.shields.io/badge/iOS%20%C2%B7%20Android-native-F4F4F2.svg?style=for-the-badge&labelColor=26231C" height="28">
+</p>
+
+# agent-ddp
 
 See and check native iOS and Android UI from a coding agent, frame by frame.
 
