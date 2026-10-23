@@ -192,7 +192,7 @@ internal object FrameCapture {
      * Dialog, tooltips) are windows of their own that the activity's view tree does not hold.
      * WindowManagerGlobal is hidden API; Debug builds may use it. Falls back to the activity window alone.
      */
-    private fun windowRoots(decor: View): List<View> = runCatching {
+    fun windowRoots(decor: View): List<View> = runCatching {
         val (instance, getNames, getRootView) = Hidden.windowManager ?: return listOf(decor)
         @Suppress("UNCHECKED_CAST")
         val names = getNames.invoke(instance) as Array<String>

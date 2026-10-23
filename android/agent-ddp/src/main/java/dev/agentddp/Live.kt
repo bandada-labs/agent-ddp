@@ -14,6 +14,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.unit.Dp
 import org.json.JSONObject
+import java.util.concurrent.ExecutionException
 import java.util.concurrent.FutureTask
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
@@ -113,8 +114,6 @@ private class LiveSession(private val socket: LocalSocket) {
         while (open) outbox.poll(1, TimeUnit.SECONDS)?.let(::writeRaw) ?: writeRaw("")
     }
 
-    private fun <T> onMain(block: () -> T): T = FutureTask(block).also(main::post).get(5, TimeUnit.SECONDS)
-
     private fun write(line: JSONObject) = writeRaw(line.toString())
 
     /** An empty line is a keep-alive: it finds out a closed client while nothing else is sent. */
@@ -184,3 +183,12 @@ private object LiveEval {
 
     private fun error(message: String) = JSONObject().put("type", "error").put("error", message)
 }
+
+/** Runs [block] on the main thread and waits for it, like a capture does. Called from socket threads. */
+internal fun <T> onMain(block: () -> T): T =
+    if (Looper.myLooper() == Looper.getMainLooper()) block()
+    else try {
+        FutureTask(block).also(Handler(Looper.getMainLooper())::post).get(5, TimeUnit.SECONDS)
+    } catch (wrapped: ExecutionException) {
+        throw wrapped.cause ?: wrapped
+    }

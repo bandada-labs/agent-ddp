@@ -1,6 +1,8 @@
 package dev.agentddp
 
 import android.app.Application
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.net.LocalServerSocket
 import org.json.JSONArray
 import org.json.JSONObject
@@ -59,7 +61,7 @@ internal class CdpConnection(
         val host = request.headers["host"] ?: "localhost"
         when {
             request.headers["upgrade"].equals("websocket", ignoreCase = true) -> upgrade(request)
-            request.path == "/json/version" -> json(Cdp.version(target).put("webSocketDebuggerUrl", "ws://$host/devtools/page/${target.id}"))
+            request.path == "/json/version" -> json(Cdp.version(target).put("webSocketDebuggerUrl", "ws://$host/devtools/browser/${target.id}"))
             request.path == "/json" || request.path == "/json/list" -> json(JSONArray().put(
                 JSONObject().put("id", target.id).put("type", "page").put("title", target.title).put("url", target.url)
                     .put("description", "Agent-DDP").put("webSocketDebuggerUrl", "ws://$host/devtools/page/${target.id}")
@@ -76,7 +78,7 @@ internal class CdpConnection(
         output.write(("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
             "Sec-WebSocket-Accept: ${WebSocket.acceptKey(key)}\r\n\r\n").toByteArray())
         output.flush()
-        val session = CdpSession(target) { message -> synchronized(output) { WebSocket.writeText(output, message) } }
+        val session = CdpSession(target, browserLevel = request.path.startsWith("/devtools/browser")) { message -> synchronized(output) { WebSocket.writeText(output, message) } }
         while (true) {
             val frame = runCatching { WebSocket.readFrame(input) }.getOrNull() ?: return
             when (frame.opcode) {
@@ -189,15 +191,43 @@ internal object WebSocket {
     private fun InputStream.readNumber(bytes: Int): Long = (0 until bytes).fold(0L) { number, _ -> (number shl 8) or readByte().toLong() }
 }
 
-/** Answers CDP messages for one client. The same error codes and messages as Chrome, so clients behave the same. */
-internal class CdpSession(private val target: CdpTarget, private val send: (String) -> Unit) {
-    private val methods: Map<String, (JSONObject) -> JSONObject> = mapOf(
+/**
+ * Answers CDP messages for one client. The same error codes and messages as Chrome, so clients behave the same.
+ * [browserLevel]: connected to `/devtools/browser`, as clients that drive several targets do. A page connection is the page.
+ */
+internal class CdpSession(
+    private val target: CdpTarget,
+    private val browserLevel: Boolean = false,
+    private val send: (String) -> Unit,
+) {
+    /** Flat sessions: the app is one page, so every session id reaches the same handlers and only goes back on answers. */
+    private val sessionIds = mutableSetOf<String>()
+
+    private val methods: Map<String, (JSONObject) -> JSONObject> = mapOf<String, (JSONObject) -> JSONObject>(
         "Browser.getVersion" to { _ -> Cdp.browserVersion(target) },
         "Target.getTargets" to { _ -> JSONObject().put("targetInfos", JSONArray().put(target.info())) },
         "Target.getTargetInfo" to { _ -> JSONObject().put("targetInfo", target.info()) },
         "Target.setDiscoverTargets" to { _ -> JSONObject() },
-        "Schema.getDomains" to { _ -> JSONObject().put("domains", JSONArray(Cdp.DOMAINS.map { JSONObject().put("name", it).put("version", "1.3") })) },
-    )
+        "Target.attachToTarget" to { _ -> JSONObject().put("sessionId", attach()) },
+        "Target.setAutoAttach" to { params ->
+            // Chrome's browser target auto-attaches its pages; a page has no child targets here.
+            if (browserLevel && params.optBoolean("autoAttach") && sessionIds.isEmpty()) attach()
+            JSONObject()
+        },
+        "Target.detachFromTarget" to { params -> sessionIds.remove(params.optString("sessionId")); JSONObject() },
+        "Schema.getDomains" to { _ -> JSONObject().put("domains", JSONArray(Cdp.DOMAINS.map { JSONObject().put("name", it).put("version", Cdp.PROTOCOL_VERSION) })) },
+        "Runtime.runIfWaitingForDebugger" to { _ -> JSONObject() },
+        "Accessibility.getFullAXTree" to { _ -> JSONObject().put("nodes", Cdp.axTree(target.title, onMain { FrameCapture.frame(0, 0.0) }.getJSONArray("elements"))) },
+        "Page.captureScreenshot" to { params -> Cdp.screenshot(params) },
+    ) + Cdp.TOGGLED_DOMAINS.flatMap { listOf("$it.enable", "$it.disable") }.associateWith { { _: JSONObject -> JSONObject() } }
+
+    private fun attach(): String {
+        val sessionId = java.util.UUID.randomUUID().toString().replace("-", "").uppercase()
+        sessionIds += sessionId
+        send(JSONObject().put("method", "Target.attachedToTarget").put("params", JSONObject().put("sessionId", sessionId)
+            .put("targetInfo", target.info().put("attached", true)).put("waitingForDebugger", false)).toString())
+        return sessionId
+    }
 
     fun receive(text: String) {
         val message = runCatching { JSONObject(text) }.getOrNull()
@@ -215,7 +245,9 @@ internal class CdpSession(private val target: CdpTarget, private val send: (Stri
 
 internal object Cdp {
     const val PROTOCOL_VERSION = "1.3"
-    val DOMAINS = listOf("Browser", "Schema", "Target")
+    val DOMAINS = listOf("Accessibility", "Browser", "DOM", "Log", "Network", "Page", "Runtime", "Schema", "Target")
+    /** Domains whose enable and disable only switch events on and off. */
+    val TOGGLED_DOMAINS = listOf("Accessibility", "DOM", "Log", "Network", "Page", "Runtime")
 
     private const val PRODUCT = "Agent-DDP/${FrameCapture.PROTOCOL}"
 
@@ -230,6 +262,62 @@ internal object Cdp {
         .put("userAgent", userAgent(target)).put("jsVersion", "")
 
     private fun userAgent(target: CdpTarget) = "Agent-DDP Android ${target.packageName}"
+
+    /**
+     * `Accessibility.getFullAXTree`: a root like Chrome's RootWebArea, then the elements in reading order.
+     * Ids are positions in this read, so they hold only until the screen changes.
+     */
+    fun axTree(title: String, elements: JSONArray): JSONArray {
+        val children = (0 until elements.length()).map { index ->
+            val element = elements.getJSONObject(index)
+            axNode(index + 2, element.optString("role", "generic"), element.optString("label", element.optString("id")))
+                .put("parentId", "1")
+        }
+        return JSONArray().put(axNode(1, "RootWebArea", title).put("childIds", JSONArray(children.map { it.getString("nodeId") })))
+            .apply { children.forEach(::put) }
+    }
+
+    private fun axNode(id: Int, role: String, name: String) = JSONObject().put("nodeId", id.toString())
+        .put("backendDOMNodeId", id).put("ignored", false).put("childIds", JSONArray())
+        .put("role", JSONObject().put("type", "role").put("value", role))
+        .put("name", JSONObject().put("type", "computedString").put("value", name))
+
+    /**
+     * `Page.captureScreenshot` in device pixels, like Chrome; `clip` is in dp, Android's CSS pixel. Draws every app
+     * window like a frame capture does, so dialogs and menus show. SurfaceView and TextureView content does not.
+     */
+    fun screenshot(params: JSONObject): JSONObject {
+        val format = params.optString("format", "png")
+        val compress = when (format) {
+            "png" -> Bitmap.CompressFormat.PNG
+            "jpeg" -> Bitmap.CompressFormat.JPEG
+            else -> throw IllegalArgumentException("Unsupported image format: $format")
+        }
+        val bitmap = onMain {
+            val decor = FrameRecorder.resumedActivity?.window?.decorView ?: throw IllegalStateException("No window to capture")
+            val density = decor.resources.displayMetrics.density
+            val clip = params.optJSONObject("clip")
+            val scale = clip?.optDouble("scale", 1.0)?.toFloat() ?: 1f
+            val left = (clip?.optDouble("x") ?: 0.0).toFloat() * density
+            val top = (clip?.optDouble("y") ?: 0.0).toFloat() * density
+            val width = clip?.let { it.optDouble("width").toFloat() * density } ?: decor.width.toFloat()
+            val height = clip?.let { it.optDouble("height").toFloat() * density } ?: decor.height.toFloat()
+            val bitmap = Bitmap.createBitmap((width * scale).toInt().coerceAtLeast(1), (height * scale).toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bitmap).apply { scale(scale, scale); translate(-left, -top) }
+            val origin = IntArray(2).also(decor::getLocationOnScreen)
+            FrameCapture.windowRoots(decor).forEach { root ->
+                val onScreen = IntArray(2).also(root::getLocationOnScreen)
+                canvas.save()
+                canvas.translate((onScreen[0] - origin[0]).toFloat(), (onScreen[1] - origin[1]).toFloat())
+                root.draw(canvas)
+                canvas.restore()
+            }
+            bitmap
+        }
+        val bytes = ByteArrayOutputStream().also { bitmap.compress(compress, params.optInt("quality", 80), it) }.toByteArray()
+        bitmap.recycle()
+        return JSONObject().put("data", Base64.getEncoder().encodeToString(bytes))
+    }
 
     /** Like Chrome: no Origin (a tool) or DevTools itself. A web page always sends its own origin. */
     fun originAllowed(origin: String?) = origin == null || origin.startsWith("devtools://") || origin.startsWith("chrome-devtools://")

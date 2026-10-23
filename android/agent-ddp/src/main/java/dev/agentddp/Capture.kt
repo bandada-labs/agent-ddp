@@ -9,7 +9,13 @@ import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.view.View
 import android.view.ViewGroup
+import android.widget.Button
+import android.widget.CompoundButton
+import android.widget.EditText
 import android.widget.ImageView
+import android.widget.RadioButton
+import android.widget.SeekBar
+import android.widget.Switch
 import android.widget.TextView
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -24,6 +30,7 @@ import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.InspectableValue
 import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.platform.isDebugInspectorInfoEnabled
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -131,8 +138,43 @@ internal class Capture(private val density: Float) {
             id?.let { put("id", it) }
             label?.let { put("label", it) }
             if (view.isClickable && view.hasOnClickListeners()) put("tap", true)
+            put("role", viewRole(view))
         })
         return elements.length() - 1
+    }
+
+    /** The ARIA role a browser would give it, so agents read the same words on both platforms. Subclasses first. */
+    private fun viewRole(view: View) = when {
+        view is EditText -> "textbox"
+        view is Switch -> "switch"
+        view is RadioButton -> "radio"
+        view is CompoundButton -> "checkbox"
+        view is SeekBar -> "slider"
+        view is Button || (view.isClickable && view.hasOnClickListeners()) -> "button"
+        view is ImageView -> "image"
+        view is TextView -> "StaticText"
+        else -> "generic"
+    }
+
+    private fun composeRole(node: SemanticsNode): String {
+        val config = node.config
+        when (config.getOrNull(SemanticsProperties.Role)) {
+            Role.Button -> return "button"
+            Role.Checkbox -> return "checkbox"
+            Role.Switch -> return "switch"
+            Role.RadioButton -> return "radio"
+            Role.Tab -> return "tab"
+            Role.Image -> return "image"
+            Role.DropdownList -> return "combobox"
+        }
+        return when {
+            config.getOrNull(SemanticsActions.SetText) != null -> "textbox"
+            config.getOrNull(SemanticsActions.SetProgress) != null -> "slider"
+            config.getOrNull(SemanticsActions.OnClick) != null -> "button"
+            config.getOrNull(SemanticsProperties.Heading) != null -> "heading"
+            config.getOrNull(SemanticsProperties.Text) != null -> "StaticText"
+            else -> "generic"
+        }
     }
 
     private fun collectSemantics(node: SemanticsNode, into: MutableMap<Int, SemanticsNode>) {
@@ -183,6 +225,7 @@ internal class Capture(private val density: Float) {
             elements.put(JSONObject().put("frame", rectArray(frame)).apply {
                 tag?.let { put("id", it) }
                 label?.let { put("label", it) }
+                put("role", composeRole(node))
                 if (node.config.getOrNull(SemanticsActions.OnClick) != null) {
                     put("tap", true)
                     // Material pads small controls to 48 dp with an outer layout modifier: that is the touch area.

@@ -56,6 +56,40 @@ final class CdpTests: XCTestCase {
         XCTAssertFalse(Cdp.originAllowed("http://localhost:3000"))
     }
 
+    func testAttachingAnnouncesTheSessionBeforeAnswering() {
+        let sent = messages(after: ["{\"id\":3,\"method\":\"Target.attachToTarget\",\"params\":{\"targetId\":\"app\",\"flatten\":true}}"])
+        XCTAssertEqual(sent.first?["method"] as? String, "Target.attachedToTarget")
+        let announced = (sent.first?["params"] as? [String: Any])?["sessionId"] as? String
+        XCTAssertNotNil(announced)
+        XCTAssertEqual((sent.last?["result"] as? [String: Any])?["sessionId"] as? String, announced)
+    }
+
+    func testOnlyTheBrowserTargetAutoAttachesThePage() {
+        let autoAttach = "{\"id\":1,\"method\":\"Target.setAutoAttach\",\"params\":{\"autoAttach\":true,\"flatten\":true}}"
+        XCTAssertEqual(messages(after: [autoAttach], browserLevel: true).count, 2)
+        XCTAssertEqual(messages(after: [autoAttach], browserLevel: false).count, 1)
+    }
+
+    func testTheAccessibilityTreeHangsTheElementsFromOneRoot() {
+        let nodes = Cdp.axTree(title: "Example", elements: [["label": "Tap me", "role": "button"], ["id": "flashBox"]])
+        XCTAssertEqual(nodes.count, 3)
+        XCTAssertEqual(nodes[0]["childIds"] as? [String], ["2", "3"])
+        XCTAssertEqual((nodes[1]["role"] as? [String: Any])?["value"] as? String, "button")
+        XCTAssertEqual((nodes[1]["name"] as? [String: Any])?["value"] as? String, "Tap me")
+        XCTAssertEqual((nodes[2]["name"] as? [String: Any])?["value"] as? String, "flashBox")
+        XCTAssertEqual(nodes[2]["parentId"] as? String, "1")
+    }
+
+    private func messages(after input: [String], browserLevel: Bool = true) -> [[String: Any]] {
+        var sent: [[String: Any]] = []
+        let session = CdpSession(target: CdpTarget(bundleIdentifier: "com.example", title: "Example"),
+                                 browserLevel: browserLevel) {
+            sent.append((try? JSONSerialization.jsonObject(with: Data($0.utf8))) as? [String: Any] ?? [:])
+        }
+        input.forEach(session.receive)
+        return sent
+    }
+
     private func answer(to message: String) -> [String: Any] {
         var text = ""
         CdpSession(target: CdpTarget(bundleIdentifier: "com.example", title: "Example")) { text = $0 }.receive(message)

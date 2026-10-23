@@ -19,7 +19,19 @@ Discovery and messages are the same as Chrome's: `GET /json/version` and `GET /j
 
 The app is one target with id `app`, type `page`, and the URL `android-app://<package>` or `ios-app://<bundle id>`.
 
-Methods today: `Browser.getVersion`, `Target.getTargets`, `Target.getTargetInfo`, `Target.setDiscoverTargets`, `Schema.getDomains`. The rest of the domains come in the order in [STATUS.md](STATUS.md).
+`/json/version` points at `/devtools/browser/app`, the list at `/devtools/page/app`. Both reach the same page. The difference is the one Chrome has: on the browser connection `Target.setAutoAttach` attaches the page, on the page connection it attaches nothing.
+
+Coordinates are CSS pixels the way the platform's browser counts them: points on iOS, dp on Android. Screenshots are in device pixels.
+
+Methods today:
+
+- `Browser.getVersion`, `Schema.getDomains`.
+- `Target.getTargets`, `getTargetInfo`, `setDiscoverTargets`, `attachToTarget`, `detachFromTarget`, `setAutoAttach`. Sessions are flat (`flatten: true`): a message with a `sessionId` gets it back on its answer. Attaching sends `Target.attachedToTarget` first, as Chrome does.
+- `enable` and `disable` of Accessibility, DOM, Log, Network, Page and Runtime. `Runtime.runIfWaitingForDebugger`.
+- `Accessibility.getFullAXTree`: a `RootWebArea` node named after the app, with one child per element. `role` is the element's role, `name` its label or else its id. Node ids are positions in that read and hold only until the screen changes.
+- `Page.captureScreenshot`: `format` png or jpeg, `quality`, `clip`. Every window of the app, like a frame capture. On Android, SurfaceView and TextureView content is not drawn.
+
+The rest of the domains come in the order in [STATUS.md](STATUS.md).
 
 ## Transport
 

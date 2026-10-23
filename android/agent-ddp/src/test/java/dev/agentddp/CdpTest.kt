@@ -1,5 +1,6 @@
 package dev.agentddp
 
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -52,6 +53,39 @@ class CdpTest {
         assertTrue(Cdp.originAllowed(null))
         assertTrue(Cdp.originAllowed("devtools://devtools"))
         assertFalse(Cdp.originAllowed("http://localhost:3000"))
+    }
+
+    @Test
+    fun attachingAnnouncesTheSessionBeforeAnswering() {
+        val sent = messagesAfter("{\"id\":3,\"method\":\"Target.attachToTarget\",\"params\":{\"targetId\":\"app\",\"flatten\":true}}")
+        assertEquals("Target.attachedToTarget", sent.first().getString("method"))
+        val announced = sent.first().getJSONObject("params").getString("sessionId")
+        assertEquals(announced, sent.last().getJSONObject("result").getString("sessionId"))
+    }
+
+    @Test
+    fun onlyTheBrowserTargetAutoAttachesThePage() {
+        val autoAttach = "{\"id\":1,\"method\":\"Target.setAutoAttach\",\"params\":{\"autoAttach\":true,\"flatten\":true}}"
+        assertEquals(2, messagesAfter(autoAttach, browserLevel = true).size)
+        assertEquals(1, messagesAfter(autoAttach, browserLevel = false).size)
+    }
+
+    @Test
+    fun theAccessibilityTreeHangsTheElementsFromOneRoot() {
+        val elements = JSONArray().put(JSONObject().put("label", "Tap me").put("role", "button")).put(JSONObject().put("id", "flashBox"))
+        val nodes = Cdp.axTree("Example", elements)
+        assertEquals(3, nodes.length())
+        assertEquals("[\"2\",\"3\"]", nodes.getJSONObject(0).getJSONArray("childIds").toString())
+        assertEquals("button", nodes.getJSONObject(1).getJSONObject("role").getString("value"))
+        assertEquals("Tap me", nodes.getJSONObject(1).getJSONObject("name").getString("value"))
+        assertEquals("flashBox", nodes.getJSONObject(2).getJSONObject("name").getString("value"))
+        assertEquals("1", nodes.getJSONObject(2).getString("parentId"))
+    }
+
+    private fun messagesAfter(message: String, browserLevel: Boolean = true): List<JSONObject> {
+        val sent = mutableListOf<JSONObject>()
+        CdpSession(CdpTarget("com.example", "Example"), browserLevel) { sent += JSONObject(it) }.receive(message)
+        return sent
     }
 
     private fun answerTo(message: String): JSONObject {

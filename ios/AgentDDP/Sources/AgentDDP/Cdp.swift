@@ -86,7 +86,7 @@ private final class CdpConnection {
         let socketURL = "ws://\(host)/devtools/page/\(target.id)"
         switch request.path {
         case "/json/version":
-            json(Cdp.version(target).merging(["webSocketDebuggerUrl": socketURL]) { $1 })
+            json(Cdp.version(target).merging(["webSocketDebuggerUrl": "ws://\(host)/devtools/browser/\(target.id)"]) { $1 })
         case "/json", "/json/list":
             json([["id": target.id, "type": "page", "title": target.title, "url": target.url,
                    "description": "Agent-DDP", "webSocketDebuggerUrl": socketURL]])
@@ -106,7 +106,7 @@ private final class CdpConnection {
         let head = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
             "Sec-WebSocket-Accept: \(WebSocket.acceptKey(key))\r\n\r\n"
         connection.send(content: Data(head.utf8), completion: .contentProcessed { _ in })
-        session = CdpSession(target: target) { [connection] message in
+        session = CdpSession(target: target, browserLevel: request.path.hasPrefix("/devtools/browser")) { [connection] message in
             connection.send(content: WebSocket.frame(opcode: WebSocket.text, payload: Data(message.utf8)),
                             completion: .contentProcessed { _ in })
         }
@@ -235,18 +235,53 @@ enum WebSocket {
 /// Answers CDP messages for one client. The same error codes and messages as Chrome, so clients behave the same.
 final class CdpSession {
     private let target: CdpTarget
+    /// Connected to `/devtools/browser`, as clients that drive several targets do. A page connection is the page.
+    private let browserLevel: Bool
     private let send: (String) -> Void
-    private lazy var methods: [String: ([String: Any]) -> [String: Any]] = [
+    /// Flat sessions: the app is one page, so every session id reaches the same handlers and only goes back on answers.
+    private var sessionIds = Set<String>()
+    private lazy var methods: [String: ([String: Any]) throws -> [String: Any]] = [
         "Browser.getVersion": { [target] _ in Cdp.browserVersion(target) },
         "Target.getTargets": { [target] _ in ["targetInfos": [target.info()]] },
         "Target.getTargetInfo": { [target] _ in ["targetInfo": target.info()] },
         "Target.setDiscoverTargets": { _ in [:] },
+        "Target.attachToTarget": { [unowned self] _ in ["sessionId": attach()] },
+        "Target.setAutoAttach": { [unowned self] params in
+            // Chrome's browser target auto-attaches its pages; a page has no child targets here.
+            if browserLevel, params["autoAttach"] as? Bool == true, sessionIds.isEmpty { attach() }
+            return [:]
+        },
+        "Target.detachFromTarget": { [unowned self] params in
+            sessionIds.remove(params["sessionId"] as? String ?? "")
+            return [:]
+        },
         "Schema.getDomains": { _ in ["domains": Cdp.domains.map { ["name": $0, "version": Cdp.protocolVersion] }] },
-    ]
+        "Runtime.runIfWaitingForDebugger": { _ in [:] },
+        "Accessibility.getFullAXTree": { [target] _ in
+            ["nodes": Cdp.axTree(title: target.title, elements: onMain {
+                FrameCapture.visibleWindows().flatMap(AccessibilityReader.elements(in:))
+            })]
+        },
+        "Page.captureScreenshot": { params in try Cdp.screenshot(params) },
+    ].merging(Cdp.toggledDomains.flatMap { domain -> [(String, ([String: Any]) throws -> [String: Any])] in
+        [("\(domain).enable", { _ in [:] }), ("\(domain).disable", { _ in [:] })]
+    }) { $1 }
 
-    init(target: CdpTarget, send: @escaping (String) -> Void) {
+    init(target: CdpTarget, browserLevel: Bool = false, send: @escaping (String) -> Void) {
         self.target = target
+        self.browserLevel = browserLevel
         self.send = send
+    }
+
+    @discardableResult
+    private func attach() -> String {
+        let sessionId = UUID().uuidString.replacingOccurrences(of: "-", with: "")
+        sessionIds.insert(sessionId)
+        var info = target.info()
+        info["attached"] = true
+        reply(["method": "Target.attachedToTarget",
+               "params": ["sessionId": sessionId, "targetInfo": info, "waitingForDebugger": false]])
+        return sessionId
     }
 
     func receive(_ text: String) {
@@ -260,7 +295,12 @@ final class CdpSession {
         guard let handler = methods[method] else {
             return reply(Cdp.error(id: id, code: -32601, message: "'\(method)' wasn't found"))
         }
-        var answer: [String: Any] = ["id": id, "result": handler(message["params"] as? [String: Any] ?? [:])]
+        var answer: [String: Any]
+        do {
+            answer = ["id": id, "result": try handler(message["params"] as? [String: Any] ?? [:])]
+        } catch {
+            answer = Cdp.error(id: id, code: -32000, message: "\(error)")
+        }
         if let sessionId = message["sessionId"] { answer["sessionId"] = sessionId }
         reply(answer)
     }
@@ -271,9 +311,57 @@ final class CdpSession {
     }
 }
 
+/// The CDP queue waits for UIKit; tests call in from the main thread already.
+func onMain<T>(_ work: () -> T) -> T { Thread.isMainThread ? work() : DispatchQueue.main.sync(execute: work) }
+
 enum Cdp {
     static let protocolVersion = "1.3"
-    static let domains = ["Browser", "Schema", "Target"]
+    static let domains = ["Accessibility", "Browser", "DOM", "Log", "Network", "Page", "Runtime", "Schema", "Target"]
+    /// Domains whose enable and disable only switch events on and off.
+    static let toggledDomains = ["Accessibility", "DOM", "Log", "Network", "Page", "Runtime"]
+
+    struct Failure: Error, CustomStringConvertible {
+        let description: String
+    }
+
+    /// `Accessibility.getFullAXTree`: a root like Chrome's RootWebArea, then the elements in reading order.
+    /// Ids are positions in this read, so they hold only until the screen changes.
+    static func axTree(title: String, elements: [[String: Any]]) -> [[String: Any]] {
+        let children = elements.enumerated().map { index, element -> [String: Any] in
+            ["nodeId": String(index + 2), "parentId": "1", "backendDOMNodeId": index + 2, "ignored": false,
+             "role": ["type": "role", "value": element["role"] as? String ?? "generic"],
+             "name": ["type": "computedString", "value": element["label"] as? String ?? element["id"] as? String ?? ""],
+             "childIds": [String]()]
+        }
+        let root: [String: Any] = ["nodeId": "1", "backendDOMNodeId": 1, "ignored": false,
+                                   "role": ["type": "role", "value": "RootWebArea"],
+                                   "name": ["type": "computedString", "value": title],
+                                   "childIds": children.map { $0["nodeId"]! }]
+        return [root] + children
+    }
+
+    /// `Page.captureScreenshot` in device pixels, like Chrome. `clip` is in points.
+    static func screenshot(_ params: [String: Any]) throws -> [String: Any] {
+        let format = params["format"] as? String ?? "png"
+        guard ["png", "jpeg"].contains(format) else { throw Failure(description: "Unsupported image format: \(format)") }
+        let quality = (params["quality"] as? Double ?? 80) / 100
+        let data: Data? = onMain {
+            let windows = FrameCapture.visibleWindows()
+            guard let screen = windows.first?.screen else { return nil }
+            let clip = (params["clip"] as? [String: Any]).map {
+                CGRect(x: $0["x"] as? Double ?? 0, y: $0["y"] as? Double ?? 0,
+                       width: $0["width"] as? Double ?? 0, height: $0["height"] as? Double ?? 0)
+            } ?? screen.bounds
+            let renderFormat = UIGraphicsImageRendererFormat()
+            renderFormat.scale = screen.scale * ((params["clip"] as? [String: Any])?["scale"] as? Double ?? 1)
+            let image = UIGraphicsImageRenderer(bounds: clip, format: renderFormat).image { _ in
+                windows.forEach { $0.drawHierarchy(in: $0.frame, afterScreenUpdates: false) }
+            }
+            return format == "png" ? image.pngData() : image.jpegData(compressionQuality: quality)
+        }
+        guard let data else { throw Failure(description: "No window to capture") }
+        return ["data": data.base64EncodedString()]
+    }
     private static let product = "Agent-DDP/\(FrameCapture.protocolVersion)"
 
     /// `/json/version`.

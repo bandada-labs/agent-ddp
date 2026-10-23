@@ -21,6 +21,7 @@ enum AccessibilityReader {
             if let id = identifier(of: object) { element["id"] = id }
             if let label = object.accessibilityLabel, !label.isEmpty { element["label"] = label }
             if !object.accessibilityTraits.intersection([.button, .link, .adjustable]).isEmpty { element["tap"] = true }
+            element["role"] = role(of: object)
             found.append(element)
         }
         return found
@@ -35,6 +36,24 @@ enum AccessibilityReader {
             }
         }
         return match
+    }
+
+    // Not public API: the trait XCTest reads to call an element a text field (SwiftUI TextField has no class to check).
+    private static let textEntryTrait = UIAccessibilityTraits(rawValue: 1 << 18)
+
+    /// The ARIA role a browser would give it, so agents read the same words on both platforms.
+    static func role(of object: NSObject) -> String {
+        let traits = object.accessibilityTraits
+        if object is UITextField || object is UITextView || traits.contains(textEntryTrait) { return "textbox" }
+        if traits.contains(.searchField) { return "searchbox" }
+        if #available(iOS 17, *), traits.contains(.toggleButton) { return "switch" }
+        if traits.contains(.adjustable) { return "slider" }
+        if traits.contains(.link) { return "link" }
+        if traits.contains(.button) { return "button" }
+        if traits.contains(.header) { return "heading" }
+        if traits.contains(.image) { return "image" }
+        if traits.contains(.staticText) { return "StaticText" }
+        return "generic"
     }
 
     private static func identifier(of object: NSObject) -> String? {
