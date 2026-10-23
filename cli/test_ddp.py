@@ -94,7 +94,7 @@ with tempfile.TemporaryDirectory() as directory:
     recording.write_text(corner_recording(clip_round=True))
     assert "nothing outside rounded corners" in run("check", "corners", recording=recording)
 
-# Timeline: a shine shows at 200..300ms after the tap (the first change, at t=100), at half alpha.
+# Timeline: a glow shows at 200..300ms after the tap (the first change, at t=100), at half alpha.
 def timeline_recording():
     lines = [{"type": "header", "platform": "ios", "unit": "pt", "scale": 3, "frames": 30}]
     for i in range(30):
@@ -103,7 +103,7 @@ def timeline_recording():
         elements = [{"id": "button", "frame": [0, 0, 50, 50]}]
         if 300 <= t <= 400:
             nodes.append({"z": 1, "kind": "layer", "fill": "#FFFFFF80", "frame": [100, 0, 50, 50]})
-            elements.append({"id": "shine", "frame": [100, 0, 50, 50]})
+            elements.append({"id": "glow", "frame": [100, 0, 50, 50]})
         lines.append({"type": "frame", "i": i, "t": t, "nodes": nodes, "elements": elements})
     return "\n".join(json.dumps(line) for line in lines)
 
@@ -118,34 +118,34 @@ def timeline(cases, recording):
 with tempfile.TemporaryDirectory() as directory:
     recording = Path(directory, "timeline.jsonl")
     recording.write_text(timeline_recording())
-    on_time = timeline([{"id": "shine", "at": 200, "until": 300, "minAlpha": 0.4, "frame": [100, 0, 50, 50]}], recording)
-    assert on_time.returncode == 0 and "ok shine" in on_time.stdout, on_time.stdout
-    late = timeline([{"id": "shine", "at": 100}], recording)
-    assert late.returncode == 1 and "LATE shine" in late.stdout and "100ms late" in late.stdout, late.stdout
+    on_time = timeline([{"id": "glow", "at": 200, "until": 300, "minAlpha": 0.4, "frame": [100, 0, 50, 50]}], recording)
+    assert on_time.returncode == 0 and "ok glow" in on_time.stdout, on_time.stdout
+    late = timeline([{"id": "glow", "at": 100}], recording)
+    assert late.returncode == 1 and "LATE glow" in late.stdout and "100ms late" in late.stdout, late.stdout
     # The button is there before the first change (t=100); expected from the action on, it is on time.
     present = timeline([{"id": "button", "at": 0}], recording)
     assert present.returncode == 0 and "ok button" in present.stdout, present.stdout
-    # Absent: the shine (label-less, by id) and a text match must not be drawn in a window.
-    shown = timeline([{"id": "shine", "absent": True, "at": 0, "until": 400}], recording)
-    assert shown.returncode == 1 and "SHOWN shine (absent 0..400ms): 6 frames, 200..300ms" in shown.stdout, shown.stdout
-    clear = timeline([{"id": "shine", "absent": True, "at": 350}, {"text": "nothing like this", "absent": True, "at": 0}], recording)
-    assert clear.returncode == 0 and "ok shine (absent from 350ms): not drawn" in clear.stdout, clear.stdout
-    faint = timeline([{"id": "shine", "at": 200, "minAlpha": 0.9}, {"id": "glow", "at": 0}], recording)
-    assert "MISSING shine" in faint.stdout and "MISSING glow" in faint.stdout, faint.stdout
+    # Absent: the glow (label-less, by id) and a text match must not be drawn in a window.
+    shown = timeline([{"id": "glow", "absent": True, "at": 0, "until": 400}], recording)
+    assert shown.returncode == 1 and "SHOWN glow (absent 0..400ms): 6 frames, 200..300ms" in shown.stdout, shown.stdout
+    clear = timeline([{"id": "glow", "absent": True, "at": 350}, {"text": "nothing like this", "absent": True, "at": 0}], recording)
+    assert clear.returncode == 0 and "ok glow (absent from 350ms): not drawn" in clear.stdout, clear.stdout
+    faint = timeline([{"id": "glow", "at": 200, "minAlpha": 0.9}, {"id": "halo", "at": 0}], recording)
+    assert "MISSING glow" in faint.stdout and "MISSING halo" in faint.stdout, faint.stdout
 
 # Queries over the timeline recording above: tree, get, find, diff.
 with tempfile.TemporaryDirectory() as directory:
     recording = Path(directory, "timeline.jsonl")
     recording.write_text(timeline_recording())
     tree = run("tree", "--at", "0.35s", recording=recording)
-    assert "t=340ms" in tree and "shine [100, 0, 50, 50]" in tree and "fill #FFFFFF80" in tree, tree
-    got = run("get", "shine", "--from", "280ms", "--to", "420", recording=recording)
+    assert "t=340ms" in tree and "glow [100, 0, 50, 50]" in tree and "fill #FFFFFF80" in tree, tree
+    got = run("get", "glow", "--from", "280ms", "--to", "420", recording=recording)
     assert got.count("\n") == 4 and "absent" in got and "0.50" in got, got
     found = run("find", "--where", "fill~ffffff and alpha<0.6", "--between", "0", "1s", recording=recording)
     assert found.startswith("6 matches in 6 frames, t=300..400ms"), found
     other = Path(directory, "other.jsonl")
     other.write_text(timeline_recording().replace("#FFFFFF80", "#FFFFFFFF"))
-    diffed = subprocess.run([sys.executable, str(CLI), "diff", str(recording), str(other), "--id", "shine",
+    diffed = subprocess.run([sys.executable, str(CLI), "diff", str(recording), str(other), "--id", "glow",
                              "--ignore", "frame"], capture_output=True, text=True, check=True).stdout
     assert "alpha 0.5 vs 1.0; fill #FFFFFF80 vs #FFFFFFFF" in diffed, diffed
 

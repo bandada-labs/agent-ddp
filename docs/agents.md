@@ -52,8 +52,8 @@ Without a session, `record` asks the app by Darwin notification (iOS) or broadca
 
   ```json
   {"origin": "first-change", "toleranceMs": 50, "expect": [
-    {"id": "finalShine", "at": 2000, "until": 2400, "minAlpha": 0.5, "frame": [x, y, w, h], "tolerancePt": 4},
-    {"text": "para qué te gustaría", "absent": true, "at": 0, "until": 800}
+    {"id": "finalGlow", "at": 2000, "until": 2400, "minAlpha": 0.5, "frame": [x, y, w, h], "tolerancePt": 4},
+    {"text": "welcome back", "absent": true, "at": 0, "until": 800}
   ]}
   ```
 

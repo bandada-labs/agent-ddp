@@ -1022,7 +1022,7 @@ def main():
     net_parser = commands.add_parser("net", help="live: network requests the app reported (redacted)")
     net_parser.add_argument("action", choices=["list", "get", "watch"])
     net_parser.add_argument("request_id", nargs="?", help="get: request id from `ddp net list`")
-    net_parser.add_argument("--until", help="watch: stop when true, e.g. 'status>=400' or 'url~/build'")
+    net_parser.add_argument("--until", help="watch: stop when true, e.g. 'status>=400' or 'url~/api'")
     net_parser.set_defaults(handler=net)
 
     time_parser = commands.add_parser("time", help="live: pause, step, slow down or seek the app's animations")
