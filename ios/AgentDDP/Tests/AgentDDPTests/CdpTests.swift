@@ -103,6 +103,13 @@ final class CdpTests: XCTestCase {
         XCTAssertEqual(dom.document(depth: -1).description.contains("BUTTON"), true)
     }
 
+    func testChildrenForRequestChildNodes() throws {
+        let dom = Dom(title: "Example", elements: [["role": "button"], ["role": "StaticText"]])
+        XCTAssertEqual(try dom.children(of: Dom.htmlId, depth: 1).map { $0["nodeName"] as? String }, ["BODY"])
+        XCTAssertEqual(try dom.children(of: Dom.bodyId, depth: 1).map { $0["nodeName"] as? String }, ["BUTTON", "TEXT"])
+        XCTAssertThrowsError(try dom.children(of: 99, depth: 1))
+    }
+
     func testTheBoxModelIsTheFrame() throws {
         let model = try Dom(title: "Example", elements: [["frame": [10.0, 20.0, 30.0, 40.0]]]).boxModel(4)
         XCTAssertEqual(model["content"] as? [Double], [10, 20, 40, 20, 40, 60, 10, 60])

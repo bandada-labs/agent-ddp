@@ -108,6 +108,15 @@ class CdpTest {
     }
 
     @Test
+    fun childrenForRequestChildNodes() {
+        val dom = Dom("Example", JSONArray().put(JSONObject().put("role", "button")).put(JSONObject().put("role", "StaticText")))
+        val names = { array: JSONArray -> (0 until array.length()).map { array.getJSONObject(it).getString("nodeName") } }
+        assertEquals(listOf("BODY"), names(dom.children(Dom.HTML_ID, 1)))
+        assertEquals(listOf("BUTTON", "TEXT"), names(dom.children(Dom.BODY_ID, 1)))
+        assertTrue(runCatching { dom.children(99, 1) }.isFailure)
+    }
+
+    @Test
     fun theBoxModelIsTheFrameInDp() {
         val dom = Dom("Example", JSONArray().put(JSONObject().put("frame", JSONArray(listOf(20, 40, 60, 80)))), density = 2f)
         assertEquals("[10,20,40,20,40,60,10,60]", dom.boxModel(4).getJSONArray("content").toString())

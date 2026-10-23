@@ -258,7 +258,12 @@ internal class CdpSession(
                 ?: throw IllegalStateException("No post data available for the request"))
         },
         "DOM.getDocument" to { params -> JSONObject().put("root", Dom.read(target.title).document(params.optInt("depth", 1))) },
-        "DOM.requestChildNodes" to { _ -> JSONObject() },
+        "DOM.requestChildNodes" to { params ->
+            val id = Dom.nodeId(params)
+            val children = Dom.read(target.title).children(id, params.optInt("depth", 1))
+            event("DOM.setChildNodes", JSONObject().put("parentId", id).put("nodes", children), currentSessionId)
+            JSONObject()
+        },
         "DOM.describeNode" to { params -> JSONObject().put("node", Dom.read(target.title).node(Dom.nodeId(params))) },
         "DOM.getAttributes" to { params ->
             JSONObject().put("attributes", Dom.read(target.title).node(Dom.nodeId(params)).optJSONArray("attributes") ?: JSONArray())
@@ -336,6 +341,12 @@ internal class Dom(private val title: String, val elements: JSONArray, private v
 
     /** [depth] -1 is the whole tree, as in Chrome. */
     fun document(depth: Int): JSONObject = node(DOCUMENT_ID, depth)
+
+    /** What `DOM.setChildNodes` carries for `DOM.requestChildNodes`. */
+    fun children(id: Int, depth: Int): JSONArray {
+        node(id)
+        return node(id, depth).optJSONArray("children") ?: JSONArray()
+    }
 
     fun node(id: Int): JSONObject {
         if (id < DOCUMENT_ID || id > elementIds.last.coerceAtLeast(BODY_ID)) throw IllegalArgumentException("Could not find node with given id")

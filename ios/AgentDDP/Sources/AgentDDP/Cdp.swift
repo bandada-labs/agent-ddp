@@ -307,7 +307,12 @@ final class CdpSession {
         "DOM.getDocument": { [target] params in
             ["root": Dom(title: target.title, elements: Dom.read()).document(depth: params["depth"] as? Int ?? 1)]
         },
-        "DOM.requestChildNodes": { _ in [:] },
+        "DOM.requestChildNodes": { [unowned self] params in
+            let id = try Dom.nodeId(params)
+            let children = try Dom(title: target.title, elements: Dom.read()).children(of: id, depth: params["depth"] as? Int ?? 1)
+            event("DOM.setChildNodes", ["parentId": id, "nodes": children], sessionId: currentSessionId)
+            return [:]
+        },
         "DOM.describeNode": { [target] params in
             ["node": try Dom(title: target.title, elements: Dom.read()).node(Dom.nodeId(params))]
         },
@@ -415,6 +420,12 @@ struct Dom {
 
     /// `depth` -1 is the whole tree, as in Chrome.
     func document(depth: Int) -> [String: Any] { node(Dom.documentId, depth: depth) }
+
+    /// What `DOM.setChildNodes` carries for `DOM.requestChildNodes`.
+    func children(of id: Int, depth: Int) throws -> [[String: Any]] {
+        _ = try node(id)
+        return node(id, depth: depth)["children"] as? [[String: Any]] ?? []
+    }
 
     func node(_ id: Int) throws -> [String: Any] {
         guard id >= Dom.documentId, id < Dom.firstElementId + elements.count else { throw Cdp.Failure(description: "Could not find node with given id") }
