@@ -257,6 +257,44 @@ with tempfile.TemporaryDirectory() as directory:
     assert changed.returncode == 1 and "CHANGED box" in changed.stdout, changed.stdout
     assert '<testsuite name="ddp baseline before" tests="1" failures="1">' in Path(directory, "j.xml").read_text()
 
+# Accessibility, owners from the recorder, the PNG codec behind annotate, view, mcp.
+with tempfile.TemporaryDirectory() as directory:
+    take = Path(directory, "a11y.jsonl")
+    elements = [{"id": "tiny", "label": "Tiny", "tap": True, "frame": [0, 0, 20, 20]},
+                {"id": "chip", "label": "Chip", "tap": True, "frame": [0, 40, 60, 32], "touch": [0, 32, 60, 48]},
+                {"id": "icon", "tap": True, "frame": [100, 0, 48, 48]},
+                {"id": "faint", "label": "Faint", "frame": [0, 100, 100, 20]},
+                {"id": "dark", "label": "Dark", "frame": [0, 140, 100, 20]}]
+    nodes = [{"z": 0, "kind": "layer", "fill": "#FFFFFFFF", "frame": [0, 0, 400, 400], "own": -1},
+             {"z": 1, "kind": "bitmap", "frame": [0, 100, 100, 20], "text": {"size": 14, "color": "#CCCCCCFF"}, "own": 3},
+             {"z": 2, "kind": "bitmap", "frame": [0, 140, 100, 20], "text": {"size": 14, "color": "#222222FF"}, "own": 4},
+             # Owned by nobody although it sits inside "dark": the recorder said so.
+             {"z": 3, "kind": "layer", "fill": "#888888FF", "frame": [0, 140, 100, 20], "own": -1}]
+    take.write_text("\n".join(json.dumps(line) for line in [
+        {"type": "header", "platform": "ios", "unit": "pt", "scale": 3, "frames": 1},
+        {"type": "frame", "i": 0, "t": 0, "elements": elements, "nodes": nodes}]))
+    a11y = ddp_in(directory, "check", "a11y", "--file", "a11y.jsonl").stdout
+    assert "SMALL TARGET tiny: 20x20" in a11y and "chip" not in a11y, a11y
+    assert "NO LABEL icon" in a11y and "LOW CONTRAST faint: 1.6:1" in a11y and "dark:" not in a11y, a11y
+    assert "COVERED dark" in ddp_in(directory, "check", "overlap", "--file", "a11y.jsonl").stdout
+
+    rows = [bytearray(b"\x10\x20\x30\xff" * 5) for _ in range(4)]
+    png = curves.png_write(5, 4, rows)
+    width, height, back = curves.png_read(png)
+    assert (width, height) == (5, 4) and back == rows
+
+    page = ddp_in(directory, "view", "page.html", "--file", "a11y.jsonl")
+    assert page.returncode == 0 and '"tiny"' in Path(directory, "page.html").read_text(), page.stderr
+
+    calls = "\n".join(json.dumps(m) for m in [
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "ddp_tree", "arguments": {"args": "-i --file a11y.jsonl"}}},
+    ]) + "\n"
+    answers = [json.loads(line) for line in ddp_in(directory, "mcp", stdin=calls).stdout.splitlines()]
+    assert any(tool["name"] == "ddp_tree" for tool in answers[1]["result"]["tools"])
+    assert "@e1 tiny" in answers[2]["result"]["content"][0]["text"] and not answers[2]["result"]["isError"]
+
 # --then runs without a shell, so "; touch" is an argument to echo, not a second command.
 from importlib.machinery import SourceFileLoader
 ddp = SourceFileLoader("ddp", str(CLI)).load_module()

@@ -97,7 +97,7 @@ class LimitedOutput:
         self.stream.flush()
 
     def finish(self):
-        if self.dropped:
+        if self.dropped and self.limit:
             self.stream.write(f"\n[truncated: showing {self.written} of {self.written + self.dropped} chars. "
                               f"Use --max-output to adjust]\n")
         if self.started:
@@ -221,6 +221,8 @@ def warn_if_empty(recording):
 
 
 def record(args):
+    if args.on:
+        return record_on(args)
     if live_session(args):
         recording = record_live(args)
         print(f"recorded {len(recording['frames'])} frames live -> {DEFAULT_FILE}" +
@@ -526,10 +528,14 @@ def area(rect):
 
 
 def assign_owners(frame, tolerance):
-    """A node belongs to the smallest element whose frame holds it. Others stay unowned."""
+    """A node belongs to the element whose subtree drew it, when the recorder knows (`own`, Android).
+    Otherwise to the smallest element whose frame holds it. Others stay unowned."""
     elements = sorted(frame["elements"], key=lambda e: area(e["frame"]))
     for node in frame["nodes"]:
-        owner = next((e for e in elements if contains(e["frame"], node["frame"], tolerance)), None)
+        if "own" in node:
+            owner = frame["elements"][node["own"]] if 0 <= node["own"] < len(frame["elements"]) else None
+        else:
+            owner = next((e for e in elements if contains(e["frame"], node["frame"], tolerance)), None)
         node["owner"] = element_key(owner) if owner else None
 
 
@@ -1078,6 +1084,85 @@ def check_timeline(args):
         sys.exit(1)
 
 
+# ---------- check a11y ----------
+
+MIN_TARGET = {"ios": 44, "android": 48}  # pt / dp: Apple HIG and Material
+
+
+def luminance(color):
+    channels = [int(color[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+    linear = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+
+def over(color, background):
+    """A translucent color composited over an opaque background."""
+    alpha = int(color[7:9], 16) / 255
+    mixed = [round(int(color[i:i + 2], 16) * alpha + int(background[i:i + 2], 16) * (1 - alpha)) for i in (1, 3, 5)]
+    return "#" + "".join(f"{c:02X}" for c in mixed) + "FF"
+
+
+def contrast(text_color, background):
+    lighter, darker = sorted((luminance(text_color), luminance(background)), reverse=True)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def background_under(frame, node):
+    """The opaque color behind a node: the topmost fill below it that holds its center, blended upwards."""
+    x, y, w, h = node["frame"]
+    center = (x + w / 2, y + h / 2)
+    below = [n for n in frame["nodes"] if n["z"] < node["z"] and n.get("fill") and paints_at(n, center)]
+    color = None
+    for fill in sorted(below, key=lambda n: n["z"]):
+        if color is None:
+            if fill["fill"].endswith("FF"):
+                color = fill["fill"]
+        else:
+            color = over(fill["fill"], color)
+    return color
+
+
+def check_a11y(args, recording=None):
+    """Small touch targets, controls nobody can name, and text without enough contrast (WCAG AA)."""
+    recording = recording or recording_for(args)
+    header = recording["header"]
+    to_pt = 1 / header.get("scale", 1) if header.get("unit") == "px" else 1
+    minimum = MIN_TARGET.get(header["platform"], 44)
+    problems = {}
+    last = recording["frames"][-1]
+    for element in last["elements"]:
+        if not element.get("tap"):
+            continue
+        key = element_key(element)
+        w, h = (v * to_pt for v in element.get("touch", element["frame"])[2:])
+        if w < minimum - 0.5 or h < minimum - 0.5:
+            problems[key] = f"SMALL TARGET {key}: {w:.0f}x{h:.0f}, under {minimum}x{minimum}"
+        elif not element.get("label"):
+            problems[key] = f"NO LABEL {key}: a control a screen reader can't name"
+    for frame in recording["frames"]:
+        for node in frame["nodes"]:
+            text = node.get("text") or {}
+            key = node.get("owner") or f"text at {node['frame']}"
+            if not text.get("color") or key in problems:
+                continue
+            background = background_under(frame, node)
+            if not background:
+                continue
+            ratio = contrast(over(text["color"], background), background)
+            size_pt = (text.get("size") or 0) * to_pt
+            large = size_pt >= 18 or (size_pt >= 14 and text.get("weight", 400) >= 700)
+            needed = 3 if large else 4.5
+            if ratio < needed:
+                estimated = " (color read from pixels)" if text.get("estimated") else ""
+                problems[key] = (f"LOW CONTRAST {key}: {ratio:.1f}:1, {text['color']} on {background}, "
+                                 f"needs {needed}:1{estimated}")
+    for line in problems.values():
+        print(line)
+    if not problems and recording is not getattr(args, "shared_recording", None):
+        print("no accessibility problems found")
+    return len(problems)
+
+
 # ---------- check jank, settle ----------
 
 JANK_FACTOR = 3        # a frame interval 3x the usual one means at least two missed refreshes
@@ -1272,12 +1357,13 @@ def resolve_ref(text):
 
 
 def parents_by_containment(frame, tolerance):
-    """Each element's parent: the smallest other element whose frame holds it."""
-    elements = sorted(frame["elements"], key=lambda e: area(e["frame"]))
+    """Each element's parent: the smallest element listed before it whose frame holds it. Recorders list
+    elements in tree order, so a parent always comes first; a popup listed later never adopts the screen below."""
+    elements = frame["elements"]
     parents = {}
     for index, element in enumerate(elements):
-        holder = next((other for other in elements[index + 1:]
-                       if contains(other["frame"], element["frame"], tolerance)), None)
+        holders = [other for other in elements[:index] if contains(other["frame"], element["frame"], tolerance)]
+        holder = min(holders, key=lambda e: area(e["frame"]), default=None)
         parents[element_key(element)] = element_key(holder) if holder else None
     return parents
 
@@ -1507,6 +1593,482 @@ def diff(args):
         print("  no differences")
 
 
+# ---------- device commands: tap, wait, logs, set, open ----------
+
+def target(args):
+    """(platform, device, app) from the flags or the session."""
+    session = json.loads(SESSION_FILE.read_text()) if SESSION_FILE.exists() else {}
+    device = getattr(args, "device", None) or session.get("device") or os.environ.get("DDP_DEVICE")
+    app = getattr(args, "app", None) or session.get("app")
+    if not device:
+        fail("no device", "missing_device", "ddp connect DEVICE --app ID, or pass --device")
+    platform = getattr(args, "platform", None) or session.get("platform") or \
+        ("ios" if len(device) == 36 and device.count("-") == 4 else "android")
+    return platform, device, app
+
+
+def adb(device, *command):
+    return subprocess.run([adb_path(), "-s", device, *command], capture_output=True, text=True)
+
+
+def tap(args):
+    session = require_session()
+    recording = snapshot_live(session)
+    frame = recording["frames"][-1]
+    element = next((e for e in frame["elements"] if element_key(e) == args.id), None)
+    if element is None:
+        fail(f"no element '{args.id}' on screen", "unknown_element", "ddp tree -i")
+    x, y, w, h = element["frame"]
+    if session["platform"] == "android":
+        result = adb(session["device"], "shell", "input", "tap", str(round(x + w / 2)), str(round(y + h / 2)))
+        if result.returncode != 0:
+            fail(f"adb input tap failed: {result.stderr.strip()}", "tap_failed")
+    else:
+        name = element.get("id") or element.get("label")
+        activated = next(m for m in LiveClient(session, {"cmd": "tap", "id": name}))["value"]
+        if not activated:
+            fail(f"'{args.id}' has no accessibility action", "tap_failed", "use agent-device for a real touch")
+    print(f"tapped {args.id} at ({x + w / 2:.0f}, {y + h / 2:.0f})")
+
+
+def wait(args):
+    """Live: until an element is drawn, a label shows, or nothing changes for a while."""
+    session = require_session()
+    if not (args.by or args.settled):
+        fail("wait needs `id <id>`, `text <label>` or --settled 300ms", "missing_option")
+    settled_ms = parse_ms(args.settled) if args.settled else None
+    timeout = parse_ms(args.timeout)
+    header, last_change, previous = None, 0, None
+    for message in stream_frames(session, timeout):
+        if message["type"] == "header":
+            header = message
+            continue
+        if message["type"] != "frame":
+            continue
+        name_elements(message)
+        assign_owners(message, OWNER_TOLERANCE_PT * (header.get("scale", 1) if header.get("unit") == "px" else 1))
+        t = message["t"]
+        if args.by:
+            found = next((e for e in message["elements"]
+                          if (element_key(e) == args.value or e.get("id") == args.value if args.by == "id"
+                              else normalize_label(args.value).lower() in (e.get("label") or "").lower())
+                          and element_alpha(message, element_key(e)) >= 0.05), None)
+            if found:
+                print(f"{element_key(found)} drawn at t={t:.0f}ms, frame {found['frame']}")
+                return
+        else:
+            ignored = set(args.ignore)
+            state = json.dumps([[e for e in message["elements"] if element_key(e) not in ignored],
+                                [{k: v for k, v in n.items() if k != "z"} for n in message["nodes"]
+                                 if n["owner"] not in ignored]], sort_keys=True)
+            if state != previous:
+                previous, last_change = state, t
+            elif t - last_change >= settled_ms:
+                print(f"settled: nothing changed from t={last_change:.0f}ms to t={t:.0f}ms")
+                return
+    what = f"{args.by} {args.value}" if args.by else f"{args.settled} without change"
+    fail(f"timed out after {args.timeout} waiting for {what}", "timeout",
+         "ddp tree -i to see what is there, or a longer --timeout")
+
+
+def logs(args):
+    """The app's log lines during the last take (or --file), at their time in the take."""
+    recording = load(args.file or DEFAULT_FILE)
+    started = recording["header"].get("startedAt")
+    if not started:
+        fail("this recording has no start time (an older library)", "no_start_time", "record again")
+    end = started + recording["frames"][-1]["t"] + 500
+    platform, device, app = target(args)
+    if not app:
+        fail("no app", "missing_option", "pass --app, or ddp connect first")
+    lines = []
+    if platform == "ios":
+        info = run(["xcrun", "simctl", "appinfo", device, app])
+        executable = next((line.split("=", 1)[1].strip().strip('";') for line in info.splitlines()
+                           if "CFBundleExecutable" in line), app.split(".")[-1])
+        start_text = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(started / 1000 - 1))
+        output = run(["xcrun", "simctl", "spawn", device, "log", "show", "--info", "--style", "compact", "--start", start_text,
+                      "--predicate", f'process == "{executable}"'])
+        for line in output.splitlines():
+            try:
+                stamp = time.mktime(time.strptime(line[:19], "%Y-%m-%d %H:%M:%S")) * 1000 + float(line[19:23] or 0) * 1000
+            except ValueError:
+                continue
+            if started - 100 <= stamp <= end:
+                lines.append((stamp - started, line[24:].strip()))
+    else:
+        pid = adb(device, "shell", "pidof", app).stdout.strip()
+        if not pid:
+            fail(f"{app} is not running", "not_running", f"adb -s {device} shell monkey -p {app} 1")
+        output = adb(device, "logcat", "-d", "-v", "epoch", f"--pid={pid}").stdout
+        for line in output.splitlines():
+            parts = line.split(None, 1)
+            try:
+                stamp = float(parts[0]) * 1000
+            except (ValueError, IndexError):
+                continue
+            if started - 100 <= stamp <= end:
+                lines.append((stamp - started, parts[1].strip()))
+    if args.grep:
+        lines = [(t, text) for t, text in lines if args.grep.lower() in text.lower()]
+    if not lines:
+        print(f"no log lines from {app} during the take")
+        return
+    for t, text in lines[:args.limit]:
+        print(f"t={t:.0f}ms {text}")
+    if len(lines) > args.limit:
+        print(f"... {len(lines) - args.limit} more (--grep or --limit)")
+
+
+ANDROID_TEXT_SIZES = {"small": "0.85", "default": "1.0", "large": "1.15", "largest": "1.3"}
+
+
+def settings(args):
+    platform, device, app = target(args)
+    what, value = args.what, args.value
+    if platform == "ios":
+        commands = {
+            "appearance": [["xcrun", "simctl", "ui", device, "appearance", value]],
+            "text-size": [["xcrun", "simctl", "ui", device, "content_size", value]],
+            "reduce-motion": [["xcrun", "simctl", "spawn", device, "defaults", "write", "com.apple.Accessibility",
+                               "ReduceMotionEnabled", "-bool", "YES" if value == "on" else "NO"]],
+            "locale": [["xcrun", "simctl", "spawn", device, "defaults", "write", app or "-g", "AppleLanguages",
+                        "-array", value]],
+        }
+    else:
+        scale = "0" if value == "on" else "1"
+        commands = {
+            "appearance": [[adb_path(), "-s", device, "shell", "cmd", "uimode", "night", "yes" if value == "dark" else "no"]],
+            "text-size": [[adb_path(), "-s", device, "shell", "settings", "put", "system", "font_scale",
+                           ANDROID_TEXT_SIZES.get(value, value)]],
+            "reduce-motion": [[adb_path(), "-s", device, "shell", "settings", "put", "global", name, scale]
+                              for name in ("animator_duration_scale", "transition_animation_scale", "window_animation_scale")],
+            "locale": [[adb_path(), "-s", device, "shell", "cmd", "locale", "set-app-locales", app or "",
+                        "--locales", value]],
+        }
+    for command in commands[what]:
+        result = subprocess.run(command, capture_output=True, text=True)
+        if result.returncode != 0:
+            fail(f"{' '.join(command[-4:])} failed: {result.stderr.strip()}", "set_failed")
+    relaunch = what == "locale" or (what == "reduce-motion" and platform == "ios")
+    print(f"{what} {value} on {platform} {device}" + ("; relaunch the app to see it" if relaunch else ""))
+
+
+def open_url(args):
+    platform, device, app = target(args)
+    if platform == "ios":
+        command = ["xcrun", "simctl", "openurl", device, args.url]
+    else:
+        command = [adb_path(), "-s", device, "shell", "am", "start", "-W", "-a", "android.intent.action.VIEW",
+                   "-d", args.url, *(["-p", app] if app else [])]
+    result = subprocess.run(command, capture_output=True, text=True)
+    if result.returncode != 0 or "Error" in result.stdout:
+        fail(f"could not open {args.url}: {(result.stderr or result.stdout).strip()}", "open_failed")
+    print(f"opened {args.url} on {platform} {device}")
+    if platform == "ios" and not args.url.startswith(("http://", "https://")):
+        # A system alert, outside the app: ddp can't see it.
+        print("iOS asks 'Open in <app>?' for a custom scheme: confirm it (agent-device press Open)")
+
+
+def record_on(args):
+    """The same take on several sessions at once (one per platform), then parity between the first two."""
+    names = args.on.split(",")
+    processes = {}
+    for name in names:
+        session_file = Path(".ddp", "sessions", name, "session.json")
+        if not session_file.exists():
+            fail(f"no session '{name}'", "not_connected", f"ddp connect DEVICE --app ID --session {name}")
+        session = json.loads(session_file.read_text())
+        command = [sys.executable, __file__, "record", "--session", name, "--name", f"take-{name}",
+                   "--for", args.duration or "2s"]
+        if args.then:
+            command += ["--then", args.then.format(**session)]
+        processes[name] = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    for name, process in processes.items():
+        print(f"{name}: {process.communicate()[0].strip()}")
+    if any(process.returncode for process in processes.values()):
+        sys.exit(1)
+    if len(names) >= 2:
+        takes = [Path(".ddp", "sessions", name, "saved", f"take-{name}.jsonl.gz") for name in names[:2]]
+        args.file, args.against = takes
+        check_parity(args)
+
+
+# ---------- annotate: a screenshot with numbered boxes ----------
+
+# 3x5 digits, one row per string, for labels that match @eN refs.
+DIGITS = ["111101101101111", "010110010010111", "111001111100111", "111001111001111", "101101111001001",
+          "111100111001111", "111100111101111", "111001001001001", "111101111101111", "111101111001111"]
+BOX_COLORS = [(230, 25, 75), (60, 180, 75), (0, 130, 200), (245, 130, 48), (145, 30, 180), (240, 50, 230)]
+
+
+def png_read(data):
+    """8-bit RGB or RGBA, not interlaced (what simctl and screencap write) to (width, height, rows of RGBA)."""
+    import struct
+    import zlib
+    position, idat, width = 8, b"", 0
+    while position < len(data):
+        length, kind = struct.unpack(">I4s", data[position:position + 8])
+        body = data[position + 8:position + 8 + length]
+        if kind == b"IHDR":
+            width, height, depth, color = struct.unpack(">IIBB", body[:10])
+            if depth != 8 or color not in (2, 6):
+                fail("unsupported screenshot format", "bad_png")
+            channels = 4 if color == 6 else 3
+        elif kind == b"IDAT":
+            idat += body
+        position += 12 + length
+    raw, stride = zlib.decompress(idat), width * channels
+    rows, previous = [], bytearray(stride)
+    for y in range(height):
+        kind, line = raw[y * (stride + 1)], bytearray(raw[y * (stride + 1) + 1:(y + 1) * (stride + 1)])
+        for i in range(stride):
+            left = line[i - channels] if i >= channels else 0
+            up, up_left = previous[i], previous[i - channels] if i >= channels else 0
+            if kind == 1:
+                line[i] = (line[i] + left) & 255
+            elif kind == 2:
+                line[i] = (line[i] + up) & 255
+            elif kind == 3:
+                line[i] = (line[i] + (left + up) // 2) & 255
+            elif kind == 4:
+                guess = left + up - up_left
+                nearest = min((abs(guess - left), left), (abs(guess - up), up), (abs(guess - up_left), up_left))[1]
+                line[i] = (line[i] + nearest) & 255
+        previous = line
+        rows.append(line if channels == 4 else
+                    bytearray(b for i in range(0, stride, 3) for b in (*line[i:i + 3], 255)))
+    return width, height, rows
+
+
+def png_write(width, height, rows):
+    import struct
+    import zlib
+
+    def chunk(kind, body):
+        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body))
+    raw = b"".join(b"\x00" + bytes(row) for row in rows)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)) +
+            chunk(b"IDAT", zlib.compress(raw, 6)) + chunk(b"IEND", b""))
+
+
+def paint(rows, x0, y0, x1, y1, color):
+    height, width = len(rows), len(rows[0]) // 4
+    for y in range(max(int(y0), 0), min(int(y1), height)):
+        row = rows[y]
+        for x in range(max(int(x0), 0), min(int(x1), width)):
+            row[x * 4:x * 4 + 4] = bytes((*color, 255))
+
+
+def annotate(args):
+    session = require_session()
+    recording = snapshot_live(session)
+    refs = save_refs(recording["frames"])
+    frame = recording["frames"][-1]
+    out = Path(args.out)
+    if session["platform"] == "ios":
+        run(["xcrun", "simctl", "io", session["device"], "screenshot", "--type=png", str(out)])
+        scale = recording["header"].get("scale", 1)
+    else:
+        out.write_bytes(subprocess.run([adb_path(), "-s", session["device"], "exec-out", "screencap", "-p"],
+                                       capture_output=True, check=True).stdout)
+        scale = 1
+    width, height, rows = png_read(out.read_bytes())
+    density = recording["header"].get("scale", 1)  # labels the same size in pt on both platforms
+    thick, dot = max(2, round(density)), max(3, round(density * 1.5))
+    for index, element in enumerate(frame["elements"]):
+        color = BOX_COLORS[index % len(BOX_COLORS)]
+        x, y, w, h = (v * scale for v in element["frame"])
+        for edge in ((x, y, x + w, y + thick), (x, y + h - thick, x + w, y + h), (x, y, x + thick, y + h),
+                     (x + w - thick, y, x + w, y + h)):
+            paint(rows, *edge, color)
+        number = refs[element_key(element)][2:]
+        label_w, label_h = (len(number) * 4 + 1) * dot, 7 * dot
+        paint(rows, x, y, x + label_w, y + label_h, color)
+        for position, digit in enumerate(number):
+            for bit, on in enumerate(DIGITS[int(digit)]):
+                if on == "1":
+                    cx, cy = x + (1 + position * 4 + bit % 3) * dot, y + (1 + bit // 3) * dot
+                    paint(rows, cx, cy, cx + dot, cy + dot, (255, 255, 255))
+    out.write_bytes(png_write(width, height, rows))
+    print(f"{out}: {len(frame['elements'])} boxes, label N is @eN")
+    for element in frame["elements"]:
+        print(f"  {refs[element_key(element)]} {element_key(element)}")
+
+
+# ---------- view: a local HTML timeline for people ----------
+
+VIEW_PAGE = """<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ddp take</title>
+<style>
+:root { --bg: #fafafa; --fg: #1d1d1f; --muted: #6e6e73; --line: #d2d2d7; --pick: #0a66d8; }
+@media (prefers-color-scheme: dark) { :root { --bg: #161617; --fg: #f5f5f7; --muted: #a1a1a6; --line: #3a3a3c; --pick: #4a9eff; } }
+body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 14px/1.4 -apple-system, system-ui, sans-serif; }
+main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 24px; }
+@media (max-width: 720px) { main { grid-template-columns: 1fr; } }
+svg.screen { width: 100%; max-height: 80vh; border: 1px solid var(--line); background: var(--bg); }
+.row { display: grid; grid-template-columns: 9em 1fr; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--line); cursor: pointer; }
+.row.on { color: var(--pick); }
+.track { font: 12px ui-monospace, monospace; color: var(--muted); }
+input[type=range] { width: 100%; }
+h1 { font-size: 16px; margin: 0 0 8px; } .meta { color: var(--muted); margin-bottom: 12px; }
+</style></head><body>
+<h1>ddp take</h1><div class="meta" id="meta"></div>
+<input type="range" id="t" min="0" value="0"><div class="meta" id="now"></div>
+<main><svg class="screen" id="screen"></svg><div id="list"></div></main>
+<script>
+const take = __DATA__;
+const slider = document.getElementById("t"), screen = document.getElementById("screen");
+let picked = null;
+slider.max = take.frames.length - 1;
+document.getElementById("meta").textContent =
+  `${take.platform}, ${take.frames.length} frames over ${Math.round(take.frames.at(-1).t)} ms, unit ${take.unit}`;
+const [width, height] = take.size;
+screen.setAttribute("viewBox", `0 0 ${width} ${height}`);
+function draw() {
+  const frame = take.frames[slider.value];
+  document.getElementById("now").textContent = `t=${Math.round(frame.t)} ms (frame ${slider.value})`;
+  screen.innerHTML = frame.boxes.map(([key, x, y, w, h, fill, border, alpha]) =>
+    `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill || "none"}" fill-opacity="${fill ? alpha : 0}"
+      stroke="${key === picked ? "var(--pick)" : (border ? "#e5484d" : "var(--muted)")}"
+      stroke-width="${key === picked ? 4 : 1 + border}"><title>${key}</title></rect>`).join("");
+}
+document.getElementById("list").innerHTML = take.tracks.map(([key, lines]) =>
+  `<div class="row" data-key="${key}"><div>${key}</div><div class="track">${lines.join("<br>") || "no change"}</div></div>`).join("");
+document.querySelectorAll(".row").forEach(row => row.onclick = () => {
+  picked = picked === row.dataset.key ? null : row.dataset.key;
+  document.querySelectorAll(".row").forEach(r => r.classList.toggle("on", r.dataset.key === picked));
+  draw();
+});
+slider.oninput = draw;
+draw();
+</script></body></html>
+"""
+
+
+def view(args):
+    """Writes a self-contained HTML page: the take frame by frame, and each element's changes. No server."""
+    recording = load(args.file or DEFAULT_FILE)
+    frames, header = recording["frames"], recording["header"]
+    times = [f["t"] for f in frames]
+    keys = element_keys(frames)
+    boxes = []
+    for frame in frames:
+        rows = []
+        for element in frame["elements"]:
+            state = element_state(frame, element_key(element))
+            fill = state["fill"]
+            rows.append([element_key(element), *element["frame"], fill and f"#{fill[1:7]}", state["border"],
+                         round(element_alpha(frame, element_key(element)), 2)])
+        boxes.append({"t": frame["t"], "boxes": rows})
+    edges = [e["frame"] for f in frames for e in f["elements"]]
+    size = [max((x + w for x, _, w, _ in edges), default=400), max((y + h for _, y, _, h in edges), default=800)]
+    tracks = []
+    for key in keys:
+        states = [element_state(f, key) for f in frames]
+        lines = [describe_track(name, states, times) for name in ("frame", "fill", "border", "opacity", "draws", "label")]
+        tracks.append([key, [line.strip() for line in lines if line]])
+    data = {"platform": header["platform"], "unit": header["unit"], "size": size, "frames": boxes, "tracks": tracks}
+    # "</" inside the JSON would end the script tag early.
+    page = VIEW_PAGE.replace("__DATA__", json.dumps(data).replace("</", "<\\/"))
+    Path(args.out).write_text(page)
+    print(f"{args.out}: {len(frames)} frames, {len(keys)} elements. Open it in a browser")
+
+
+# ---------- explore, mcp ----------
+
+def explore(args):
+    """Live: tap each tappable element on the screen once, record what happens, run check all on each take.
+    Prints one line per control; each take is saved as explore-<control> for a closer look.
+    Stops when a tap leaves the screen (most of its elements gone), so the agent decides where to go next."""
+    import io
+    session = require_session()
+    start = snapshot_live(session)["frames"][-1]
+    start_keys = {element_key(e) for e in start["elements"]}
+    tappable = [element_key(e) for e in start["elements"] if e.get("tap") and element_key(e) not in args.skip]
+    if not tappable:
+        fail("nothing tappable on screen", "nothing_to_explore", "ddp tree -i (the recorder marks controls with tap)")
+    print(f"exploring {len(tappable)} controls: {', '.join(tappable)}", flush=True)
+    session_flag = ["--session", args.session] if args.session else []
+    for key in tappable:
+        name = "explore-" + "".join(c if c.isalnum() else "-" for c in key)
+        args.duration, args.frames, args.name, args.all_frames = args.per, None, name, True
+        args.then = shlex.join([sys.executable, __file__, "tap", key, "--max-output", "0", *session_flag])
+        recording = record_live(args)
+        args.shared_recording = recording
+        details, saved = io.StringIO(), sys.stdout
+        sys.stdout = details  # the details stay in the saved take; one line per control here
+        try:
+            problems = {check_name: count for check_name, check in RECORDING_CHECKS.items()
+                        if (count := check(args, recording))}
+        finally:
+            sys.stdout = saved
+        changed = [k for k in changing_keys(recording["frames"]) if k != key]
+        print(f"{key}: changed {', '.join(changed[:6]) or 'nothing else'}; " +
+              (", ".join(f"{check_name} {count}" for check_name, count in problems.items()) if problems else "no problems") +
+              f" (ddp check all --file {name})", flush=True)
+        now = {element_key(e) for e in recording["frames"][-1]["elements"]}
+        if len(start_keys & now) < len(start_keys) / 2:
+            print(f"  {key} left the screen (new: {', '.join(sorted(now - start_keys)[:5])}); stopped. "
+                  "Go back and run explore again with --skip, or explore the new screen")
+            return
+
+
+MCP_PROFILES = {
+    "core": ["doctor", "connect", "tree", "find", "get", "read", "check", "wait", "tap", "skills"],
+    "live": ["watch", "eval", "time", "net", "record", "logs", "annotate"],
+    "checks": ["check", "baseline", "diff"],
+}
+
+
+def mcp(args):
+    """A Model Context Protocol server on stdin/stdout: each ddp command is a tool taking the command's
+    arguments as one string. --tools picks small sets so a client's context stays small."""
+    import io
+    wanted = []
+    for profile in args.tools.split(","):
+        names = sorted({n for names in MCP_PROFILES.values() for n in names}) if profile == "all" else MCP_PROFILES[profile]
+        wanted += [n for n in names if n not in wanted]
+    real_stdout = sys.__stdout__
+    tools = [{"name": f"ddp_{name}", "description": f"ddp {name}: see `ddp skills get core`. Pass the arguments as "
+              f"you would after `ddp {name}` on a command line.",
+              "inputSchema": {"type": "object", "properties": {"args": {"type": "string"}}}} for name in wanted]
+
+    def reply(message_id, result=None, error=None):
+        body = {"jsonrpc": "2.0", "id": message_id}
+        body.update({"error": error} if error else {"result": result})
+        real_stdout.write(json.dumps(body) + "\n")
+        real_stdout.flush()
+
+    for line in sys.stdin:
+        if not line.strip():
+            continue
+        message = json.loads(line)
+        method, message_id = message.get("method"), message.get("id")
+        if method == "initialize":
+            reply(message_id, {"protocolVersion": message.get("params", {}).get("protocolVersion", "2025-06-18"),
+                               "capabilities": {"tools": {}}, "serverInfo": {"name": "ddp", "version": "1"}})
+        elif method == "tools/list":
+            reply(message_id, {"tools": tools})
+        elif method == "tools/call":
+            name = message["params"]["name"].removeprefix("ddp_")
+            if name not in wanted:
+                reply(message_id, error={"code": -32602, "message": f"unknown tool {name}"})
+                continue
+            captured, errors = io.StringIO(), io.StringIO()
+            saved = sys.stdout, sys.stderr
+            sys.stdout, sys.stderr = captured, errors
+            try:
+                code = run_command([name, *shlex.split(message["params"].get("arguments", {}).get("args", ""))])
+            finally:
+                sys.stdout, sys.stderr = saved
+            text = (captured.getvalue() + errors.getvalue()).strip() or "(no output)"
+            reply(message_id, {"content": [{"type": "text", "text": text}], "isError": code != 0})
+        elif message_id is not None:
+            reply(message_id, error={"code": -32601, "message": f"no method {method}"})
+
+
 # ---------- skills, doctor, batch ----------
 
 def skill_files():
@@ -1647,7 +2209,8 @@ def batch(args):
         sys.exit(worst)
 
 
-RECORDING_CHECKS = {"overlap": check_overlap, "corners": check_corners, "jank": check_jank, "settle": check_settle}
+RECORDING_CHECKS = {"overlap": check_overlap, "corners": check_corners, "jank": check_jank, "settle": check_settle,
+                    "a11y": check_a11y}
 CHECKS = {**RECORDING_CHECKS, "parity": check_parity, "timeline": check_timeline, "baseline": check_baseline,
           "all": check_all}
 
@@ -1707,6 +2270,8 @@ def build_parser():
     record_parser.add_argument("--app", help="offline only: bundle id / application id")
     record_parser.add_argument("--device", help="offline only: simulator UDID or adb serial (or env DDP_DEVICE)")
     record_parser.add_argument("--name", help="keep this take under a name (never pruned); use it as --file NAME")
+    record_parser.add_argument("--on", help="sessions to record at once, e.g. ios,android; --then may use {platform} "
+                                            "{device} {app}; then check parity runs on the two takes")
     add_window(record_parser)
     add_file(record_parser)
 
@@ -1745,6 +2310,51 @@ def build_parser():
     check_parser.add_argument("--all-frames", action="store_true", help="check every frame, not only the last")
     add_window(check_parser)
     add_file(check_parser)
+
+    tap_parser = command("tap", tap, help="live: tap an element (Android: a real touch; iOS: its accessibility action)")
+    tap_parser.add_argument("id", help="element id, label or @ref")
+
+    wait_parser = command("wait", wait, help="live: until an element is drawn, a label shows, or the screen settles")
+    wait_parser.add_argument("by", nargs="?", choices=["id", "text"])
+    wait_parser.add_argument("value", nargs="?")
+    wait_parser.add_argument("--settled", help="until nothing changes for this long (300ms)")
+    wait_parser.add_argument("--timeout", default="10s")
+    wait_parser.add_argument("--ignore", nargs="+", default=[], metavar="ELEMENT",
+                             help="--settled: elements that never stop (a spinner, a clock) and should not count")
+
+    logs_parser = command("logs", logs, help="the app's log lines during the last take, at their time in it")
+    logs_parser.add_argument("--grep", help="only lines holding this text")
+    logs_parser.add_argument("--limit", type=int, default=50)
+    logs_parser.add_argument("--device")
+    logs_parser.add_argument("--app")
+    add_file(logs_parser)
+
+    set_parser = command("set", settings, help="device settings: appearance, text size, reduce motion, locale")
+    set_parser.add_argument("what", choices=["appearance", "text-size", "reduce-motion", "locale"])
+    set_parser.add_argument("value", help="appearance dark|light; text-size (iOS: large, extra-large, "
+                                          "accessibility-large...; Android: small|default|large|largest or a factor); "
+                                          "reduce-motion on|off; locale es-ES")
+    set_parser.add_argument("--device")
+    set_parser.add_argument("--app")
+
+    annotate_parser = command("annotate", annotate, help="live: a screenshot with numbered boxes, label N is @eN")
+    annotate_parser.add_argument("out", nargs="?", default="ddp-annotated.png")
+
+    explore_parser = command("explore", explore, help="live: tap each control once, record it, run check all on each")
+    explore_parser.add_argument("--per", default="2s", help="how long to record after each tap")
+    explore_parser.add_argument("--skip", nargs="+", default=[], metavar="ELEMENT", help="controls not to tap")
+
+    mcp_parser = command("mcp", mcp, help="a Model Context Protocol server on stdio (tools: core, live, checks, all)")
+    mcp_parser.add_argument("--tools", default="core", help="comma-separated profiles: core, live, checks, all")
+
+    view_parser = command("view", view, help="a local HTML page of a take, frame by frame, for people")
+    view_parser.add_argument("out", nargs="?", default="ddp-take.html")
+    add_file(view_parser)
+
+    open_parser = command("open", open_url, help="open a deep link or URL on the device")
+    open_parser.add_argument("url")
+    open_parser.add_argument("--device")
+    open_parser.add_argument("--app")
 
     baseline_parser = command("baseline", baseline, help="keep a take under ddp-baselines/ to check against later")
     baseline_parser.add_argument("action", choices=["save"])

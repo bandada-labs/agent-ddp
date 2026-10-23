@@ -19,6 +19,16 @@ cli/ddp record [--for 5s] [--then "<cmd>"] [--name N] saves .ddp/last.jsonl for 
 cli/ddp eval <element> <path>                          one property, read-only
 cli/ddp time pause | resume | step [frames] | rate 0.1 | seek <time> | status
 cli/ddp net list | get <id> | watch [--until 'status>=400']
+cli/ddp tap <element>                                  Android: a real touch; iOS: the accessibility action
+cli/ddp wait id <id> | text <label> | --settled 300ms [--ignore <el>] [--timeout 10s]
+cli/ddp logs [--grep <text>]                           app log lines during the last take, at their time in it
+cli/ddp set appearance dark | text-size large | reduce-motion on | locale es-ES
+cli/ddp open <deep link or URL>
+cli/ddp annotate [out.png]                             screenshot with numbered boxes, label N is @eN
+cli/ddp explore [--per 2s] [--skip <el> ...]           tap each control once, record, check all on each
+cli/ddp record --on ios,android --for 3s --then "<cmd with {platform}>"   both at once, then parity
+cli/ddp view [out.html] [--file rec]                   a local HTML page of a take, for people
+cli/ddp mcp [--tools core,live,checks,all]             the commands as MCP tools on stdio
 cli/ddp batch [--bail] "<cmd>" ...                    several commands in one call (or one per stdin line)
 cli/ddp skills list | get <name> [--full] [--filter <heading>]
 cli/ddp disconnect
@@ -94,13 +104,17 @@ Without a session, `record` asks the app by Darwin notification (iOS) or broadca
 
 `get <element> --curve` splits each numeric track (x, y, w, h, alpha, border, opacity) into moves and prints `from -> to over <ms> from <ms>`, plus the named timing curve that fits best (`linear`, `easeIn`, `easeOut`, `easeInOut`, `fastOutSlowIn`) or `spring (overshoot N%)`. A flash that comes back is two moves, out and back. A fit worse than 0.05 RMS says `loose fit`.
 
+### check a11y
+
+`check a11y` reports controls (`tap`) smaller than 44x44 pt (iOS) or 48x48 dp (Android), using the touch area when there is one; controls with no label; and text whose contrast with the fill behind it is under WCAG AA (4.5:1, or 3:1 for text of 18 pt, or 14 pt bold). It checks every frame, so text that turns white before its background turns dark is caught too.
+
 ### check jank, settle
 
 `check jank` finds frame intervals over 3x the usual one (two or more missed refreshes) from the frame times, and prints the recorder's own capture cost next to them. `check settle` reports elements still changing in the last 500 ms (`NOT SETTLED`: a loop, or a take that ended too early) and positions that shake by 1 pt or less (`JITTER`). It needs a take of 1 s or more.
 
 ### check all, baseline
 
-`check all` runs overlap, corners, jank and settle on one take, prints only problems and a summary, and exits 1 on any. `baseline save <name>` stores the last take (or `--file`) in `ddp-baselines/<name>.jsonl.gz`, next to the code so it can be committed. `check baseline --against <name>` lines the take up with it on the first change and prints `CHANGED <element> from t=...` with the first differences; `--junit <file>` also writes a JUnit report for CI.
+`check all` runs overlap, corners, jank, settle and a11y on one take, prints only problems and a summary, and exits 1 on any. `baseline save <name>` stores the last take (or `--file`) in `ddp-baselines/<name>.jsonl.gz`, next to the code so it can be committed. `check baseline --against <name>` lines the take up with it on the first change and prints `CHANGED <element> from t=...` with the first differences; `--junit <file>` also writes a JUnit report for CI.
 
 ### check parity
 
@@ -145,10 +159,18 @@ A drawn node belongs to the smallest element whose frame holds it (4 pt toleranc
 - `points` (Android `draw` lines): `[x0, y0, x1, y1]` in window coordinates. `clipRound` (Android): `[x, y, w, h, radius]` of the rounded clip around the node.
 - `shadow` (iOS): `{"radius", "opacity", "color"}` of a layer shadow, which is how SwiftUI draws `.shadow` and most glows.
 - Optional fields appear only when they apply: `visible` when clipped, `opacity` when under 1, `clips` when the node clips its children, `source` when the native view class is known.
+- `text` on a text node: `{"size", "color", "weight"}`, size in the recording's unit. Android reads it from the laid-out Compose style or the TextView; iOS from UILabel / UITextField, and for SwiftUI `Text` from the pixels of the first frame (`"estimated": true`, size from the line height).
+- `own` (Android): the index in `elements` of the element whose subtree drew the node, `-1` for none. The CLI uses it for ownership instead of geometry, so a plain box drawn over a label counts as covering it.
+- Elements: `tap` when the element is a control (iOS button, link or adjustable trait; Android click action), and `touch` (Android) when its touch area is bigger than what it draws, such as a Material chip padded to 48 dp.
+- The header carries `startedAt` (ms since 1970) so `ddp logs` can line log lines up with the take.
+- Android walks every Compose layout node in draw order, so nodes without semantics and `zIndex` count, and every window of the app, so menus, dialogs and popups are read. iOS sorts sublayers by `zPosition`. Android Views follow a custom child drawing order (API 29+). A `GradientDrawable` stroke and corner radius are read on Android.
 
 ## What it does not see yet
 
-The main limits: Compose nodes with no semantics, Android popup windows, `zPosition` and custom draw order.
+- Physical iOS devices: the CLI uses `simctl`.
+- The single shapes inside a SwiftUI `Canvas` or `drawingGroup`: one bitmap, read by its pixels.
+- System UI outside the app: iOS alerts like "Open in ...?", Android system dialogs.
+- Compose `drawWithCache` and `drawWithContent`, text drawn inside a Canvas.
 
 ## Adding it to an app (Debug only)
 

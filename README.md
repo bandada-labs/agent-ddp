@@ -38,7 +38,7 @@ So if the extra layer is there mostly for the tooling, it may not be needed anym
 
 ## Limits
 
-Debug builds only. iOS works on the simulator, not on devices yet. Not seen yet: Compose nodes without semantics, Android popup windows (menus, dialogs), custom draw order (`zPosition`, `zIndex`), and the colors of single shapes inside a SwiftUI `Canvas`.
+Debug builds only. iOS works on the simulator, not on devices yet. Not seen yet: the single shapes inside a SwiftUI `Canvas` (read by their pixels instead), and system UI outside the app such as iOS alerts.
 
 ## License
 
