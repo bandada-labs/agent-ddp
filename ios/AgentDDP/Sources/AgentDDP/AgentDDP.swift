@@ -154,7 +154,7 @@ enum FrameCapture {
         let windows = visibleWindows()
         return ["type": "frame", "i": index, "t": round2(milliseconds),
                 "elements": windows.flatMap(AccessibilityReader.elements(in:)),
-                "nodes": LayerReader.paintedNodes(in: windows, textColors: index == 0)]
+                "nodes": LayerReader.paintedNodes(in: windows)]
     }
 
     static func visibleWindows() -> [UIWindow] {
@@ -240,21 +240,20 @@ enum LayerReader {
     }
 
     /// Layers in paint order (later covers earlier). Only layers that draw something are kept.
-    /// `textColors`: also read the color of each text bitmap from its pixels (SwiftUI `Text` has no other trace of it).
-    static func paintedNodes(in windows: [UIWindow], textColors: Bool = false) -> [[String: Any]] {
+    static func paintedNodes(in windows: [UIWindow]) -> [[String: Any]] {
         var nodes: [[String: Any]] = []
         for window in windows {
             let root = window.layer.presentation() ?? window.layer
             let windowClip = CGRect(origin: .zero, size: window.bounds.size)
             walk(window.layer, root: root, clip: windowClip, opacity: 1, offset: window.frame.origin,
-                 textColors: textColors, into: &nodes)
+                 into: &nodes)
         }
         return nodes
     }
 
     // ponytail: paint order is sublayer order, re-sorted by zPosition; 3D transforms are ignored.
     private static func walk(_ layer: CALayer, root: CALayer, clip: CGRect, opacity: Float,
-                             offset: CGPoint, textColors: Bool, into nodes: inout [[String: Any]]) {
+                             offset: CGPoint, into nodes: inout [[String: Any]]) {
         let shown = layer.presentation() ?? layer
         let effectiveOpacity = opacity * shown.opacity
         guard !shown.isHidden, effectiveOpacity > 0.001 else { return }
@@ -271,7 +270,7 @@ enum LayerReader {
             if let view = layer.delegate as? UIView, !NSStringFromClass(type(of: view)).hasPrefix("_Tt") {
                 node["source"] = NSStringFromClass(type(of: view))
             }
-            if let text = textStyle(of: layer, sampling: textColors) { node["text"] = text }
+            if let text = textStyle(of: layer) { node["text"] = text }
             nodes.append(node)
         }
 
@@ -281,14 +280,14 @@ enum LayerReader {
         let ordered = (layer.sublayers ?? []).enumerated()
             .sorted { ($0.element.zPosition, $0.offset) < ($1.element.zPosition, $1.offset) }.map(\.element)
         ordered.forEach {
-            walk($0, root: root, clip: childClip, opacity: effectiveOpacity, offset: offset, textColors: textColors,
-                 into: &nodes)
+            walk($0, root: root, clip: childClip, opacity: effectiveOpacity, offset: offset, into: &nodes)
         }
     }
 
-    /// Size and color of the text a layer draws: from UILabel / UITextField / UITextView when there is one,
-    /// otherwise (SwiftUI `Text`) the main color of its pixels, when asked to sample.
-    private static func textStyle(of layer: CALayer, sampling: Bool) -> [String: Any]? {
+    /// Size and color of the text a layer draws: from UILabel / UITextField when there is one, otherwise
+    /// (SwiftUI `Text`) the main color of its pixels, every frame. SwiftUI redraws a text's bitmap in place,
+    /// so there is no cheap sign that its color changed.
+    private static func textStyle(of layer: CALayer) -> [String: Any]? {
         if let label = layer.delegate as? UILabel, let font = label.font {
             return ["size": round2(font.pointSize), "color": hex(label.textColor.cgColor) ?? "transparent",
                     "weight": weight(of: font)]
@@ -297,8 +296,8 @@ enum LayerReader {
             return ["size": round2(font.pointSize), "color": hex(field.textColor?.cgColor) ?? "transparent",
                     "weight": weight(of: font)]
         }
-        guard sampling, NSStringFromClass(type(of: layer)).contains("CGDrawingLayer"),
-              let pixels = PixelSampler.sample(layer),
+        guard NSStringFromClass(type(of: layer)).contains("CGDrawingLayer"), layer.contents != nil,
+              let pixels = PixelSampler.sample(layer, maxSide: PixelSampler.textSide),
               let main = (pixels["colors"] as? [[String: Any]])?.first?["color"] as? String else { return nil }
         // The bitmap's line height is about 1.2 times the font size.
         return ["color": main, "size": round2(layer.bounds.height / 1.2), "estimated": true]
@@ -358,11 +357,13 @@ enum PixelSampler {
     // ponytail: at most 64 px a side keeps a sample near 1 ms; a hairline thinner than one sample pixel
     // reads fainter than it is. Raise it if an agent needs exact line colors.
     private static let maxSide: CGFloat = 64
+    // ponytail: text only needs its main color; 24 px a side keeps it under 0.1 ms a label.
+    static let textSide: CGFloat = 24
     private static let visibleAlpha = 13  // about 5 %
 
     /// The colors a drawing shows (top 3 with their share of its painted pixels), its strongest alpha,
     /// and how much of its box is painted.
-    static func sample(_ layer: CALayer) -> [String: Any]? {
+    static func sample(_ layer: CALayer, maxSide: CGFloat = maxSide) -> [String: Any]? {
         let size = layer.bounds.size
         guard size.width >= 1, size.height >= 1 else { return nil }
         let scale = min(1, maxSide / max(size.width, size.height))

@@ -106,7 +106,7 @@ Without a session, `record` asks the app by Darwin notification (iOS) or broadca
 
 ### check a11y
 
-`check a11y` reports controls (`tap`) smaller than 44x44 pt (iOS) or 48x48 dp (Android), using the touch area when there is one; controls with no label; and text whose contrast with the fill behind it is under WCAG AA (4.5:1, or 3:1 for text of 18 pt, or 14 pt bold). It checks every frame, so text that turns white before its background turns dark is caught too.
+`check a11y` reports controls (`tap`) smaller than 44x44 pt (iOS) or 48x48 dp (Android), using the touch area when there is one; controls with no label; and text whose contrast with the fill behind it is under WCAG AA (4.5:1, or 3:1 for text of 18 pt, or 14 pt bold). It checks every frame and reports the worst moment per element with its time, so text that turns white before its background turns dark is caught too. Text over a gradient, an image or a drawing is not judged; the check lists those elements instead of guessing.
 
 ### check jank, settle
 
@@ -159,7 +159,7 @@ A drawn node belongs to the smallest element whose frame holds it (4 pt toleranc
 - `points` (Android `draw` lines): `[x0, y0, x1, y1]` in window coordinates. `clipRound` (Android): `[x, y, w, h, radius]` of the rounded clip around the node.
 - `shadow` (iOS): `{"radius", "opacity", "color"}` of a layer shadow, which is how SwiftUI draws `.shadow` and most glows.
 - Optional fields appear only when they apply: `visible` when clipped, `opacity` when under 1, `clips` when the node clips its children, `source` when the native view class is known.
-- `text` on a text node: `{"size", "color", "weight"}`, size in the recording's unit. Android reads it from the laid-out Compose style or the TextView; iOS from UILabel / UITextField, and for SwiftUI `Text` from the pixels of the first frame (`"estimated": true`, size from the line height).
+- `text` on a text node: `{"size", "color", "weight"}`, size in the recording's unit. Android reads it from the laid-out Compose style or the TextView; iOS from UILabel / UITextField, and for SwiftUI `Text` from its pixels every frame, sampled at 24 px a side (`"estimated": true`, size from the line height).
 - `own` (Android): the index in `elements` of the element whose subtree drew the node, `-1` for none. The CLI uses it for ownership instead of geometry, so a plain box drawn over a label counts as covering it.
 - Elements: `tap` when the element is a control (iOS button, link or adjustable trait; Android click action), and `touch` (Android) when its touch area is bigger than what it draws, such as a Material chip padded to 48 dp.
 - The header carries `startedAt` (ms since 1970) so `ddp logs` can line log lines up with the take.

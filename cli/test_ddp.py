@@ -264,10 +264,13 @@ with tempfile.TemporaryDirectory() as directory:
                 {"id": "chip", "label": "Chip", "tap": True, "frame": [0, 40, 60, 32], "touch": [0, 32, 60, 48]},
                 {"id": "icon", "tap": True, "frame": [100, 0, 48, 48]},
                 {"id": "faint", "label": "Faint", "frame": [0, 100, 100, 20]},
-                {"id": "dark", "label": "Dark", "frame": [0, 140, 100, 20]}]
+                {"id": "dark", "label": "Dark", "frame": [0, 140, 100, 20]},
+                {"id": "onGradient", "label": "Over a gradient", "frame": [200, 0, 100, 20]}]
     nodes = [{"z": 0, "kind": "layer", "fill": "#FFFFFFFF", "frame": [0, 0, 400, 400], "own": -1},
              {"z": 1, "kind": "bitmap", "frame": [0, 100, 100, 20], "text": {"size": 14, "color": "#CCCCCCFF"}, "own": 3},
              {"z": 2, "kind": "bitmap", "frame": [0, 140, 100, 20], "text": {"size": 14, "color": "#222222FF"}, "own": 4},
+             {"z": 4, "kind": "gradient", "gradient": ["#FFFFFFFF", "#000000FF"], "frame": [200, 0, 100, 20], "own": -1},
+             {"z": 5, "kind": "bitmap", "frame": [200, 0, 100, 20], "text": {"size": 14, "color": "#777777FF"}, "own": 5},
              # Owned by nobody although it sits inside "dark": the recorder said so.
              {"z": 3, "kind": "layer", "fill": "#888888FF", "frame": [0, 140, 100, 20], "own": -1}]
     take.write_text("\n".join(json.dumps(line) for line in [
@@ -275,7 +278,8 @@ with tempfile.TemporaryDirectory() as directory:
         {"type": "frame", "i": 0, "t": 0, "elements": elements, "nodes": nodes}]))
     a11y = ddp_in(directory, "check", "a11y", "--file", "a11y.jsonl").stdout
     assert "SMALL TARGET tiny: 20x20" in a11y and "chip" not in a11y, a11y
-    assert "NO LABEL icon" in a11y and "LOW CONTRAST faint: 1.6:1" in a11y and "dark:" not in a11y, a11y
+    assert "contrast not judged (text over a gradient, image or drawing): onGradient" in a11y, a11y
+    assert "NO LABEL icon" in a11y and "LOW CONTRAST faint: 1.6:1 at t=0ms" in a11y and "dark:" not in a11y, a11y
     assert "COVERED dark" in ddp_in(directory, "check", "overlap", "--file", "a11y.jsonl").stdout
 
     rows = [bytearray(b"\x10\x20\x30\xff" * 5) for _ in range(4)]

@@ -542,15 +542,20 @@ def assign_owners(frame, tolerance):
         else:
             owner = next((e for e in elements if contains(e["frame"], node["frame"], tolerance)), None)
         node["owner"] = element_key(owner) if owner else None
+    # Lookups by name, built once per frame: queries ask for one element in every frame.
+    frame["by_key"] = {element_key(e): e for e in frame["elements"]}
+    frame["by_owner"] = {}
+    for node in frame["nodes"]:
+        frame["by_owner"].setdefault(node["owner"], []).append(node)
 
 
 # ---------- read ----------
 
 def element_state(frame, key):
-    element = next((e for e in frame["elements"] if element_key(e) == key), None)
+    element = frame["by_key"].get(key)
     if element is None:
         return None
-    owned = [n for n in frame["nodes"] if n["owner"] == key]
+    owned = frame["by_owner"].get(key, [])
     filled = [n for n in owned if n.get("fill")]
     bordered = [n for n in owned if n.get("border")]
     widest_border = max(bordered, key=lambda n: n["border"]["width"], default=None)
@@ -986,7 +991,7 @@ def check_parity(args):
 # ---------- check timeline ----------
 
 def element_alpha(frame, key):
-    return max((node_alpha(n) for n in frame["nodes"] if n["owner"] == key), default=0)
+    return max((node_alpha(n) for n in frame["by_owner"].get(key, [])), default=0)
 
 
 def case_name(case):
@@ -1113,10 +1118,14 @@ def contrast(text_color, background):
 
 
 def background_under(frame, node):
-    """The opaque color behind a node: the topmost fill below it that holds its center, blended upwards."""
+    """The opaque color behind a node: the fills below it that hold its center, blended upwards.
+    None when what is right behind it is not a plain fill."""
     x, y, w, h = node["frame"]
     center = (x + w / 2, y + h / 2)
-    below = [n for n in frame["nodes"] if n["z"] < node["z"] and n.get("fill") and paints_at(n, center)]
+    under = [n for n in frame["nodes"] if n["z"] < node["z"] and paints_at(n, center)]
+    if under and not max(under, key=lambda n: n["z"]).get("fill"):
+        return None  # text over a gradient, an image or a drawing: no single color to compare with
+    below = [n for n in under if n.get("fill")]
     color = None
     for fill in sorted(below, key=lambda n: n["z"]):
         if color is None:
@@ -1144,27 +1153,35 @@ def check_a11y(args, recording=None):
             problems[key] = f"SMALL TARGET {key}: {w:.0f}x{h:.0f}, under {minimum}x{minimum}"
         elif not element.get("label"):
             problems[key] = f"NO LABEL {key}: a control a screen reader can't name"
+    worst = {}  # per element, the frame where its text is hardest to read
+    unjudged = set()
     for frame in recording["frames"]:
         for node in frame["nodes"]:
             text = node.get("text") or {}
             key = node.get("owner") or f"text at {node['frame']}"
-            if not text.get("color") or key in problems:
+            if not text.get("color") or (key in problems and key not in worst):
                 continue
             background = background_under(frame, node)
             if not background:
+                unjudged.add(key)
                 continue
             ratio = contrast(over(text["color"], background), background)
             size_pt = (text.get("size") or 0) * to_pt
             large = size_pt >= 18 or (size_pt >= 14 and text.get("weight", 400) >= 700)
             needed = 3 if large else 4.5
-            if ratio < needed:
+            if ratio < needed and ratio < worst.get(key, needed):
+                worst[key] = ratio
                 estimated = " (color read from pixels)" if text.get("estimated") else ""
-                problems[key] = (f"LOW CONTRAST {key}: {ratio:.1f}:1, {text['color']} on {background}, "
-                                 f"needs {needed}:1{estimated}")
+                problems[key] = (f"LOW CONTRAST {key}: {ratio:.1f}:1 at t={frame['t']:.0f}ms, {text['color']} on "
+                                 f"{background}, needs {needed}:1{estimated}")
     for line in problems.values():
         print(line)
-    if not problems and recording is not getattr(args, "shared_recording", None):
-        print("no accessibility problems found")
+    unjudged -= problems.keys()
+    if recording is not getattr(args, "shared_recording", None):
+        if not problems:
+            print("no accessibility problems found")
+        if unjudged:
+            print(f"contrast not judged (text over a gradient, image or drawing): {', '.join(sorted(unjudged))}")
     return len(problems)
 
 
