@@ -15,3 +15,5 @@ dist/
 /npm/bin/ddp-*
 /.build/
 /.swiftpm/
+/npm/README.md
+/npm/LICENSE

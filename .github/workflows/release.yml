@@ -1,7 +1,8 @@
 name: release
 
-# Push a tag like v0.1.2: builds ddp for every platform and attaches the binaries to a GitHub release.
-# npm is published by hand with 2FA from those binaries: npm/publish.sh 0.1.2
+# Push a tag like v0.1.3: builds ddp for every platform, attaches the binaries to a GitHub release and
+# stages the npm package (NPM_TOKEN). Nothing reaches npm until a maintainer approves it with 2FA:
+#   npm stage list agent-ddp, then npm stage approve <id>
 on:
   push:
     tags: ["v*"]
@@ -51,3 +52,16 @@ jobs:
       - run: gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" bin/ddp-* --title "$GITHUB_REF_NAME" --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      # npm stage needs npm 11.19 or later.
+      - run: npm install -g npm@11.19.1
+      - name: Stage the npm package
+        run: |
+          cp bin/ddp-* npm/bin/ && chmod +x npm/bin/ddp-*
+          cp README.md LICENSE npm/
+          cd npm && npm stage publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
