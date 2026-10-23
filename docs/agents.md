@@ -161,7 +161,7 @@ A drawn node belongs to the smallest element whose frame holds it (4 pt toleranc
 ## Recording format (JSON lines)
 
 ```
-{"type":"header","platform":"ios","unit":"pt","scale":3,"frames":240}
+{"type":"header","protocol":1,"platform":"ios","unit":"pt","scale":3,"frames":240}
 {"type":"frame","i":0,"t":0,"elements":[{"id":"flashBox","label":"Flash","frame":[x,y,w,h]}],
  "nodes":[{"z":5,"kind":"layer","frame":[x,y,w,h],"visible":[x,y,w,h],"fill":"#RRGGBBAA",
            "border":{"width":2,"color":"#RRGGBBAA"},"corner":12,"opacity":0.5,"clips":true,"source":"ActionBarContainer"}]}

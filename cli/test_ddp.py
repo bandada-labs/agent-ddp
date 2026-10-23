@@ -53,6 +53,13 @@ with tempfile.TemporaryDirectory() as directory:
     lines.append({"type": "end", "frames": 5})
     recording.write_text("\n".join(json.dumps(line) for line in lines))
 
+    # A library newer than the CLI: stop with the fix instead of misreading frames. No field means protocol 0.
+    newer = Path(directory, "newer.jsonl")
+    newer.write_text("\n".join(json.dumps(line) for line in [{**lines[0], "protocol": 99}, *lines[1:]]))
+    refused = ddp_in(directory, "read", "--file", str(newer), "--json")
+    assert refused.returncode == 1 and json.loads(refused.stdout)["code"] == "protocol_too_new", refused.stdout
+    assert "agent-ddp@latest" in json.loads(refused.stdout)["next"], refused.stdout
+
     summary = run("read", recording=recording)
     assert "border: 0 -> 0" in summary and "max 4" in summary and "TRANSIENT" in summary, summary
     assert "borderColor: None -> None, 3 values" in summary, summary

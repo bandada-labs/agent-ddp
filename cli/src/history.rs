@@ -3,7 +3,7 @@
 use crate::args::Args;
 use crate::device::target;
 use crate::live::{live_session, LiveClient};
-use crate::model::{contains, decode, element_key, element_state, option_equal, rect, save_recording, Frame};
+use crate::model::{self, contains, decode, element_key, element_state, option_equal, rect, save_recording, Frame};
 use crate::py::{self, f};
 use crate::state::{adb_path, ctx, local_time, now_ms, parse_ms, Result, ANDROID_DIR};
 use crate::{fail, say};
@@ -57,6 +57,7 @@ fn read_segments(args: &Args, since: f64) -> Result<Vec<Segment>> {
         // The last line of a file the app was writing when it died may be cut: skip what does not parse.
         let lines: Vec<Value> = decode(&files[name]).lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
         let Some(header) = lines.iter().find(|l| l["type"] == "header").cloned() else { continue };
+        model::check_protocol(&header)?;
         let started = f(&header["startedAt"]);
         let kept = lines
             .into_iter()

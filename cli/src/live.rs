@@ -193,6 +193,9 @@ impl LiveClient {
                 self.done = true;
                 fail!(py::str(&message["error"]), "app_error");
             }
+            if message["type"] == "header" {
+                model::check_protocol(&message)?;
+            }
             if message["type"] == "end" {
                 self.done = true;
                 if message.get("frames").is_none() {

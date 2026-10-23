@@ -4,6 +4,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 
 ## Unreleased
 
+- Protocol version 1: the libraries send `"protocol": 1` in every header. The CLI stops with `protocol_too_new` when a library is newer than it, and still reads older ones.
 - README rewritten with real output, prompts to give an agent, MCP setup and a FAQ.
 - ARCHITECTURE.md, docs/protocol.md, CONTRIBUTING.md, SECURITY.md and AGENTS.md for contributors.
 - CI also checks `rustfmt` and `clippy`, and builds the iOS and Android libraries.

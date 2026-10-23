@@ -144,8 +144,12 @@ final class FrameStream {
 }
 
 enum FrameCapture {
+    /// The DDP protocol version (docs/protocol.md). Raise it only when a field changes meaning or goes away.
+    static let protocolVersion = 1
+
     static func header(frames: Int) -> [String: Any] {
-        ["type": "header", "platform": "ios", "unit": "pt", "scale": UIScreen.main.scale, "frames": frames,
+        ["type": "header", "protocol": protocolVersion, "platform": "ios", "unit": "pt", "scale": UIScreen.main.scale,
+         "frames": frames,
          "startedAt": (Date().timeIntervalSince1970 * 1000).rounded()]
     }
 

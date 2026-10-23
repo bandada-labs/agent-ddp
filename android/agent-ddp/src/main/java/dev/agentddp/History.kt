@@ -148,7 +148,7 @@ private class Segment(private val directory: File, val startedAt: Long, scale: D
     private var slowestCaptureMs = 0.0
 
     init {
-        line(JSONObject().put("type", "header").put("platform", "android").put("unit", "px").put("scale", scale)
+        line(JSONObject().put("type", "header").put("protocol", FrameCapture.PROTOCOL).put("platform", "android").put("unit", "px").put("scale", scale)
             .put("frames", 0).put("startedAt", startedAt).put("history", true))
     }
 

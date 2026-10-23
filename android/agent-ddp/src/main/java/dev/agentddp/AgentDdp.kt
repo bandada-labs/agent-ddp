@@ -186,9 +186,12 @@ internal class FrameStream(
 
 internal object FrameCapture {
     /** Null when no activity is in the foreground. */
+    /** The DDP protocol version (docs/protocol.md). Raise it only when a field changes meaning or goes away. */
+    const val PROTOCOL = 1
+
     fun header(frames: Int): JSONObject? {
         val activity = FrameRecorder.resumedActivity ?: return null
-        return JSONObject().put("type", "header").put("platform", "android").put("unit", "px")
+        return JSONObject().put("type", "header").put("protocol", PROTOCOL).put("platform", "android").put("unit", "px")
             .put("scale", activity.resources.displayMetrics.density.toDouble()).put("frames", frames)
             .put("startedAt", System.currentTimeMillis())
     }

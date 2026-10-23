@@ -54,6 +54,24 @@ impl Frame {
     }
 }
 
+/// The DDP protocol this CLI reads (docs/protocol.md). A header without `protocol` comes from a library
+/// older than the field, which reads as 0 and is still understood. Raise it when a field changes meaning
+/// or goes away; an added optional field needs no new version.
+pub const PROTOCOL: u64 = 1;
+
+/// A library newer than this CLI may send frames it would misread, so it stops instead of guessing.
+pub fn check_protocol(header: &Value) -> Result<()> {
+    let spoken = header.get("protocol").and_then(Value::as_u64).unwrap_or(0);
+    if spoken > PROTOCOL {
+        fail!(
+            format!("the app's library speaks DDP protocol {spoken}; this ddp reads up to {PROTOCOL}"),
+            "protocol_too_new",
+            "npm i -g agent-ddp@latest"
+        );
+    }
+    Ok(())
+}
+
 pub struct Recording {
     pub header: Value,
     pub end: Value,
@@ -227,6 +245,7 @@ pub fn from_lines(lines: Vec<Value>, path: PathBuf) -> Result<Recording> {
             "ddp record again"
         );
     };
+    check_protocol(&header)?;
     let end = lines.iter().find(|l| l["type"] == "end").cloned().unwrap_or_else(|| json!({}));
     let tolerance = tolerance_for(&header);
     let frames = lines.into_iter().filter(|l| l["type"] == "frame").map(|l| Frame::from(l, tolerance)).collect();

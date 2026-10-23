@@ -2,7 +2,11 @@
 
 This is the contract between the library inside the app and any client. The `ddp` CLI is one client. Another tool can speak the same protocol without it.
 
-Version: 0 (before 1.0). Fields may be added in any release. Removing or renaming a field or a command is listed in [CHANGELOG.md](../CHANGELOG.md).
+Version: 1. The `header` of every stream, recording and history file carries it as `"protocol": 1`. A header without the field comes from a library older than the field and reads as 0.
+
+- Adding an optional field does not change the version. A client must ignore fields it does not know.
+- Changing what a field means, or removing a field or a command, raises the version and is listed in [CHANGELOG.md](../CHANGELOG.md).
+- A client stops when the version is higher than the one it knows, instead of guessing. The `ddp` CLI fails with code `protocol_too_new` and tells the user to update. It still reads every lower version.
 
 ## Transport
 
@@ -43,7 +47,7 @@ When something fails the app sends `{"type": "error", "error": "<message for a p
 ### header
 
 ```json
-{"type": "header", "platform": "ios", "unit": "pt", "scale": 3, "frames": 240, "startedAt": 1761210000000}
+{"type": "header", "protocol": 1, "platform": "ios", "unit": "pt", "scale": 3, "frames": 240, "startedAt": 1761210000000}
 ```
 
 `unit` is `pt` on iOS and `px` on Android. `scale` converts between them. `startedAt` is ms since 1970.
