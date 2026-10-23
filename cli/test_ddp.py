@@ -1,5 +1,6 @@
 """Self-check for the ddp CLI logic on a synthetic recording: python3 cli/test_ddp.py"""
 import json
+import math
 import subprocess
 import sys
 import tempfile
@@ -210,6 +211,51 @@ with tempfile.TemporaryDirectory() as directory:
         assert size <= budget, f"{command} printed {size} chars, budget {budget}"
         if "-v" in sys.argv:
             print(command, size)
+
+# Curves, jank, settle, baselines.
+def motion_recording(times, xs, label="box"):
+    lines = [{"type": "header", "platform": "ios", "unit": "pt", "scale": 3, "frames": len(times)}]
+    for i, (t, x) in enumerate(zip(times, xs)):
+        lines.append({"type": "frame", "i": i, "t": t, "elements": [{"id": label, "frame": [x, 0, 40, 40]}],
+                      "nodes": [{"z": 0, "kind": "layer", "fill": "#FF0000FF", "frame": [x, 0, 40, 40]}]})
+    return "\n".join(json.dumps(line) for line in lines)
+
+
+with tempfile.TemporaryDirectory() as directory:
+    take = Path(directory, "move.jsonl")
+    times = [i * 16 for i in range(80)]
+    # Holds at 0, moves to 100 over 400 ms on the CSS ease-out curve, then holds.
+    from importlib.machinery import SourceFileLoader
+    curves = SourceFileLoader("ddp_curves", str(CLI)).load_module()
+    xs = [0] * 10 + [round(100 * curves.bezier_progress(curves.EASINGS["easeOut"], u / 25), 2) for u in range(1, 26)] + [100] * 45
+    take.write_text(motion_recording(times, xs))
+    curve = run("get", "box", "--curve", recording=take)
+    assert "x: 0 -> 100.0 over 400ms from 144ms, easeOut" in curve and "loose" not in curve, curve
+    assert curves.sparkline([(0, 0), (50, 4), (100, 0)], width=3) == "▁█▁"
+    assert curves.sparkline([(0, 1), (50, 0.2), (100, 1)], width=3) == "█▁█"  # a dip shows too
+    assert "no jank" in run("check", "jank", recording=take)
+    assert "everything settled" in run("check", "settle", recording=take)
+
+    gaps = Path(directory, "gaps.jsonl")
+    gaps.write_text(motion_recording([0, 16, 32, 48, 130, 146, 162, 178], [0] * 8))
+    jank = ddp_in(directory, "check", "jank", "--file", "gaps.jsonl").stdout
+    assert "JANK 1 hitches" in jank and "worst 82ms at t=48ms" in jank, jank
+
+    loop = Path(directory, "loop.jsonl")
+    loop.write_text(motion_recording(times, [20 * math.sin(i / 3) for i in range(80)]))
+    assert "NOT SETTLED box: x" in ddp_in(directory, "check", "settle", "--file", "loop.jsonl").stdout
+    shaky = Path(directory, "shaky.jsonl")
+    shaky.write_text(motion_recording(times, [0] * 40 + [0.4 * (i % 2) for i in range(40)]))
+    assert "JITTER box: x shakes by 0.40pt" in ddp_in(directory, "check", "settle", "--file", "shaky.jsonl").stdout
+
+    assert "baseline before" in ddp_in(directory, "baseline", "save", "before", "--file", "move.jsonl").stdout
+    same = ddp_in(directory, "check", "baseline", "--against", "before", "--file", "move.jsonl")
+    assert same.returncode == 0 and "0 of 1 elements changed" in same.stdout, same.stdout
+    slower = Path(directory, "slower.jsonl")
+    slower.write_text(motion_recording(times, [0] * 10 + [4 * u for u in range(1, 26)] + [100] * 45))
+    changed = ddp_in(directory, "check", "baseline", "--against", "before", "--file", "slower.jsonl", "--junit", "j.xml")
+    assert changed.returncode == 1 and "CHANGED box" in changed.stdout, changed.stdout
+    assert '<testsuite name="ddp baseline before" tests="1" failures="1">' in Path(directory, "j.xml").read_text()
 
 # --then runs without a shell, so "; touch" is an argument to echo, not a second command.
 from importlib.machinery import SourceFileLoader

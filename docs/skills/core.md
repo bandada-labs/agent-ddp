@@ -34,7 +34,10 @@ ddp tree --within @e4 -d 1   # one part of the screen, one level deep
 ddp find text "Picked"       # elements by part of a label, no tree needed
 ddp find id flashBox
 ddp get @e3 --from 1s --to 1.5s
+ddp get @e3 --curve          # each move: 0 -> 4 over 400ms from 550ms, easeInOut
 ```
+
+`read` draws each numeric track as a sparkline (`border 0 -> 0 ▁▅█▂▁▁`), so the shape of an animation costs a few tokens. `get --curve` names the easing (linear, easeIn, easeOut, easeInOut, fastOutSlowIn) or a spring with its overshoot, ready to compare with a design spec.
 
 ## Saving tokens
 
@@ -62,7 +65,11 @@ ddp check overlap      # something drawn over a control
 ddp check corners      # a fill or hatch past rounded corners
 ddp check timeline --expect cases.json   # MISSING / LATE / EARLY / SHOWN against an expected timeline
 ddp check parity --file ios.jsonl --against android.jsonl
-ddp check all          # every check that needs only one take
+ddp check jank         # missed refreshes: hitches with their time and length
+ddp check settle       # still moving at the end (a loop?) or shaking by about 1 pt
+ddp check all          # overlap, corners, jank and settle over one take, problems only
+ddp baseline save before            # keep the take in ddp-baselines/ (commit it)
+ddp check baseline --against before [--junit report.xml]   # what changed since, per element
 ```
 
 ## Troubleshooting

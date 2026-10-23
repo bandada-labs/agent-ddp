@@ -63,7 +63,7 @@ Without a session, `record` asks the app by Darwin notification (iOS) or broadca
 
 ### read
 
-`read` prints, per element, its last state and every property that changed: first and last value, time window, min and max. `TRANSIENT` marks a value that is the same at start and end but different in between, such as a border that flashes during an animation. `--id` prints the per-frame timeline of one element instead. It also tracks `pixels` (main color and peak alpha) for SwiftUI `Canvas` / `drawingGroup`, sampled at up to 64 px a side, so a hairline reads fainter than it is.
+`read` prints, per element, its last state and every property that changed: first and last value, a sparkline of numeric tracks, time window, min and max. `TRANSIENT` marks a value that is the same at start and end but different in between, such as a border that flashes during an animation. `--id` prints the per-frame timeline of one element instead. It also tracks `pixels` (main color and peak alpha) for SwiftUI `Canvas` / `drawingGroup`, sampled at up to 64 px a side, so a hairline reads fainter than it is.
 
 ### tree, get, find, diff
 
@@ -89,6 +89,18 @@ Without a session, `record` asks the app by Darwin notification (iOS) or broadca
 ```
 
 `id` is the element id or label; `text` matches part of a label instead (any case). `"absent": true` turns a case around: the element must not be drawn between `at` and `until` (default: the end of the recording), and it reports `SHOWN` with how many frames and when. The absent window is narrowed by the tolerance at both ends, so a fade that ends on time does not count. `at` / `until` are ms from the origin: `first-change` (the action, default) or `start` (the first recorded frame). `until`, `minAlpha` (default 0.05, peak alpha of what the element owns), `frame` (in pt) and `tolerancePt` are optional. An element on screen from the first frame counts as on time for a case at 0. Record long enough to cover the last case: a recording that ends early reports the late cases as missing.
+
+### get --curve
+
+`get <element> --curve` splits each numeric track (x, y, w, h, alpha, border, opacity) into moves and prints `from -> to over <ms> from <ms>`, plus the named timing curve that fits best (`linear`, `easeIn`, `easeOut`, `easeInOut`, `fastOutSlowIn`) or `spring (overshoot N%)`. A flash that comes back is two moves, out and back. A fit worse than 0.05 RMS says `loose fit`.
+
+### check jank, settle
+
+`check jank` finds frame intervals over 3x the usual one (two or more missed refreshes) from the frame times, and prints the recorder's own capture cost next to them. `check settle` reports elements still changing in the last 500 ms (`NOT SETTLED`: a loop, or a take that ended too early) and positions that shake by 1 pt or less (`JITTER`). It needs a take of 1 s or more.
+
+### check all, baseline
+
+`check all` runs overlap, corners, jank and settle on one take, prints only problems and a summary, and exits 1 on any. `baseline save <name>` stores the last take (or `--file`) in `ddp-baselines/<name>.jsonl.gz`, next to the code so it can be committed. `check baseline --against <name>` lines the take up with it on the first change and prints `CHANGED <element> from t=...` with the first differences; `--junit <file>` also writes a JUnit report for CI.
 
 ### check parity
 

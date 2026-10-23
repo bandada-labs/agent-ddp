@@ -594,8 +594,28 @@ def describe_track(name, states, times):
     if all(isinstance(v, (int, float)) for _, v in present):
         peak_t, peak = max(present, key=lambda p: p[1])
         low_t, low = min(present, key=lambda p: p[1])
-        return f"  {name}: {first} -> {last}, {window}, min {low} @{low_t}ms, max {peak} @{peak_t}ms{note}"
+        return (f"  {name}: {first} -> {last} {sparkline(present)}, {window}, "
+                f"min {low} @{low_t}ms, max {peak} @{peak_t}ms{note}")
     return f"  {name}: {first} -> {last}, {len(change_times) + 1} values, {window}{note}"
+
+
+SPARK = "▁▂▃▄▅▆▇█"
+
+
+def sparkline(points, width=12):
+    """The shape of a numeric track in a few characters: per time slice, the value farthest from where the
+    track started, so a dip shows as well as a peak."""
+    start, end = points[0][0], points[-1][0]
+    low, high = min(v for _, v in points), max(v for _, v in points)
+    span = (end - start) or 1
+    slices = [[] for _ in range(width)]
+    for t, value in points:
+        slices[min(int((t - start) / span * width), width - 1)].append(value)
+    marks, last = [], points[0][1]
+    for values in slices:
+        last = max(values, key=lambda v: abs(v - points[0][1])) if values else last  # an empty slice repeats the last
+        marks.append(SPARK[round((last - low) / ((high - low) or 1) * (len(SPARK) - 1))])
+    return "".join(marks)
 
 
 def read(args):
@@ -637,6 +657,97 @@ def print_timeline(key, frames, states):
         if row != previous:
             print(f"  {frame['t']:>8} {row}")
         previous = row
+
+
+# ---------- curves ----------
+
+# CSS / SwiftUI / Compose named timing curves as cubic Bezier control points.
+EASINGS = {"linear": (0, 0, 1, 1), "easeIn": (0.42, 0, 1, 1), "easeOut": (0, 0, 0.58, 1),
+           "easeInOut": (0.42, 0, 0.58, 1), "fastOutSlowIn": (0.4, 0, 0.2, 1)}
+
+
+def bezier_progress(control, x):
+    """y of a timing curve at time x (0..1), found by bisection on the curve's x."""
+    x1, y1, x2, y2 = control
+
+    def at(a, b, u):
+        return 3 * a * u * (1 - u) ** 2 + 3 * b * u * u * (1 - u) + u ** 3
+
+    low, high = 0.0, 1.0
+    for _ in range(30):
+        middle = (low + high) / 2
+        low, high = (middle, high) if at(x1, x2, middle) < x else (low, middle)
+    return at(y1, y2, (low + high) / 2)
+
+
+def segments(points):
+    """Moves of a numeric track: runs of change between holds, split again at a turn (rise then fall)."""
+    runs, current = [], []
+    for index in range(1, len(points)):
+        moving = points[index][1] != points[index - 1][1]
+        if moving:
+            current = current or [points[index - 1]]
+            current.append(points[index])
+        elif current and all(points[j][1] == points[index][1] for j in range(index, min(index + 3, len(points)))):
+            runs.append(current)
+            current = []
+    if current:
+        runs.append(current)
+    split = []
+    for run in runs:
+        start, end = run[0][1], run[-1][1]
+        extreme = max(range(len(run)), key=lambda i: abs(run[i][1] - start))
+        # Comes back to where it started (a flash): two moves, out and back.
+        if 0 < extreme < len(run) - 1 and abs(end - start) < abs(run[extreme][1] - start) / 2:
+            split += [run[:extreme + 1], run[extreme:]]
+        else:
+            split.append(run)
+    return split
+
+
+def describe_move(run):
+    """`0 -> 4 over 400ms from 550ms, easeOut` or a spring with its overshoot."""
+    (t0, v0), (t1, v1) = run[0], run[-1]
+    duration = t1 - t0
+    distance = v1 - v0
+    text = f"{v0} -> {v1} over {duration:.0f}ms from {t0:.0f}ms"
+    if not distance or duration <= 0 or len(run) < 4:
+        return text
+    progress = [((t - t0) / duration, (v - v0) / distance) for t, v in run]
+    overshoot = max(p for _, p in progress) - 1
+    if overshoot > 0.02:
+        return f"{text}, spring (overshoot {overshoot:.0%})"
+    fits = {name: math.sqrt(sum((bezier_progress(c, x) - y) ** 2 for x, y in progress) / len(progress))
+            for name, c in EASINGS.items()}
+    best = min(fits, key=fits.get)
+    return f"{text}, {best}" + ("" if fits[best] < 0.05 else f" (loose fit {fits[best]:.2f})")
+
+
+def numeric_tracks(recording, key):
+    """x, y, w, h, alpha, border, opacity of one element per frame, in the recording's unit."""
+    tracks = {name: [] for name in ("x", "y", "w", "h", "alpha", "border", "opacity")}
+    for frame in recording["frames"]:
+        state = element_state(frame, key)
+        if state is None:
+            continue
+        values = dict(zip("xywh", state["frame"]), alpha=round(element_alpha(frame, key), 3),
+                      border=state["border"], opacity=state["opacity"])
+        for name, value in values.items():
+            tracks[name].append((frame["t"], value))
+    return tracks
+
+
+def print_curves(recording, key):
+    print(f"{key} moves (unit {recording['header']['unit']}):")
+    found = False
+    for name, points in numeric_tracks(recording, key).items():
+        for run in segments(points):
+            if abs(run[-1][1] - run[0][1]) < 0.05 and len(run) < 4:
+                continue  # rounding noise, not a move
+            found = True
+            print(f"  {name}: {describe_move(run)}")
+    if not found:
+        print("  no numeric change")
 
 
 # ---------- check overlap ----------
@@ -967,6 +1078,127 @@ def check_timeline(args):
         sys.exit(1)
 
 
+# ---------- check jank, settle ----------
+
+JANK_FACTOR = 3        # a frame interval 3x the usual one means at least two missed refreshes
+SETTLE_WINDOW_MS = 500
+JITTER_PT = 1
+
+
+def check_jank(args, recording=None):
+    """Missed refreshes from the frame timestamps the recorder already writes."""
+    recording = recording or recording_for(args)
+    times = [f["t"] for f in recording["frames"]]
+    intervals = sorted(b - a for a, b in zip(times, times[1:]))
+    if not intervals:
+        return 0
+    usual = intervals[len(intervals) // 2]
+    hitches = [(a, b - a) for a, b in zip(times, times[1:]) if b - a > usual * JANK_FACTOR]
+    end = recording["end"]
+    if hitches:
+        worst = max(hitches, key=lambda h: h[1])
+        print(f"JANK {len(hitches)} hitches over {times[-1] - times[0]:.0f}ms (usual frame {usual:.1f}ms), "
+              f"worst {worst[1]:.0f}ms at t={worst[0]:.0f}ms: " +
+              ", ".join(f"{t:.0f}ms+{gap:.0f}" for t, gap in hitches[:8]) + (" ..." if len(hitches) > 8 else ""))
+        print(f"  capture cost per frame: average {end.get('averageCaptureMs')} ms, slowest {end.get('slowestCaptureMs')} ms"
+              " (the recorder's own share)")
+    elif recording is not getattr(args, "shared_recording", None):
+        print(f"no jank: {len(times)} frames, usual frame {usual:.1f}ms")
+    return len(hitches)
+
+
+def check_settle(args, recording=None):
+    """Elements still moving at the end of the take (an animation that never stops),
+    or shaking back and forth by about a point (jitter)."""
+    recording = recording or recording_for(args)
+    frames = recording["frames"]
+    to_pt = 1 / recording["header"].get("scale", 1) if recording["header"].get("unit") == "px" else 1
+    if frames[-1]["t"] - frames[0]["t"] < 2 * SETTLE_WINDOW_MS:
+        if recording is not getattr(args, "shared_recording", None):
+            print(f"take too short to tell: settle needs {2 * SETTLE_WINDOW_MS}ms or more")
+        return 0
+    window_start = frames[-1]["t"] - SETTLE_WINDOW_MS
+    problems = 0
+    for key in element_keys(frames):
+        for name, points in numeric_tracks(recording, key).items():
+            tail = [v for t, v in points if t >= window_start]
+            steps = [b - a for a, b in zip(tail, tail[1:]) if b != a]
+            if len(steps) < 3:
+                continue
+            turns = sum(1 for a, b in zip(steps, steps[1:]) if (a > 0) != (b > 0))
+            amplitude = (max(tail) - min(tail)) * (to_pt if name in ("x", "y", "w", "h", "border") else 1)
+            if turns >= 2 and amplitude <= JITTER_PT and name in ("x", "y", "w", "h"):
+                print(f"JITTER {key}: {name} shakes by {amplitude:.2f}pt, {turns} turns in the last {SETTLE_WINDOW_MS}ms")
+            else:
+                print(f"NOT SETTLED {key}: {name} still changes in the last {SETTLE_WINDOW_MS}ms "
+                      f"({len(steps)} changes, {tail[0]} -> {tail[-1]}). A loop, or record longer to tell")
+            problems += 1
+            break  # one line per element
+    if not problems and recording is not getattr(args, "shared_recording", None):
+        print(f"everything settled in the last {SETTLE_WINDOW_MS}ms")
+    return problems
+
+
+# ---------- baselines ----------
+
+BASELINE_DIR = Path("ddp-baselines")
+
+
+def baseline(args):
+    """Keep the last take as a baseline next to the code, so it can be committed and checked in CI."""
+    source = recording_path(str(args.file)) if args.file else DEFAULT_FILE
+    if not source.exists():
+        fail(f"{source} not found", "file_not_found", "ddp record first")
+    BASELINE_DIR.mkdir(exist_ok=True)
+    target = BASELINE_DIR / f"{args.name}.jsonl.gz"
+    with gzip.open(target, "wt", encoding="utf-8") as archive:
+        archive.write(read_text(source))
+    print(f"baseline {args.name} -> {target} ({target.stat().st_size} bytes)")
+
+
+def check_baseline(args):
+    if not args.against:
+        fail("check baseline needs --against <baseline name>", "missing_option", "ddp baseline save NAME, then --against NAME")
+    path = BASELINE_DIR / f"{args.against}.jsonl.gz"
+    path = path if path.exists() else recording_path(str(args.against))
+    expected, actual = with_origin(load(path)), with_origin(recording_for(args))
+    keys = element_keys(expected["frames"]) + [k for k in element_keys(actual["frames"]) if k not in element_keys(expected["frames"])]
+    results = []
+    for key in keys:
+        first = None
+        for frame in actual["frames"]:
+            t = frame["t"] - actual["origin"]
+            other = frame_at(expected["frames"], t + expected["origin"])
+            found = state_differences(comparable_state(expected, other, key), comparable_state(actual, frame, key))
+            if found:
+                first = (t, found)
+                break
+        results.append((key, first))
+        if first:
+            print(f"CHANGED {key} from t={first[0]:.0f}ms: {'; '.join(first[1][:3])} (baseline vs now)")
+    changed = sum(1 for _, first in results if first)
+    print(f"baseline {args.against}: {changed} of {len(results)} elements changed")
+    if args.junit:
+        write_junit(args.junit, f"ddp baseline {args.against}",
+                    [(key, f"from t={first[0]:.0f}ms: {'; '.join(first[1])}" if first else None) for key, first in results])
+    if changed:
+        sys.exit(1)
+
+
+def write_junit(path, suite, cases):
+    """cases: (name, failure message or None)."""
+    from xml.sax.saxutils import quoteattr
+    failures = sum(1 for _, message in cases if message)
+    lines = [f'<testsuite name={quoteattr(suite)} tests="{len(cases)}" failures="{failures}">']
+    for name, message in cases:
+        if message:
+            lines.append(f"  <testcase name={quoteattr(name)}><failure message={quoteattr(message)}/></testcase>")
+        else:
+            lines.append(f"  <testcase name={quoteattr(name)}/>")
+    lines.append("</testsuite>")
+    Path(path).write_text("\n".join(lines) + "\n")
+
+
 # ---------- check all ----------
 
 def check_all(args):
@@ -1116,6 +1348,9 @@ def get(args):
     frames = frames_between(recording["frames"], args.start and parse_ms(args.start), args.end and parse_ms(args.end))
     if args.id not in element_keys(recording["frames"]):
         fail(f"no element '{args.id}'. Known: {', '.join(element_keys(recording['frames']))}", "unknown_element", "ddp tree, or ddp find text <part of a label>")
+    if args.curve:
+        print_curves({**recording, "frames": frames}, args.id)
+        return
     print_timeline(args.id, frames, [element_state(f, args.id) for f in frames])
 
 
@@ -1412,8 +1647,9 @@ def batch(args):
         sys.exit(worst)
 
 
-RECORDING_CHECKS = {"overlap": check_overlap, "corners": check_corners}
-CHECKS = {**RECORDING_CHECKS, "parity": check_parity, "timeline": check_timeline, "all": check_all}
+RECORDING_CHECKS = {"overlap": check_overlap, "corners": check_corners, "jank": check_jank, "settle": check_settle}
+CHECKS = {**RECORDING_CHECKS, "parity": check_parity, "timeline": check_timeline, "baseline": check_baseline,
+          "all": check_all}
 
 
 def build_parser():
@@ -1504,10 +1740,16 @@ def build_parser():
     check_parser = command("check", lambda args: CHECKS[args.what](args), help="checks over a recording (live: records first)")
     check_parser.add_argument("what", choices=list(CHECKS))
     check_parser.add_argument("--expect", type=Path, help="timeline: expected cases JSON (ddp skills get core --filter timeline)")
-    check_parser.add_argument("--against", type=Path, help="parity: the other platform's recording")
+    check_parser.add_argument("--against", type=Path, help="parity: the other platform's recording; baseline: its name")
+    check_parser.add_argument("--junit", type=Path, help="baseline: also write a JUnit XML report here")
     check_parser.add_argument("--all-frames", action="store_true", help="check every frame, not only the last")
     add_window(check_parser)
     add_file(check_parser)
+
+    baseline_parser = command("baseline", baseline, help="keep a take under ddp-baselines/ to check against later")
+    baseline_parser.add_argument("action", choices=["save"])
+    baseline_parser.add_argument("name")
+    add_file(baseline_parser)
 
     tree_parser = command("tree", tree, help="elements and what they drew at one moment (live: now)")
     tree_parser.add_argument("--at", help="offline: time (1.5s, 1500ms, 1500); default the last frame")
@@ -1524,6 +1766,8 @@ def build_parser():
     get_parser.add_argument("id", help="element id, label or @ref")
     get_parser.add_argument("--from", dest="start", help="time (1.5s, 1500ms)")
     get_parser.add_argument("--to", dest="end", help="time (1.5s, 1500ms)")
+    get_parser.add_argument("--curve", action="store_true",
+                            help="each move as from -> to, duration, delay and easing (or spring overshoot)")
     add_window(get_parser)
     add_file(get_parser)
 
