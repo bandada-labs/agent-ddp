@@ -4,6 +4,8 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 
 ## Unreleased
 
+- The library also serves the Chrome DevTools Protocol (ADR 0007): discovery on `/json/version` and `/json/list`, a WebSocket with `Browser.getVersion`, `Target.getTargets` and `Schema.getDomains`. On Android `chrome://inspect` lists the app. The v1 endpoint is unchanged.
+
 ## 0.1.5 (2026-10-23)
 
 - Protocol version 1: the libraries send `"protocol": 1` in every header. The CLI stops with `protocol_too_new` when a library is newer than it, and still reads older ones.

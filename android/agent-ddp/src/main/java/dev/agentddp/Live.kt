@@ -27,13 +27,14 @@ internal object LiveServer {
     // Abstract sockets are open to every app on the device: only adb (the shell user) and root may talk.
     private const val SHELL_UID = 2000
     private const val ROOT_UID = 0
+    val ALLOWED_UIDS = setOf(SHELL_UID, ROOT_UID)
 
     fun start(packageName: String) {
         thread(name = "agentddp-live", isDaemon = true) {
             val server = runCatching { LocalServerSocket("agentddp.$packageName") }.getOrNull() ?: return@thread
             while (true) {
                 val socket = runCatching { server.accept() }.getOrNull() ?: continue
-                if (socket.peerCredentials.uid !in setOf(SHELL_UID, ROOT_UID)) {
+                if (socket.peerCredentials.uid !in ALLOWED_UIDS) {
                     socket.close()
                     continue
                 }

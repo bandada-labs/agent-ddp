@@ -47,3 +47,13 @@ Asked to choose between Python and Rust before publishing: "Rust primero" (Rust 
 
 ### Release 0.1.5 and security reports
 Asked to push and release 0.1.5: "yes". Asked to turn on private vulnerability reporting and give a contact email for a code of conduct: "yes but no notifications". Private reporting is on; no contact email, so no code of conduct for now.
+
+### Name in prose
+"recuerda que cuando se hable de agent-ddp debería ser Agent-DDP, ¿no?"
+(Remember that when we talk about agent-ddp it should be Agent-DDP, right?)
+
+### CDP as the protocol
+"no me interesa mucho que sean opciones de ddp, me hago entender? sino que sea casi que una copia exacta de cdp".
+(I don't want them as ddp options, I want almost an exact copy of CDP.)
+
+After asking what QuickJS is, why not plain Java and why not Rust: "bueno aprobado anota todo, y dale arranca". (Approved, write it all down and start.) QuickJS on Android, JavaScriptCore on iOS, the CDP server in Swift and Kotlin, no Rust core for now. ADR 0007.

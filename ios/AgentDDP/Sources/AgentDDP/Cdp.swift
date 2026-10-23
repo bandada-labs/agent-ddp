@@ -1,0 +1,311 @@
+#if DEBUG && canImport(UIKit)
+import CryptoKit
+import Foundation
+import Network
+import UIKit
+
+/// The Chrome DevTools Protocol endpoint (ADR 0007): HTTP discovery on `/json/version` and `/json/list`,
+/// then JSON-RPC over a WebSocket. Bound to 127.0.0.1; the port goes to `Library/Caches/agent-ddp/cdp.json`.
+/// Like Chrome, discovery needs no token: the Host check stops DNS rebinding and the Origin check stops web pages.
+final class CdpServer {
+    static let shared = CdpServer()
+
+    private let queue = DispatchQueue(label: "dev.agentddp.cdp")
+    private var listener: NWListener?
+
+    func start(directory: URL) {
+        let parameters = NWParameters.tcp
+        parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: .any)
+        guard listener == nil, let listener = try? NWListener(using: parameters) else { return }
+        let target = CdpTarget(bundleIdentifier: Bundle.main.bundleIdentifier ?? "app",
+                               title: Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
+                                   ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "app")
+        let endpointFile = directory.appendingPathComponent("cdp.json")
+        listener.stateUpdateHandler = { state in
+            guard case .ready = state, let port = listener.port?.rawValue,
+                  let data = try? JSONSerialization.data(withJSONObject: ["port": Int(port)]) else { return }
+            try? data.write(to: endpointFile, options: .atomic)
+        }
+        listener.newConnectionHandler = { [queue] connection in
+            CdpConnection(connection: connection, target: target, queue: queue).start()
+        }
+        listener.start(queue: queue)
+        self.listener = listener
+    }
+}
+
+struct CdpTarget {
+    let bundleIdentifier: String
+    let title: String
+    let id = "app"
+    var url: String { "ios-app://\(bundleIdentifier)" }
+
+    func info() -> [String: Any] {
+        ["targetId": id, "type": "page", "title": title, "url": url, "attached": false, "canAccessOpener": false]
+    }
+}
+
+/// One HTTP request: a discovery answer and close, or a WebSocket upgrade that then carries CDP messages.
+private final class CdpConnection {
+    private let connection: NWConnection
+    private let target: CdpTarget
+    private let queue: DispatchQueue
+    private var buffer = Data()
+    private var session: CdpSession?
+
+    init(connection: NWConnection, target: CdpTarget, queue: DispatchQueue) {
+        self.connection = connection
+        self.target = target
+        self.queue = queue
+    }
+
+    // The connection's handlers keep the object alive until it closes.
+    func start() {
+        connection.stateUpdateHandler = { [connection] state in
+            if case .failed = state { connection.cancel() }
+        }
+        connection.start(queue: queue)
+        receive()
+    }
+
+    private func receive() {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { [self] data, _, isComplete, error in
+            if let data { buffer.append(data) }
+            if buffer.count > WebSocket.maxMessageBytes { return connection.cancel() }
+            if session == nil, let request = HttpRequest.parse(&buffer) { handle(request) }
+            while session != nil, let frame = WebSocket.parse(&buffer) { handle(frame) }
+            if isComplete || error != nil { connection.cancel() } else { receive() }
+        }
+    }
+
+    private func handle(_ request: HttpRequest) {
+        let host = request.headers["host"] ?? "localhost"
+        guard Cdp.hostAllowed(host) else { return respond("500 Internal Server Error", "text/plain",
+            "Host header is specified and is not an IP address or localhost.") }
+        if request.headers["upgrade"]?.lowercased() == "websocket" { return upgrade(request) }
+        let socketURL = "ws://\(host)/devtools/page/\(target.id)"
+        switch request.path {
+        case "/json/version":
+            json(Cdp.version(target).merging(["webSocketDebuggerUrl": socketURL]) { $1 })
+        case "/json", "/json/list":
+            json([["id": target.id, "type": "page", "title": target.title, "url": target.url,
+                   "description": "Agent-DDP", "webSocketDebuggerUrl": socketURL]])
+        default:
+            respond("404 Not Found", "text/plain", "Unknown path \(request.path)")
+        }
+    }
+
+    private func upgrade(_ request: HttpRequest) {
+        guard let key = request.headers["sec-websocket-key"] else {
+            return respond("400 Bad Request", "text/plain", "No Sec-WebSocket-Key")
+        }
+        guard Cdp.originAllowed(request.headers["origin"]) else {
+            return respond("403 Forbidden", "text/plain",
+                           "Rejected the WebSocket connection from origin \(request.headers["origin"] ?? "")")
+        }
+        let head = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+            "Sec-WebSocket-Accept: \(WebSocket.acceptKey(key))\r\n\r\n"
+        connection.send(content: Data(head.utf8), completion: .contentProcessed { _ in })
+        session = CdpSession(target: target) { [connection] message in
+            connection.send(content: WebSocket.frame(opcode: WebSocket.text, payload: Data(message.utf8)),
+                            completion: .contentProcessed { _ in })
+        }
+    }
+
+    private func handle(_ frame: WebSocket.Frame) {
+        switch frame.opcode {
+        case WebSocket.text: session?.receive(String(decoding: frame.payload, as: UTF8.self))
+        case WebSocket.ping:
+            connection.send(content: WebSocket.frame(opcode: WebSocket.pong, payload: frame.payload),
+                            completion: .contentProcessed { _ in })
+        case WebSocket.close:
+            session = nil
+            connection.send(content: WebSocket.frame(opcode: WebSocket.close, payload: frame.payload),
+                            completion: .contentProcessed { [connection] _ in connection.cancel() })
+        default: break
+        }
+    }
+
+    private func json(_ body: Any) {
+        let data = (try? JSONSerialization.data(withJSONObject: body, options: .withoutEscapingSlashes)) ?? Data()
+        respond("200 OK", "application/json; charset=UTF-8", String(decoding: data, as: UTF8.self))
+    }
+
+    private func respond(_ status: String, _ type: String, _ body: String) {
+        let bytes = Data(body.utf8)
+        let head = "HTTP/1.1 \(status)\r\nContent-Type: \(type)\r\nContent-Length: \(bytes.count)\r\nConnection: close\r\n\r\n"
+        connection.send(content: Data(head.utf8) + bytes, isComplete: true,
+                        completion: .contentProcessed { [connection] _ in connection.cancel() })
+    }
+}
+
+struct HttpRequest {
+    let path: String
+    let headers: [String: String]
+
+    /// Takes the request off the front of `buffer` once its blank line has arrived, leaving any WebSocket bytes.
+    static func parse(_ buffer: inout Data) -> HttpRequest? {
+        guard let end = buffer.range(of: Data("\r\n\r\n".utf8)) else { return nil }
+        let lines = String(decoding: buffer[buffer.startIndex..<end.lowerBound], as: UTF8.self)
+            .components(separatedBy: "\r\n")
+        buffer.removeSubrange(buffer.startIndex..<end.upperBound)
+        let target = lines.first?.split(separator: " ").dropFirst().first.map(String.init) ?? "/"
+        var headers: [String: String] = [:]
+        for line in lines.dropFirst() {
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            headers[line[..<colon].trimmingCharacters(in: .whitespaces).lowercased()] =
+                line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+        }
+        return HttpRequest(path: String(target.split(separator: "?").first ?? ""), headers: headers)
+    }
+}
+
+/// RFC 6455, only what CDP needs: text, ping, pong and close frames. Clients mask, the server does not.
+enum WebSocket {
+    static let continuation: UInt8 = 0
+    static let text: UInt8 = 1
+    static let close: UInt8 = 8
+    static let ping: UInt8 = 9
+    static let pong: UInt8 = 10
+    static let maxMessageBytes = 64 * 1024 * 1024
+    private static let guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+    struct Frame {
+        let opcode: UInt8
+        let payload: Data
+    }
+
+    static func acceptKey(_ key: String) -> String {
+        Data(Insecure.SHA1.hash(data: Data((key + guid).utf8))).base64EncodedString()
+    }
+
+    /// Takes one whole message off the front of `buffer`, joining continuation frames. Nil until it has all arrived.
+    static func parse(_ buffer: inout Data) -> Frame? {
+        var bytes = [UInt8](buffer)
+        var offset = 0
+        var opcode: UInt8 = 0
+        var message = Data()
+        while true {
+            guard bytes.count >= offset + 2 else { return nil }
+            let first = bytes[offset], second = bytes[offset + 1]
+            var length = Int(second & 0x7F)
+            var header = 2
+            if length == 126 || length == 127 {
+                let size = length == 126 ? 2 : 8
+                guard bytes.count >= offset + 2 + size else { return nil }
+                length = bytes[(offset + 2)..<(offset + 2 + size)].reduce(0) { $0 << 8 | Int($1) }
+                header += size
+            }
+            let masked = second & 0x80 != 0
+            if masked { header += 4 }
+            guard bytes.count >= offset + header + length else { return nil }
+            let start = offset + header
+            if masked {
+                let mask = Array(bytes[(start - 4)..<start])
+                for index in 0..<length { bytes[start + index] ^= mask[index % 4] }
+            }
+            let payload = Data(bytes[start..<(start + length)])
+            offset = start + length
+            let frameOpcode = first & 0x0F
+            // Control frames may arrive between the pieces of a fragmented message.
+            if frameOpcode >= close {
+                buffer.removeFirst(offset)
+                return Frame(opcode: frameOpcode, payload: payload)
+            }
+            if frameOpcode != continuation { opcode = frameOpcode }
+            message.append(payload)
+            if first & 0x80 != 0 {
+                buffer.removeFirst(offset)
+                return Frame(opcode: opcode, payload: message)
+            }
+        }
+    }
+
+    static func frame(opcode: UInt8, payload: Data) -> Data {
+        var frame = Data([0x80 | opcode])
+        switch payload.count {
+        case ..<126: frame.append(UInt8(payload.count))
+        case ..<65_536: frame.append(contentsOf: [126, UInt8(payload.count >> 8), UInt8(payload.count & 0xFF)])
+        default: frame.append(127); frame.append(contentsOf: (0..<8).reversed().map { UInt8((payload.count >> ($0 * 8)) & 0xFF) })
+        }
+        return frame + payload
+    }
+}
+
+/// Answers CDP messages for one client. The same error codes and messages as Chrome, so clients behave the same.
+final class CdpSession {
+    private let target: CdpTarget
+    private let send: (String) -> Void
+    private lazy var methods: [String: ([String: Any]) -> [String: Any]] = [
+        "Browser.getVersion": { [target] _ in Cdp.browserVersion(target) },
+        "Target.getTargets": { [target] _ in ["targetInfos": [target.info()]] },
+        "Target.getTargetInfo": { [target] _ in ["targetInfo": target.info()] },
+        "Target.setDiscoverTargets": { _ in [:] },
+        "Schema.getDomains": { _ in ["domains": Cdp.domains.map { ["name": $0, "version": Cdp.protocolVersion] }] },
+    ]
+
+    init(target: CdpTarget, send: @escaping (String) -> Void) {
+        self.target = target
+        self.send = send
+    }
+
+    func receive(_ text: String) {
+        guard let message = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] else {
+            return reply(Cdp.error(id: nil, code: -32700, message: "Message must be a valid JSON"))
+        }
+        guard let id = message["id"] as? Int else {
+            return reply(Cdp.error(id: nil, code: -32600, message: "Message must have integer 'id' property"))
+        }
+        let method = message["method"] as? String ?? ""
+        guard let handler = methods[method] else {
+            return reply(Cdp.error(id: id, code: -32601, message: "'\(method)' wasn't found"))
+        }
+        var answer: [String: Any] = ["id": id, "result": handler(message["params"] as? [String: Any] ?? [:])]
+        if let sessionId = message["sessionId"] { answer["sessionId"] = sessionId }
+        reply(answer)
+    }
+
+    private func reply(_ answer: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: answer, options: .withoutEscapingSlashes) else { return }
+        send(String(decoding: data, as: UTF8.self))
+    }
+}
+
+enum Cdp {
+    static let protocolVersion = "1.3"
+    static let domains = ["Browser", "Schema", "Target"]
+    private static let product = "Agent-DDP/\(FrameCapture.protocolVersion)"
+
+    /// `/json/version`.
+    static func version(_ target: CdpTarget) -> [String: Any] {
+        ["Browser": product, "Protocol-Version": protocolVersion, "User-Agent": userAgent(target)]
+    }
+
+    /// `Browser.getVersion`.
+    static func browserVersion(_ target: CdpTarget) -> [String: Any] {
+        ["protocolVersion": protocolVersion, "product": product, "revision": "", "userAgent": userAgent(target),
+         "jsVersion": ""]
+    }
+
+    private static func userAgent(_ target: CdpTarget) -> String { "Agent-DDP iOS \(target.bundleIdentifier)" }
+
+    /// Like Chrome: no Origin (a tool) or DevTools itself. A web page always sends its own origin.
+    static func originAllowed(_ origin: String?) -> Bool {
+        guard let origin else { return true }
+        return origin.hasPrefix("devtools://") || origin.hasPrefix("chrome-devtools://")
+    }
+
+    /// Like Chrome: a page that rebinds its own domain to 127.0.0.1 still sends that domain as Host.
+    static func hostAllowed(_ host: String) -> Bool {
+        let name = host.hasPrefix("[") ? String(host.prefix { $0 != "]" }.dropFirst())
+            : String(host.split(separator: ":").first ?? "")
+        return ["localhost", "127.0.0.1", "::1"].contains(name)
+    }
+
+    static func error(id: Int?, code: Int, message: String) -> [String: Any] {
+        var answer: [String: Any] = ["error": ["code": code, "message": message]]
+        if let id { answer["id"] = id }
+        return answer
+    }
+}
+#endif

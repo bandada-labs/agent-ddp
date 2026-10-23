@@ -11,6 +11,7 @@ public enum AgentDDP {
         #if DEBUG && canImport(UIKit)
         FrameRecorder.shared.listenForRequests()
         LiveServer.shared.start(directory: FrameRecorder.shared.outputDirectory)
+        CdpServer.shared.start(directory: FrameRecorder.shared.outputDirectory)
         History.shared.start(directory: FrameRecorder.shared.outputDirectory.appendingPathComponent("history"))
         #endif
     }

@@ -22,6 +22,8 @@ dependencies {
     // Only for AgentDdpInterceptor; the app brings its own OkHttp, an app without it never loads that class.
     compileOnly("com.squareup.okhttp3:okhttp:4.12.0")
     testImplementation("junit:junit:4.13.2")
+    // Android's org.json is a stub on the JVM; tests only.
+    testImplementation("org.json:json:20240303")
 }
 
 // What JitPack builds from a tag (jitpack.yml): com.github.bandada-labs:agent-ddp:<tag>.

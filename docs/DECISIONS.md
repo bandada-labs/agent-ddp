@@ -16,11 +16,13 @@ A line leaves this file when the maintainer replaces it or when its work has lan
 - The npm and GitHub pages should look as good as agent-browser and agent-device, with a styled header and badges in the project's warm palette. (2026-10-23)
 - The project has to be at the level of a serious open source project in formality, structure and architecture, for contributors. (2026-10-23)
 - The public repo talks only about agent-ddp, never about other projects. (2026-10-23)
+- In prose the project is called Agent-DDP. `agent-ddp` stays for the npm package, the repo and the libraries; the command is `ddp`. (2026-10-23)
 
 ## Engineering
 
 - The CLI is Rust. (2026-10-23, "Rust first")
 - The flight recorder ("what happened 15 minutes ago") exists on both platforms. (2026-10-23, "add iOS, I think it is missing for the black box")
+- The library speaks CDP itself (same messages, domains, methods and events), not new ddp options. `Runtime.evaluate` runs JavaScript: JavaScriptCore on iOS, QuickJS on Android in a debug-only artifact. No Rust core for now. ADR 0007. (2026-10-23)
 
 ## Distribution
 

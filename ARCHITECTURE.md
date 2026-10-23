@@ -23,10 +23,10 @@ There are three parts. Each one can change on its own as long as the protocol ho
 ## Rules every change keeps
 
 - Debug only. On iOS everything is inside `#if DEBUG`, and outside Debug `start()` is empty. On Android the library is a `debugImplementation` dependency. A change that adds code to a Release build is a bug.
-- The library reads, it does not change the app. The only exceptions are the commands that exist for it: `tap`, `time` and the opt-in network log. A new command that changes app state needs its own reason in the PR.
+- The library reads unless a CDP domain exists to act: Input, Fetch, DOMStorage, Emulation, Runtime, plus `tap`, `time` and the opt-in network log (ADR 0007). Anything else that changes app state needs its own reason in the PR.
 - The main thread pays for every capture, so it stays cheap. The `end` message reports `averageCaptureMs` and `slowestCaptureMs`. A change to capture code shows these numbers before and after on a sample screen. The flight recorder costs nothing on a still screen and must keep it that way.
-- The endpoint is local only and authenticated: 127.0.0.1 plus a token on iOS, an abstract socket that accepts only the shell user and root on Android.
-- One wire format for both platforms. The CLI never branches on the platform to read a frame. It branches only for device work (`simctl` vs `adb`).
+- The endpoint is local only: 127.0.0.1 on iOS (a token on the v1 endpoint; Host and Origin checks on the CDP one), an abstract socket that accepts only the shell user and root on Android.
+- One wire format for both platforms: CDP (ADR 0007), with the v1 JSON lines endpoint kept until the CLI has moved. The CLI never branches on the platform to read a frame. It branches only for device work (`simctl` vs `adb`).
 - No daemon. The library is the server, every `ddp` command is a short process, and a recording is a plain file. Every read and check works the same live or offline on a saved take.
 - Output is for agents: short, stable and deterministic. Errors carry a stable `code` and a `next` command. Checks exit 1 when they find something. A change in output is a change in the contract and goes in the changelog.
 

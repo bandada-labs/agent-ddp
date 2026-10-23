@@ -32,6 +32,7 @@ class AgentDdpStarter : ContentProvider() {
         FrameRecorder.start(application)
         History.start(application)
         LiveServer.start(application.packageName)
+        CdpServer.start(application)
         return true
     }
 

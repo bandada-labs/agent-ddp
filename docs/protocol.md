@@ -8,6 +8,19 @@ Version: 1. The `header` of every stream, recording and history file carries it 
 - Changing what a field means, or removing a field or a command, raises the version and is listed in [CHANGELOG.md](../CHANGELOG.md).
 - A client stops when the version is higher than the one it knows, instead of guessing. The `ddp` CLI fails with code `protocol_too_new` and tells the user to update. It still reads every lower version.
 
+## Chrome DevTools Protocol endpoint
+
+The library is moving to the Chrome DevTools Protocol (ADR 0007). Both endpoints run side by side until the `ddp` CLI has moved; everything below this section is the v1 JSON lines endpoint.
+
+Discovery and messages are the same as Chrome's: `GET /json/version` and `GET /json/list` (or `/json`), then a WebSocket at the `webSocketDebuggerUrl` from the list, carrying `{"id", "method", "params"}` and answering `{"id", "result"}` or `{"id", "error": {"code", "message"}}`. An unknown method answers `-32601` with `'<method>' wasn't found`.
+
+- Android: the abstract socket `agentddp_<package>_devtools_remote`, listed by `chrome://inspect`. From a host: `adb forward tcp:9222 localabstract:agentddp_<package>_devtools_remote`. Only the shell user and root may connect.
+- iOS simulator: TCP on 127.0.0.1, the port in `Library/Caches/agent-ddp/cdp.json`. A `Host` other than localhost, 127.0.0.1 or ::1 gets a 500, a WebSocket `Origin` other than `devtools://` gets a 403, as in Chrome.
+
+The app is one target with id `app`, type `page`, and the URL `android-app://<package>` or `ios-app://<bundle id>`.
+
+Methods today: `Browser.getVersion`, `Target.getTargets`, `Target.getTargetInfo`, `Target.setDiscoverTargets`, `Schema.getDomains`. The rest of the domains come in the order in [STATUS.md](STATUS.md).
+
 ## Transport
 
 Every message is one JSON object on one line, ending with `\n`. A client opens one connection per command.
