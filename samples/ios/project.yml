@@ -1,0 +1,20 @@
+name: DDPSample
+options:
+  bundleIdPrefix: dev.agentddp
+packages:
+  AgentDDP:
+    path: ../../ios/AgentDDP
+targets:
+  DDPSample:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources: [DDPSample]
+    dependencies:
+      - package: AgentDDP
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: dev.agentddp.sample
+      GENERATE_INFOPLIST_FILE: YES
+      INFOPLIST_KEY_UILaunchScreen_Generation: YES
+      CODE_SIGNING_ALLOWED: NO
+      SWIFT_VERSION: "5.0"

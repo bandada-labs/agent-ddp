@@ -1,0 +1,15 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Cleartext only for the sample's local test server on the host (10.0.2.2). -->
+    <application android:label="DDPSample" android:usesCleartextTraffic="true" android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <activity android:name=".MainActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <!-- Reproduces a real bug: the action bar draws over the content. -->
+        <activity android:name=".CoveredActivity" android:exported="true"
+            android:theme="@android:style/Theme.Material.Light.DarkActionBar" />
+    </application>
+</manifest>

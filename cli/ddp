@@ -1,0 +1,1090 @@
+#!/usr/bin/env python3
+"""ddp: see what a Debug iOS/Android app draws, frame by frame, live or from a recording.
+
+  ddp connect DEVICE --app ID [--platform ios|android]   then every command below runs live
+  ddp disconnect
+  ddp watch ELEMENT [--until COND] [--for T] [--then CMD]
+  ddp eval ELEMENT PATH          (iOS: element.<key path> | layer.<key path>; Android: <modifier>.<property> | semantics.<Key>)
+  ddp net list | get ID | watch [--until COND]
+  ddp time pause | resume | step [N] | rate F | seek T | status
+  ddp record [--for T | --frames N] [--then CMD]        (offline: --platform P --app ID --device D)
+  ddp read [--id ELEMENT] [--json]
+  ddp check overlap [--all-frames]
+  ddp check parity --file IOS.jsonl --against ANDROID.jsonl
+  ddp check corners [--all-frames]
+  ddp check timeline --expect CASES.json
+  ddp tree --at T [--id ELEMENT]
+  ddp get ELEMENT [--from T] [--to T]
+  ddp find --where 'kind=draw and alpha>0' [--between T T]
+  ddp diff RECORDING_A RECORDING_B --id ELEMENT [--ignore frame ...]
+  (tree/get/find take --live --platform P --app ID --device D to record first)
+
+See docs/agents.md for output shapes.
+"""
+import argparse
+import json
+import math
+import os
+import shlex
+import shutil
+import socket
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+DEFAULT_FILE = Path(".ddp/last.jsonl")
+SESSION_FILE = Path(".ddp/session.json")
+IOS_DIR = "Library/Caches/agent-ddp"
+ANDROID_DIR = "files/agent-ddp"
+OWNER_TOLERANCE_PT = 4
+MAX_FRAMES = 600  # the in-app recorders clamp to this too
+
+
+# ---------- recording ----------
+
+def run(command, **kwargs):
+    return subprocess.run(command, check=True, capture_output=True, text=True, **kwargs).stdout
+
+
+def adb_path():
+    found = shutil.which("adb")
+    if found:
+        return found
+    sdk = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT")
+    if sdk and Path(sdk, "platform-tools/adb").exists():
+        return str(Path(sdk, "platform-tools/adb"))
+    sys.exit("ddp: adb not found (put it on PATH or set ANDROID_HOME)")
+
+
+class IOSDevice:
+    def __init__(self, udid, app):
+        self.udid, self.app = udid, app
+        container = run(["xcrun", "simctl", "get_app_container", udid, app, "data"]).strip()
+        self.directory = Path(container, IOS_DIR)
+
+    def request(self, frames):
+        self.directory.mkdir(parents=True, exist_ok=True)
+        (self.directory / "recording.jsonl").unlink(missing_ok=True)
+        (self.directory / "request.json").write_text(json.dumps({"frames": frames}))
+        run(["xcrun", "simctl", "spawn", self.udid, "notifyutil", "-p", "dev.agentddp.record"])
+
+    def fetch(self):
+        recording = self.directory / "recording.jsonl"
+        return recording.read_text() if recording.exists() else None
+
+
+class AndroidDevice:
+    def __init__(self, serial, app):
+        self.adb, self.serial, self.app = adb_path(), serial, app
+
+    def shell(self, *args):
+        return subprocess.run([self.adb, "-s", self.serial, "exec-out", *args],
+                              capture_output=True, text=True)
+
+    def request(self, frames):
+        self.shell("run-as", self.app, "rm", "-f", f"{ANDROID_DIR}/recording.jsonl")
+        sent = self.shell("am", "broadcast", "-a", "dev.agentddp.RECORD", "-p", self.app,
+                          "--ei", "frames", str(frames))
+        if sent.returncode != 0:
+            sys.exit(f"ddp: broadcast failed: {sent.stderr.strip()}")
+
+    def fetch(self):
+        result = self.shell("run-as", self.app, "cat", f"{ANDROID_DIR}/recording.jsonl")
+        return result.stdout if result.returncode == 0 and result.stdout.startswith("{") else None
+
+
+def run_then(command):
+    """Runs the action without a shell: no pipes, globs or variables, only a program and its arguments."""
+    try:
+        return subprocess.run(shlex.split(command)).returncode == 0
+    except (OSError, ValueError) as error:
+        print(f"ddp: --then: {error}", file=sys.stderr)
+        return False
+
+
+def record(args):
+    if live_session(args):
+        recording = record_live(args)
+        print(f"recorded {len(recording['frames'])} frames live -> {args.file or DEFAULT_FILE}")
+        return
+    args.file = args.file or DEFAULT_FILE
+    if not (args.platform and args.app):
+        sys.exit("ddp: not connected. Run `ddp connect DEVICE --app ID`, or pass --platform and --app")
+    device_id = args.device or os.environ.get("DDP_DEVICE")
+    if not device_id:
+        sys.exit("ddp: pass --device (simulator UDID or adb serial) or set DDP_DEVICE")
+    args.frames = args.frames or 120
+    if not 1 <= args.frames <= MAX_FRAMES:
+        sys.exit(f"ddp: --frames must be 1..{MAX_FRAMES} (about 10 s); record longer flows in parts")
+    device = (IOSDevice if args.platform == "ios" else AndroidDevice)(device_id, args.app)
+    device.request(args.frames)
+    if args.then and not run_then(args.then):
+        print("ddp: warning: --then command failed, the recording may show no change", file=sys.stderr)
+    # A recording runs at the display rate; allow slow frames plus app startup jitter.
+    deadline = time.time() + args.frames / 30 + 10
+    while time.time() < deadline:
+        content = device.fetch()
+        if content:
+            args.file.parent.mkdir(parents=True, exist_ok=True)
+            args.file.write_text(content)
+            recording = load(args.file)
+            print(f"recorded {len(recording['frames'])} frames -> {args.file} "
+                  f"(capture cost per frame: average {recording['end'].get('averageCaptureMs')} ms, "
+                  f"slowest {recording['end'].get('slowestCaptureMs')} ms)")
+            return
+        time.sleep(0.25)
+    sys.exit("ddp: no recording arrived. Is the app in the foreground and AgentDDP started?")
+
+
+# ---------- live ----------
+
+def live_session(args):
+    """The saved `ddp connect` session, unless this command reads a file (offline mode)."""
+    if getattr(args, "file", None) is not None or not SESSION_FILE.exists():
+        return None
+    return json.loads(SESSION_FILE.read_text())
+
+
+def require_session():
+    if not SESSION_FILE.exists():
+        sys.exit("ddp: not connected. Run `ddp connect DEVICE --app ID` first")
+    return json.loads(SESSION_FILE.read_text())
+
+
+class LiveClient:
+    """One command on the app's live endpoint: a token line, a command line, then JSON lines back."""
+
+    def __init__(self, session, command):
+        try:
+            self.socket = socket.create_connection(("127.0.0.1", session["port"]), timeout=10)
+        except OSError as error:
+            sys.exit(f"ddp: can't reach the app ({error}). Is it running? Run `ddp connect` again")
+        self.socket.sendall((json.dumps({"token": session.get("token", "")}) + "\n" + json.dumps(command) + "\n").encode())
+        self.lines = self.socket.makefile("r", encoding="utf-8")
+
+    def __iter__(self):
+        for line in self.lines:
+            if not line.strip():
+                continue  # keep-alive
+            message = json.loads(line)
+            if message.get("type") == "error":
+                sys.exit(f"ddp: {message['error']}")
+            if message.get("type") == "end" and "frames" not in message:
+                return
+            yield message
+            if message.get("type") == "end":
+                return
+
+    def close(self):
+        self.socket.close()
+
+
+def connect(args):
+    platform = args.platform or ("ios" if len(args.device) == 36 and args.device.count("-") == 4 else "android")
+    if platform == "ios":
+        container = run(["xcrun", "simctl", "get_app_container", args.device, args.app, "data"]).strip()
+        endpoint_file = Path(container, IOS_DIR, "live.json")
+        if not endpoint_file.exists():
+            sys.exit("ddp: the app has no live endpoint. Is it running a Debug build with AgentDDP.start()?")
+        endpoint = json.loads(endpoint_file.read_text())
+        session = {"platform": "ios", "app": args.app, "device": args.device,
+                   "port": endpoint["port"], "token": endpoint["token"]}
+    else:
+        forwarded = subprocess.run([adb_path(), "-s", args.device, "forward", "tcp:0", f"localabstract:agentddp.{args.app}"],
+                                   capture_output=True, text=True)
+        if forwarded.returncode != 0:
+            sys.exit(f"ddp: adb forward failed: {forwarded.stderr.strip()}")
+        session = {"platform": "android", "app": args.app, "device": args.device, "port": int(forwarded.stdout.strip())}
+    snapshot = list(LiveClient(session, {"cmd": "snapshot"}))
+    SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
+    SESSION_FILE.write_text(json.dumps(session))
+    frame = next(m for m in snapshot if m["type"] == "frame")
+    print(f"connected to {args.app} on {platform} {args.device} (port {session['port']}): "
+          f"{len(frame['elements'])} elements, {len(frame['nodes'])} nodes on screen")
+
+
+def disconnect(args):
+    if SESSION_FILE.exists():
+        session = json.loads(SESSION_FILE.read_text())
+        if session["platform"] == "android":
+            subprocess.run([adb_path(), "-s", session["device"], "forward", "--remove", f"tcp:{session['port']}"],
+                           capture_output=True)
+        SESSION_FILE.unlink()
+    print("disconnected; commands read .ddp/last.jsonl (or --file) again")
+
+
+def stream_frames(session, duration_ms, then=None):
+    """Live frames for `duration_ms` (None: until the caller stops), running `then` once the stream starts."""
+    client = LiveClient(session, {"cmd": "stream", "frames": 0})
+    started_then = False
+    try:
+        for message in client:
+            yield message
+            if message["type"] != "frame":
+                continue
+            if then and not started_then:
+                started_then = True
+                if not run_then(then):
+                    print("ddp: warning: --then command failed", file=sys.stderr)
+            if duration_ms is not None and message["t"] >= duration_ms:
+                return
+    finally:
+        client.close()
+
+
+def record_live(args):
+    """Records the live window the command asks for into the recording file and loads it."""
+    session = live_session(args)
+    duration = parse_ms(args.duration) if args.duration else (args.frames or 120) * 1000 / 60
+    lines = list(stream_frames(session, duration, args.then))
+    path = DEFAULT_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(json.dumps(line) for line in lines) + "\n")
+    return load(path)
+
+
+def snapshot_live(session):
+    path = DEFAULT_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(json.dumps(m) for m in LiveClient(session, {"cmd": "snapshot"})) + "\n")
+    return load(path)
+
+
+def recording_for(args):
+    """Live: record the window the command asks for. Offline: load --file (default .ddp/last.jsonl)."""
+    if live_session(args):
+        return record_live(args)
+    return load(args.file or DEFAULT_FILE)
+
+
+def watch(args):
+    session = require_session()
+    clauses = parse_where(args.until) if args.until else None
+    header, previous, tolerance = None, None, OWNER_TOLERANCE_PT
+    duration = parse_ms(args.duration) if args.duration else None
+    for message in stream_frames(session, duration, args.then):
+        if message["type"] == "header":
+            header = message
+            tolerance = OWNER_TOLERANCE_PT * (header.get("scale", 1) if header.get("unit") == "px" else 1)
+            print(f"watching {args.id} live, unit {header['unit']} (only changes are printed)")
+            continue
+        if message["type"] != "frame":
+            continue
+        assign_owners(message, tolerance)
+        state = watch_state(message, args.id)
+        if previous is None:
+            print(f"t={message['t']:.0f}ms " + "; ".join(f"{k} {v}" for k, v in state.items()), flush=True)
+        elif changes := [f"{k} {previous.get(k)} -> {v}" for k, v in state.items() if previous.get(k) != v]:
+            print(f"t={message['t']:.0f}ms " + "; ".join(changes), flush=True)
+        previous = state
+        if clauses and matches({**state, "t": message["t"]}, clauses):
+            print(f"until met at t={message['t']:.0f}ms")
+            return
+
+
+def watch_state(frame, key):
+    state = element_state(frame, key)
+    if state is None:
+        return {"present": False}
+    x, y, w, h = state["frame"]
+    return {"present": True, "x": x, "y": y, "w": w, "h": h, "alpha": round(element_alpha(frame, key), 2),
+            "fill": state["fill"], "border": state["border"], "borderColor": state["borderColor"],
+            "opacity": state["opacity"], "draws": state["draws"], "pixels": state["pixels"]}
+
+
+def evaluate(args):
+    session = require_session()
+    for message in LiveClient(session, {"cmd": "eval", "id": args.id, "path": args.path}):
+        print(json.dumps(message.get("value")))
+
+
+def net(args):
+    session = require_session()
+    if args.action == "get":
+        if not args.request_id:
+            sys.exit("ddp: net get needs a request id (see `ddp net list`)")
+        for message in LiveClient(session, {"cmd": "net-get", "id": args.request_id}):
+            print(json.dumps(message, indent=2, sort_keys=True))
+        return
+    if args.action == "list":
+        requests = list(LiveClient(session, {"cmd": "net"}))
+        if not requests:
+            print("no requests yet (the app reports them from its Debug network decorator)")
+        for request in requests:
+            print(net_line(request))
+        return
+    clauses = parse_where(args.until) if args.until else None
+    client = LiveClient(session, {"cmd": "net-watch"})
+    print("watching requests live", flush=True)
+    try:
+        for request in client:
+            print(net_line(request), flush=True)
+            if clauses and matches(request, clauses):
+                print(f"until met: {request['id']}")
+                return
+    finally:
+        client.close()
+
+
+def time_control(args):
+    session = require_session()
+    command = {"cmd": "time", "action": args.action}
+    if args.value is not None:
+        command["value"] = parse_ms(args.value) if args.action == "seek" else float(args.value)
+    for state in LiveClient(session, command):
+        paused = "paused" if state["paused"] else f"running at rate {state['rate']}"
+        since = f", {state['sincePauseMs']:.0f}ms from the pause point" if "sincePauseMs" in state else ""
+        print(f"clock {paused}{since}")
+
+
+def net_line(request):
+    status = request.get("status", request.get("error", "failed"))
+    return f"{request['id']} {request['method']} {status} {request['ms']:.0f}ms {request['responseBytes']}B {request['url']}"
+
+
+# ---------- loading and ownership ----------
+
+def load(path):
+    if not path.exists():
+        sys.exit(f"ddp: {path} not found, run `ddp record` first")
+    lines = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    header = next(line for line in lines if line["type"] == "header")
+    end = next((line for line in lines if line["type"] == "end"), {})
+    frames = [line for line in lines if line["type"] == "frame"]
+    tolerance = OWNER_TOLERANCE_PT * (header.get("scale", 1) if header.get("unit") == "px" else 1)
+    for frame in frames:
+        assign_owners(frame, tolerance)
+    return {"header": header, "end": end, "frames": frames, "tolerance": tolerance}
+
+
+def element_key(element):
+    return element.get("id") or element.get("label") or "?"
+
+
+def contains(outer, inner, tolerance=0):
+    ox, oy, ow, oh = outer
+    ix, iy, iw, ih = inner
+    return (ix >= ox - tolerance and iy >= oy - tolerance and
+            ix + iw <= ox + ow + tolerance and iy + ih <= oy + oh + tolerance)
+
+
+def area(rect):
+    return rect[2] * rect[3]
+
+
+def assign_owners(frame, tolerance):
+    """A node belongs to the smallest element whose frame holds it. Others stay unowned."""
+    elements = sorted(frame["elements"], key=lambda e: area(e["frame"]))
+    for node in frame["nodes"]:
+        owner = next((e for e in elements if contains(e["frame"], node["frame"], tolerance)), None)
+        node["owner"] = element_key(owner) if owner else None
+
+
+# ---------- read ----------
+
+def element_state(frame, key):
+    element = next((e for e in frame["elements"] if element_key(e) == key), None)
+    if element is None:
+        return None
+    owned = [n for n in frame["nodes"] if n["owner"] == key]
+    filled = [n for n in owned if n.get("fill")]
+    bordered = [n for n in owned if n.get("border")]
+    widest_border = max(bordered, key=lambda n: n["border"]["width"], default=None)
+    drawn = union([n.get("visible", n["frame"]) for n in owned])
+    return {
+        "frame": element["frame"],
+        "drawn": drawn,
+        "label": element.get("label"),
+        "fill": max(filled, key=lambda n: area(n["frame"]))["fill"] if filled else None,
+        "border": widest_border["border"]["width"] if widest_border else 0,
+        "borderColor": widest_border["border"]["color"] if widest_border else None,
+        "opacity": min((n.get("opacity", 1) for n in owned), default=1),
+        "kinds": sorted({n["kind"] for n in owned}),
+        "draws": sum(1 for n in owned if n["kind"] == "draw"),
+        # Canvas / drawingGroup on iOS: the main color its pixels show and their strongest alpha.
+        "pixels": next(([n["pixels"]["colors"][0]["color"] if n["pixels"]["colors"] else None, n["pixels"]["peakAlpha"]]
+                        for n in owned if n.get("pixels")), None),
+    }
+
+
+def union(rects):
+    if not rects:
+        return None
+    left = min(r[0] for r in rects)
+    top = min(r[1] for r in rects)
+    right = max(r[0] + r[2] for r in rects)
+    bottom = max(r[1] + r[3] for r in rects)
+    return [round(left, 2), round(top, 2), round(right - left, 2), round(bottom - top, 2)]
+
+
+def element_keys(frames):
+    keys = []
+    for frame in frames:
+        for element in frame["elements"]:
+            if element_key(element) not in keys:
+                keys.append(element_key(element))
+    return keys
+
+
+def describe_track(name, states, times):
+    # Frames where the element is absent are skipped; a value of None (no fill) is a real value.
+    present = [(t, s[name]) for t, s in zip(times, states) if s is not None]
+    if len({json.dumps(v) for _, v in present}) <= 1:
+        return None
+    first, last = present[0][1], present[-1][1]
+    note = ""
+    if json.dumps(first) == json.dumps(last):
+        note = "  TRANSIENT (same at start and end, different in between)"
+    change_times = [t for i, (t, v) in enumerate(present)
+                    if i > 0 and json.dumps(v) != json.dumps(present[i - 1][1])]
+    window = f"changing {change_times[0]}..{change_times[-1]}ms"
+    if all(isinstance(v, (int, float)) for _, v in present):
+        peak_t, peak = max(present, key=lambda p: p[1])
+        low_t, low = min(present, key=lambda p: p[1])
+        return f"  {name}: {first} -> {last}, {window}, min {low} @{low_t}ms, max {peak} @{peak_t}ms{note}"
+    return f"  {name}: {first} -> {last}, {len(change_times) + 1} values, {window}{note}"
+
+
+def read(args):
+    recording = recording_for(args)
+    frames = recording["frames"]
+    times = [f["t"] for f in frames]
+    keys = [args.id] if args.id else element_keys(frames)
+    if args.id and args.id not in element_keys(frames):
+        sys.exit(f"ddp: no element '{args.id}'. Known: {', '.join(element_keys(frames))}")
+    if args.json:
+        for frame in frames:
+            states = {k: element_state(frame, k) for k in keys}
+            print(json.dumps({"i": frame["i"], "t": frame["t"], "elements": states}))
+        return
+    header = recording["header"]
+    print(f"{header['platform']} {len(frames)} frames over {times[-1]:.0f} ms, unit {header['unit']}")
+    for key in keys:
+        states = [element_state(f, key) for f in frames]
+        if args.id:
+            print_timeline(key, frames, states)
+            continue
+        last = next((s for s in reversed(states) if s), None)
+        draws = f" draws {last['draws']}" if any(s and s["draws"] for s in states) else ""
+        print(f"{key}: frame {last['frame']} fill {last['fill']} border {last['border']}{draws} "
+              f"kinds {','.join(last['kinds']) or 'none'}")
+        for name in ("frame", "drawn", "fill", "border", "borderColor", "opacity", "draws", "pixels", "label", "kinds"):
+            line = describe_track(name, states, times)
+            if line:
+                print(line)
+
+
+def print_timeline(key, frames, states):
+    print(f"{key}: t(ms) drawn alpha fill border borderColor opacity draws pixels (repeated rows skipped)")
+    previous = None
+    for frame, state in zip(frames, states):
+        row = "absent" if state is None else (
+            f"{state['drawn']} {element_alpha(frame, key):.2f} {state['fill']} {state['border']} {state['borderColor']} "
+            f"{state['opacity']} {state['draws']} {state['pixels'] or ''}".rstrip())
+        if row != previous:
+            print(f"  {frame['t']:>8} {row}")
+        previous = row
+
+
+# ---------- check overlap ----------
+
+PAINTS_INTERIOR = {"bitmap", "gradient", "opaque-drawing"}  # "draw" ops count only when filled
+
+
+def paints_at(node, point):
+    paints = node["kind"] in PAINTS_INTERIOR or node.get("fill")
+    x, y, w, h = node.get("visible", node["frame"])
+    return paints and x <= point[0] <= x + w and y <= point[1] <= y + h
+
+
+def coverage(frame, element, tolerance=0):
+    """Which of 9 sample points inside the element are painted over by something it does not own.
+    Nodes of elements inside this one (a button's own label) count as its own."""
+    key = element_key(element)
+    inner_keys = {element_key(e) for e in frame["elements"]
+                  if contains(element["frame"], e["frame"], tolerance)}
+    own_top = max((n["z"] for n in frame["nodes"] if n["owner"] == key), default=None)
+    if own_top is None:
+        return None
+    x, y, w, h = element["frame"]
+    points = [(x + w * fx, y + h * fy) for fy in (0.2, 0.5, 0.8) for fx in (0.2, 0.5, 0.8)]
+    covered, coverers = 0, {}
+    for point in points:
+        above = [n for n in frame["nodes"] if n["z"] > own_top and n["owner"] not in inner_keys and paints_at(n, point)]
+        if above:
+            covered += 1
+            top = max(above, key=lambda n: n["z"])
+            coverers[top["z"]] = top
+    return covered, list(coverers.values())
+
+
+def check_overlap(args):
+    recording = recording_for(args)
+    frames = recording["frames"] if args.all_frames else recording["frames"][-1:]
+    reported = set()
+    for frame in frames:
+        for element in frame["elements"]:
+            key = element_key(element)
+            result = coverage(frame, element, recording["tolerance"])
+            if not result or result[0] == 0 or key in reported:
+                continue
+            reported.add(key)
+            covered, coverers = result
+            print(f"COVERED {key} at t={frame['t']}ms: {covered}/9 sample points, frame {element['frame']}")
+            for node in coverers:
+                details = {k: node[k] for k in ("kind", "source", "fill", "frame", "owner") if node.get(k)}
+                print(f"  by z={node['z']} {json.dumps(details)}")
+    if not reported:
+        print("no covered elements")
+
+
+# ---------- check corners ----------
+
+def inside_rounded(point, rect, radius, tolerance):
+    """Whether a point is inside a rounded rectangle, give or take the tolerance."""
+    x, y, w, h = rect
+    radius = min(radius, w / 2, h / 2)
+    # Distance from the point to the inner rectangle the corner arcs are centered on.
+    dx = max(x + radius - point[0], 0, point[0] - (x + w - radius))
+    dy = max(y + radius - point[1], 0, point[1] - (y + h - radius))
+    return math.hypot(dx, dy) <= radius + tolerance
+
+
+def outline_points(node):
+    """Points on the edge of what a node paints: line ends, 8 points round an oval, or a rect's corners."""
+    if node.get("points"):
+        p = node["points"]
+        return [(p[i], p[i + 1]) for i in range(0, len(p), 2)]
+    x, y, w, h = node["frame"]
+    if node.get("op") in ("circle", "oval", "arc"):
+        return [(x + w / 2 + w / 2 * math.cos(a), y + h / 2 + h / 2 * math.sin(a))
+                for a in (i * math.pi / 4 for i in range(8))]
+    # A rounded node's own corner is cut too: take the point on its arc at 45 degrees.
+    inset = min(node.get("corner", 0), w / 2, h / 2) * (1 - math.sqrt(0.5))
+    return [(x + inset, y + inset), (x + w - inset, y + inset), (x + inset, y + h - inset), (x + w - inset, y + h - inset)]
+
+
+def clamp(point, rect):
+    x, y, w, h = rect
+    return (min(max(point[0], x), x + w), min(max(point[1], y), y + h))
+
+
+def corner_breaks(frame, element, tolerance):
+    """Nodes drawn inside an element's rounded shape that reach past its corners and are not clipped to them."""
+    key = element_key(element)
+    shapes = [n for n in frame["nodes"] if n["owner"] == key and n.get("corner") and (n.get("fill") or n.get("border"))]
+    if not shapes:
+        return []
+    shape = max(shapes, key=lambda n: area(n["frame"]))
+    sx, sy, sw, sh = shape["frame"]
+    breaks = []
+    for node in frame["nodes"]:
+        x, y, w, h = node.get("visible", node["frame"])
+        center_inside = sx <= x + w / 2 <= sx + sw and sy <= y + h / 2 <= sy + sh
+        # The shape's own stroke, or anything as big as the shape (a page background), is not a draw inside it.
+        if (node is shape or node["kind"] == "bitmap" or not center_inside
+                or contains(node["frame"], shape["frame"], tolerance) or area(node["frame"]) > area(shape["frame"]) * 1.5):
+            continue
+        clip_round = node.get("clipRound")
+        outside = [p for p in (clamp(p, (x, y, w, h)) for p in outline_points(node))
+                   if not inside_rounded(p, shape["frame"], shape["corner"], tolerance)
+                   and not (clip_round and not inside_rounded(p, clip_round[:4], clip_round[4], tolerance))]
+        if outside:
+            breaks.append((node, outside[0]))
+    return breaks
+
+
+def check_corners(args):
+    recording = recording_for(args)
+    frames = recording["frames"] if args.all_frames else recording["frames"][-1:]
+    reported = set()
+    for frame in frames:
+        for element in frame["elements"]:
+            key = element_key(element)
+            if key in reported:
+                continue
+            breaks = corner_breaks(frame, element, recording["tolerance"] / OWNER_TOLERANCE_PT)
+            if not breaks:
+                continue
+            reported.add(key)
+            shape = max((n for n in frame["nodes"] if n["owner"] == key and n.get("corner")), key=lambda n: area(n["frame"]))
+            print(f"OUTSIDE CORNERS {key} at t={frame['t']}ms: {len(breaks)} nodes reach past corner radius "
+                  f"{shape['corner']} of {shape['frame']}")
+            for node, point in breaks[:5]:
+                details = {k: node[k] for k in ("kind", "op", "fill", "border", "frame", "points") if node.get(k)}
+                print(f"  z={node['z']} at ({point[0]:.1f}, {point[1]:.1f}) {json.dumps(details)}")
+    if not reported:
+        print("nothing outside rounded corners")
+
+
+# ---------- check parity ----------
+
+PARITY_TIMING_MS = 50   # three frames at 60 Hz
+PARITY_ALPHA = 0.1
+PARITY_PT = 1
+
+
+def color_alpha(color):
+    return int(color[7:9], 16) / 255 if color else 0
+
+
+def node_alpha(node):
+    """How strongly a node shows: its opacity times the strongest color it paints."""
+    colors = [node.get("fill"), (node.get("border") or {}).get("color"), *node.get("gradient", [])]
+    strongest = max(map(color_alpha, colors), default=0)
+    if node.get("pixels"):
+        strongest = node["pixels"]["peakAlpha"]
+    elif node["kind"] in PAINTS_INTERIOR and not node.get("fill"):
+        strongest = 1  # bitmaps and unread drawings: color unknown, count them as solid
+    return node.get("opacity", 1) * strongest
+
+
+def parity_profile(recording, key):
+    """Timing (from the recording's first change), peak alpha, corner and shadow of one element, in pt."""
+    header = recording["header"]
+    to_pt = 1 / header.get("scale", 1) if header.get("unit") == "px" else 1
+    frames = recording["frames"]
+    states = [json.dumps(element_state(f, key), sort_keys=True) for f in frames]
+    changes = [frames[i]["t"] for i in range(1, len(frames)) if states[i] != states[i - 1]]
+    owned = [n for f in frames for n in f["nodes"] if n["owner"] == key]
+    shadows = [n["shadow"] for n in owned if n.get("shadow")]
+    return {
+        "changes": (changes[0] - recording["origin"], changes[-1] - recording["origin"]) if changes else None,
+        "alpha": max(map(node_alpha, owned), default=0),
+        "corner": max((n.get("corner", 0) for n in owned), default=0) * to_pt,
+        "shadow": max((s["radius"] for s in shadows), default=0) * to_pt,
+        "shadowAlpha": max((s["opacity"] * color_alpha(s["color"]) for s in shadows), default=0),
+    }
+
+
+def parity_differences(a, b, names):
+    found = []
+    if (a["changes"] is None) != (b["changes"] is None):
+        found.append(f"timing: changes in {names[0] if a['changes'] else names[1]} only")
+    elif a["changes"] and any(abs(x - y) > PARITY_TIMING_MS for x, y in zip(a["changes"], b["changes"])):
+        found.append(f"timing: {names[0]} {a['changes'][0]:.0f}..{a['changes'][1]:.0f}ms, "
+                     f"{names[1]} {b['changes'][0]:.0f}..{b['changes'][1]:.0f}ms")
+    for field, tolerance, unit in (("alpha", PARITY_ALPHA, ""), ("corner", PARITY_PT, "pt"),
+                                   ("shadow", PARITY_PT, "pt radius"), ("shadowAlpha", PARITY_ALPHA, "")):
+        if abs(a[field] - b[field]) > tolerance:
+            label = "peak alpha" if field == "alpha" else "shadow alpha" if field == "shadowAlpha" else field
+            found.append(f"{label}: {names[0]} {a[field]:.2f}{unit}, {names[1]} {b[field]:.2f}{unit}")
+    return found
+
+
+def with_origin(recording):
+    """The first change anywhere in a recording stands for the action, so two recordings line up on it."""
+    frames = recording["frames"]
+    keys = element_keys(frames)
+    for i in range(1, len(frames)):
+        if any(element_state(frames[i], k) != element_state(frames[i - 1], k) for k in keys):
+            recording["origin"] = frames[i]["t"]
+            break
+    else:
+        recording["origin"] = 0
+    return recording
+
+
+def check_parity(args):
+    if not args.against:
+        sys.exit("ddp: check parity needs --against <other recording>")
+    left, right = with_origin(load(args.file or DEFAULT_FILE)), with_origin(load(args.against))
+    names = (left["header"]["platform"], right["header"]["platform"])
+    if names[0] == names[1]:
+        names = (str(args.file), str(args.against))
+    left_keys, right_keys = element_keys(left["frames"]), element_keys(right["frames"])
+    print(f"parity {names[0]} vs {names[1]}: times from each recording's first change, sizes in pt")
+    for key in left_keys:
+        if key not in right_keys:
+            continue
+        found = parity_differences(parity_profile(left, key), parity_profile(right, key), names)
+        print(f"DIFF {key}" if found else f"same {key}")
+        for line in found:
+            print(f"  {line}")
+    for key, side in [(k, names[0]) for k in left_keys if k not in right_keys] + \
+                     [(k, names[1]) for k in right_keys if k not in left_keys]:
+        print(f"only in {side}: {key}")
+
+
+# ---------- check timeline ----------
+
+def element_alpha(frame, key):
+    return max((node_alpha(n) for n in frame["nodes"] if n["owner"] == key), default=0)
+
+
+def case_name(case):
+    return case.get("id") or f'text "{case["text"]}"'
+
+
+def case_matches(case, element):
+    """By id (element id or label, exact) or by text (part of the label, any case)."""
+    if "id" in case:
+        return element_key(element) == case["id"]
+    return case["text"].lower() in (element.get("label") or "").lower()
+
+
+def shown_times(recording, case, to_pt):
+    """Times (from the origin) of frames where the element is there, strong enough and in place,
+    plus why it never was when the list is empty."""
+    times, present, strong = [], False, False
+    for frame in recording["frames"]:
+        element = next((e for e in frame["elements"] if case_matches(case, e)
+                        and element_alpha(frame, element_key(e)) >= case.get("minAlpha", 0.05)), None)
+        if element is None:
+            present = present or any(case_matches(case, e) for e in frame["elements"])
+            continue
+        present = strong = True
+        if "frame" in case:
+            actual = [v * to_pt for v in element["frame"]]
+            if any(abs(a - b) > case.get("tolerancePt", 4) for a, b in zip(actual, case["frame"])):
+                continue
+        times.append(frame["t"] - recording["origin"])
+    if times:
+        return times, None
+    why = "never in the recording" if not present else \
+        f"there but never at alpha {case.get('minAlpha', 0.05)} or more" if not strong else \
+        f"there but never at {case['frame']} (within {case.get('tolerancePt', 4)} pt)"
+    return times, why
+
+
+def absent_verdict(case, times, tolerance, recording_end):
+    """A case that must not be drawn between `at` and `until` (default: the end of the recording).
+    The window is narrowed by the tolerance at both ends, so a fade that ends on time is not counted."""
+    start, end = case["at"] + tolerance, case.get("until", recording_end) - tolerance
+    inside = [t for t in times if start <= t <= end]
+    if not inside:
+        return "ok", "not drawn"
+    return "SHOWN", f"{len(inside)} frames, {inside[0]:.0f}..{inside[-1]:.0f}ms"
+
+
+def timeline_verdict(case, times, why, tolerance, recording_start):
+    if not times:
+        return "MISSING", why
+    problems = []
+    # Shown from the first recorded frame: it may have been there all along, which is on time for a case
+    # expected from the action on, and early only for one expected later.
+    already_there = times[0] <= recording_start and case["at"] <= tolerance
+    if times[0] > case["at"] + tolerance:
+        problems.append(f"appears {times[0] - case['at']:.0f}ms late (at {times[0]:.0f}ms)")
+    elif times[0] < case["at"] - tolerance and not already_there:
+        problems.append(f"appears {case['at'] - times[0]:.0f}ms early (at {times[0]:.0f}ms)")
+    if "until" in case:
+        if times[-1] < case["until"] - tolerance:
+            problems.append(f"gone {case['until'] - times[-1]:.0f}ms early (last at {times[-1]:.0f}ms)")
+        elif times[-1] > case["until"] + tolerance:
+            problems.append(f"stays {times[-1] - case['until']:.0f}ms too long (last at {times[-1]:.0f}ms)")
+    if not problems:
+        return "ok", f"{times[0]:.0f}..{times[-1]:.0f}ms"
+    late = any("late" in problem or "too long" in problem for problem in problems)
+    return ("LATE" if late else "EARLY"), "; ".join(problems)
+
+
+def check_timeline(args):
+    if not args.expect:
+        sys.exit("ddp: check timeline needs --expect <cases.json>")
+    expected = json.loads(args.expect.read_text())
+    recording = recording_for(args)
+    if expected.get("origin", "first-change") == "start":
+        recording["origin"] = recording["frames"][0]["t"]
+    else:
+        with_origin(recording)
+    header = recording["header"]
+    to_pt = 1 / header.get("scale", 1) if header.get("unit") == "px" else 1
+    tolerance = expected.get("toleranceMs", PARITY_TIMING_MS)
+    print(f"timeline: times from the recording's {expected.get('origin', 'first-change')} "
+          f"(t={recording['origin']:.0f}ms), tolerance {tolerance}ms")
+    failed = 0
+    recording_start = recording["frames"][0]["t"] - recording["origin"]
+    recording_end = recording["frames"][-1]["t"] - recording["origin"]
+    for case in expected["expect"]:
+        times, why = shown_times(recording, case, to_pt)
+        if case.get("absent"):
+            verdict, detail = absent_verdict(case, times, tolerance, recording_end)
+        else:
+            verdict, detail = timeline_verdict(case, times, why, tolerance, recording_start)
+        failed += verdict != "ok"
+        window = f"{case['at']}..{case['until']}ms" if "until" in case else f"from {case['at']}ms"
+        expectation = "absent" if case.get("absent") else "expected"
+        print(f"{verdict} {case_name(case)} ({expectation} {window}): {detail}")
+    if failed:
+        sys.exit(1)
+
+
+# ---------- queries: tree, get, find, diff ----------
+
+QUERY_OPERATORS = ("!=", ">=", "<=", "=", ">", "<", "~")
+
+
+def parse_ms(text):
+    """'1.5s' or '1500ms' or '1500' (ms) to milliseconds."""
+    if text.endswith("ms"):
+        return float(text[:-2])
+    return float(text[:-1]) * 1000 if text.endswith("s") else float(text)
+
+
+def frame_at(frames, t):
+    return min(frames, key=lambda f: abs(f["t"] - t))
+
+
+def frames_between(frames, start, end):
+    return [f for f in frames if (start is None or f["t"] >= start) and (end is None or f["t"] <= end)]
+
+
+def describe_node(node):
+    parts = [f"z={node['z']}", node["kind"] + (f"/{node['op']}" if node.get("op") else "")]
+    if node.get("fill"):
+        parts.append(f"fill {node['fill']}")
+    if node.get("border"):
+        parts.append(f"border {node['border']['width']} {node['border']['color']}")
+    for field in ("corner", "opacity", "source"):
+        if node.get(field):
+            parts.append(f"{field} {node[field]}")
+    if node.get("pixels"):
+        pixels = node["pixels"]
+        parts.append(f"pixels {[c['color'] for c in pixels['colors']]} peakAlpha {pixels['peakAlpha']}")
+    parts.append(str(node.get("visible", node["frame"])))
+    return " ".join(parts)
+
+
+def tree(args):
+    session = live_session(args)
+    recording = snapshot_live(session) if session else load(args.file or DEFAULT_FILE)
+    frame = frame_at(recording["frames"], parse_ms(args.at)) if args.at else recording["frames"][-1]
+    print(f"t={frame['t']}ms (frame {frame['i']} of {len(recording['frames'])}), unit {recording['header']['unit']}")
+    keys = [args.id] if args.id else [element_key(e) for e in frame["elements"]]
+    for element in (e for e in frame["elements"] if element_key(e) in keys):
+        label = f' "{element["label"]}"' if element.get("label") and element.get("id") else ""
+        print(f"{element_key(element)}{label} {element['frame']}")
+        for node in (n for n in frame["nodes"] if n["owner"] == element_key(element)):
+            print(f"  {describe_node(node)}")
+    if not args.id:
+        print("(owned by no element)")
+        for node in (n for n in frame["nodes"] if n["owner"] is None):
+            print(f"  {describe_node(node)}")
+
+
+def get(args):
+    recording = recording_for(args)
+    frames = frames_between(recording["frames"], args.start and parse_ms(args.start), args.end and parse_ms(args.end))
+    if args.id not in element_keys(recording["frames"]):
+        sys.exit(f"ddp: no element '{args.id}'. Known: {', '.join(element_keys(recording['frames']))}")
+    print_timeline(args.id, frames, [element_state(f, args.id) for f in frames])
+
+
+def node_fields(node, frame):
+    x, y, w, h = node["frame"]
+    border = node.get("border") or {}
+    return {"t": frame["t"], "z": node["z"], "kind": node["kind"], "op": node.get("op"), "owner": node["owner"],
+            "source": node.get("source"), "fill": node.get("fill"), "border": border.get("width", 0),
+            "borderColor": border.get("color"), "corner": node.get("corner", 0), "opacity": node.get("opacity", 1),
+            "alpha": round(node_alpha(node), 2), "x": x, "y": y, "w": w, "h": h}
+
+
+def parse_where(text):
+    """'kind=draw and alpha>0' to [(field, operator, value)]."""
+    clauses = []
+    for clause in text.split(" and "):
+        operator = next((op for op in QUERY_OPERATORS if op in clause), None)
+        if operator is None:
+            sys.exit(f"ddp: can't read '{clause}'. Use field{'|'.join(QUERY_OPERATORS)}value joined by ' and '")
+        field, value = (part.strip() for part in clause.split(operator, 1))
+        clauses.append((field, operator, value))
+    return clauses
+
+
+def matches(fields, clauses):
+    for field, operator, expected in clauses:
+        if field not in fields:
+            sys.exit(f"ddp: unknown field '{field}'. Fields: {', '.join(fields)}")
+        actual = fields[field]
+        if operator == "~":
+            ok = expected.lower() in str(actual).lower()
+        else:
+            try:
+                actual, expected_value = float(actual if actual is not None else "nan"), float(expected)
+            except ValueError:
+                actual, expected_value = str(actual).lower() if actual is not None else "none", expected.lower()
+            ok = {"=": actual == expected_value, "!=": actual != expected_value, ">": actual > expected_value,
+                  "<": actual < expected_value, ">=": actual >= expected_value, "<=": actual <= expected_value}[operator]
+        if not ok:
+            return False
+    return True
+
+
+def find(args):
+    recording = recording_for(args)
+    start, end = (parse_ms(t) for t in args.between) if args.between else (None, None)
+    clauses = parse_where(args.where)
+    found = [(frame, node) for frame in frames_between(recording["frames"], start, end)
+             for node in frame["nodes"] if matches(node_fields(node, frame), clauses)]
+    if not found:
+        print("no match")
+        return
+    frames_hit = sorted({frame["t"] for frame, _ in found})
+    print(f"{len(found)} matches in {len(frames_hit)} frames, t={frames_hit[0]}..{frames_hit[-1]}ms")
+    for frame, node in found[:args.limit]:
+        print(f"  t={frame['t']} owner={node['owner']} {describe_node(node)}")
+    if len(found) > args.limit:
+        print(f"  ... {len(found) - args.limit} more (narrow --where or --between, or raise --limit)")
+
+
+def comparable_state(recording, frame, key):
+    """An element's state in pt, so two platforms compare."""
+    state = element_state(frame, key)
+    if state is None:
+        return {"present": False}
+    to_pt = 1 / recording["header"].get("scale", 1) if recording["header"].get("unit") == "px" else 1
+    return {"present": True, "frame": [round(v * to_pt, 1) for v in state["frame"]],
+            "alpha": round(element_alpha(frame, key), 2), "fill": state["fill"],
+            "border": round(state["border"] * to_pt, 1), "borderColor": state["borderColor"],
+            "opacity": state["opacity"], "draws": state["draws"]}
+
+
+def state_differences(a, b, ignored=()):
+    found = []
+    for field in (a.keys() | b.keys()) - set(ignored):
+        left, right = a.get(field), b.get(field)
+        tolerance = PARITY_ALPHA if field in ("alpha", "opacity") else PARITY_PT
+        if isinstance(left, list) and isinstance(right, list):
+            differs = any(abs(x - y) > tolerance for x, y in zip(left, right))
+        elif isinstance(left, (int, float)) and isinstance(right, (int, float)) and not isinstance(left, bool):
+            differs = abs(left - right) > (0 if field == "draws" else tolerance)
+        else:
+            differs = left != right
+        if differs:
+            found.append(f"{field} {left} vs {right}")
+    return sorted(found)
+
+
+def diff(args):
+    left, right = with_origin(load(args.recordings[0])), with_origin(load(args.recordings[1]))
+    print(f"diff {args.id}: {args.recordings[0]} vs {args.recordings[1]}, t from each recording's first change, "
+          f"sizes in pt (repeated rows skipped)")
+    previous, rows = None, 0
+    for frame in left["frames"]:
+        t = frame["t"] - left["origin"]
+        other = frame_at(right["frames"], t + right["origin"])
+        row = "; ".join(state_differences(comparable_state(left, frame, args.id),
+                                          comparable_state(right, other, args.id), args.ignore)) or "same"
+        if row != previous:
+            print(f"  t={t:.0f}ms {row}")
+            rows += 1
+        previous = row
+    if rows == 1 and previous == "same":
+        print("  no differences")
+
+
+def main():
+    parser = argparse.ArgumentParser(prog="ddp", description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    commands = parser.add_subparsers(dest="command", required=True)
+
+    def add_window(sub):
+        """Live: how long to record for the command, and what to do meanwhile."""
+        sub.add_argument("--for", dest="duration", help="live: record this long (1.5s, 1500ms); default 2s")
+        sub.add_argument("--frames", type=int, help="live or offline record: number of frames instead of --for")
+        sub.add_argument("--then", help="program and arguments to run right after recording starts (no shell)")
+
+    def add_file(sub):
+        sub.add_argument("--file", type=Path, help="offline: read this recording instead of the live app")
+
+    connect_parser = commands.add_parser("connect", help="attach to the running app (live mode)")
+    connect_parser.add_argument("device", help="simulator UDID or adb serial")
+    connect_parser.add_argument("--app", required=True, help="bundle id / application id")
+    connect_parser.add_argument("--platform", choices=["ios", "android"], help="default: guessed from the device id")
+    connect_parser.set_defaults(handler=connect)
+
+    commands.add_parser("disconnect", help="forget the live session").set_defaults(handler=disconnect)
+
+    record_parser = commands.add_parser("record", help="record frames (live, or offline by notification/broadcast)")
+    record_parser.add_argument("--platform", choices=["ios", "android"], help="offline only")
+    record_parser.add_argument("--app", help="offline only: bundle id / application id")
+    record_parser.add_argument("--device", help="offline only: simulator UDID or adb serial (or env DDP_DEVICE)")
+    add_window(record_parser)
+    add_file(record_parser)
+    record_parser.set_defaults(handler=record)
+
+    watch_parser = commands.add_parser("watch", help="live: print an element's changes frame by frame")
+    watch_parser.add_argument("id", help="element id or label")
+    watch_parser.add_argument("--until", help="stop when true, e.g. 'border>3' or 'present=false' "
+                                              "(fields: t present x y w h alpha fill border borderColor opacity draws)")
+    watch_parser.add_argument("--for", dest="duration", help="stop after this long (1.5s, 1500ms)")
+    watch_parser.add_argument("--then", help="program to run once watching starts (no shell)")
+    watch_parser.set_defaults(handler=watch)
+
+    eval_parser = commands.add_parser("eval", help="live: read one property of an element, read-only")
+    eval_parser.add_argument("id", help="element id or label")
+    eval_parser.add_argument("path", help="iOS: element.<key path> or layer.<key path>; "
+                                          "Android: <modifier>.<property> (border.width) or semantics.<Key>")
+    eval_parser.set_defaults(handler=evaluate)
+
+    net_parser = commands.add_parser("net", help="live: network requests the app reported (redacted)")
+    net_parser.add_argument("action", choices=["list", "get", "watch"])
+    net_parser.add_argument("request_id", nargs="?", help="get: request id from `ddp net list`")
+    net_parser.add_argument("--until", help="watch: stop when true, e.g. 'status>=400' or 'url~/build'")
+    net_parser.set_defaults(handler=net)
+
+    time_parser = commands.add_parser("time", help="live: pause, step, slow down or seek the app's animations")
+    time_parser.add_argument("action", choices=["pause", "resume", "step", "rate", "seek", "status"])
+    time_parser.add_argument("value", nargs="?", help="step: frames (default 1); rate: factor (0.1); "
+                                                      "seek: time from the pause point (500ms, -1s)")
+    time_parser.set_defaults(handler=time_control)
+
+    read_parser = commands.add_parser("read", help="summarize what changed per element")
+    read_parser.add_argument("--id", help="one element (id or label): print its per-frame timeline")
+    read_parser.add_argument("--json", action="store_true", help="per-frame element states as JSON lines")
+    add_window(read_parser)
+    add_file(read_parser)
+    read_parser.set_defaults(handler=read)
+
+    check_parser = commands.add_parser("check", help="checks over a recording (live: records first)")
+    check_parser.add_argument("what", choices=["overlap", "parity", "corners", "timeline"])
+    check_parser.add_argument("--expect", type=Path, help="timeline: expected cases JSON (see docs/agents.md)")
+    check_parser.add_argument("--against", type=Path, help="parity: the other platform's recording")
+    check_parser.add_argument("--all-frames", action="store_true", help="check every frame, not only the last")
+    add_window(check_parser)
+    add_file(check_parser)
+    checks = {"overlap": check_overlap, "parity": check_parity, "corners": check_corners, "timeline": check_timeline}
+    check_parser.set_defaults(handler=lambda args: checks[args.what](args))
+
+    tree_parser = commands.add_parser("tree", help="elements and what they drew at one moment (live: now)")
+    tree_parser.add_argument("--at", help="offline: time (1.5s, 1500ms, 1500); default the last frame")
+    tree_parser.add_argument("--id", help="only this element")
+    add_file(tree_parser)
+    tree_parser.set_defaults(handler=tree)
+
+    get_parser = commands.add_parser("get", help="one element per frame over a time window")
+    get_parser.add_argument("id", help="element id or label")
+    get_parser.add_argument("--from", dest="start", help="time (1.5s, 1500ms)")
+    get_parser.add_argument("--to", dest="end", help="time (1.5s, 1500ms)")
+    add_window(get_parser)
+    add_file(get_parser)
+    get_parser.set_defaults(handler=get)
+
+    find_parser = commands.add_parser("find", help="drawn nodes matching a condition")
+    find_parser.add_argument("--where", required=True,
+                             help="e.g. 'kind=draw and alpha>0'; fields: t z kind op owner source fill border "
+                                  "borderColor corner opacity alpha x y w h; operators = != > < >= <= ~(contains)")
+    find_parser.add_argument("--between", nargs=2, metavar=("FROM", "TO"))
+    find_parser.add_argument("--limit", type=int, default=20)
+    add_window(find_parser)
+    add_file(find_parser)
+    find_parser.set_defaults(handler=find)
+
+    diff_parser = commands.add_parser("diff", help="one element in two recordings, frame by frame")
+    diff_parser.add_argument("recordings", nargs=2, type=Path)
+    diff_parser.add_argument("--id", required=True)
+    diff_parser.add_argument("--ignore", nargs="+", default=[], metavar="FIELD",
+                             help="fields to leave out: frame alpha fill border borderColor opacity draws")
+    diff_parser.set_defaults(handler=diff)
+
+    argv = sys.argv[1:]
+    if argv[:2] == ["time", "seek"]:
+        argv.insert(2, "--")  # so a rewind like `seek -400ms` is a value, not a flag
+    args = parser.parse_args(argv)
+    args.handler(args)
+
+
+if __name__ == "__main__":
+    main()

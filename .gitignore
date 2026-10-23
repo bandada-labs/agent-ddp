@@ -1,0 +1,12 @@
+tools/node_modules/
+samples/ios/build/
+samples/ios/*.xcodeproj/
+samples/android/.gradle/
+samples/android/app/build/
+samples/android/build/
+samples/android/local.properties
+.ddp/
+android/agent-ddp/build/
+ios/AgentDDP/.build/
+ios/AgentDDP/.swiftpm/
+__pycache__/
