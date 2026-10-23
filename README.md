@@ -16,7 +16,7 @@ It works in the style of CDP. A small library inside the Debug build opens a loc
 
 ## Give this to your agent
 
-Nobody runs this by hand. Paste this in your agent's chat inside your app's repo:
+Paste this in your agent's chat inside your app's repo:
 
 ```
 Set up agent-ddp so you can see and check this app's UI: https://github.com/sebospc/agent-ddp
