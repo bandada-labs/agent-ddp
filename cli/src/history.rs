@@ -5,10 +5,11 @@ use crate::device::target;
 use crate::live::{live_session, LiveClient};
 use crate::model::{self, contains, decode, element_key, element_state, option_equal, rect, save_recording, Frame};
 use crate::py::{self, f};
-use crate::state::{adb_path, ctx, local_time, now_ms, parse_ms, Result, ANDROID_DIR};
+use crate::state::{adb_path, ctx, local_time, now_ms, parse_ms, Result, ANDROID_DIR, IOS_DIR};
 use crate::{fail, say};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::Path;
 use std::process::Command;
 
 const SEGMENT_MS: f64 = 60_000.0; // the recorder starts a new file every minute
@@ -38,16 +39,9 @@ fn start_of(name: &str) -> Option<f64> {
 
 /// The files that may hold anything after `since`, oldest first.
 fn read_segments(args: &Args, since: f64) -> Result<Vec<Segment>> {
-    let files: BTreeMap<String, Vec<u8>> = match &args.dir {
-        Some(dir) => std::fs::read_dir(dir)
-            .map(|entries| {
-                entries
-                    .filter_map(|e| e.ok())
-                    .filter_map(|e| Some((e.file_name().to_string_lossy().into_owned(), std::fs::read(e.path()).ok()?)))
-                    .collect()
-            })
-            .unwrap_or_default(),
-        None => android_files(args, since)?,
+    let files = match &args.dir {
+        Some(dir) => local_files(Path::new(dir)),
+        None => app_files(args, since)?,
     };
     let mut names: Vec<&String> =
         files.keys().filter(|n| start_of(n).is_some_and(|s| s >= since - SEGMENT_MS)).collect();
@@ -59,7 +53,7 @@ fn read_segments(args: &Args, since: f64) -> Result<Vec<Segment>> {
         let Some(header) = lines.iter().find(|l| l["type"] == "header").cloned() else { continue };
         model::check_protocol(&header)?;
         let started = f(&header["startedAt"]);
-        let kept = lines
+        let mut kept: Vec<Value> = lines
             .into_iter()
             .filter(|l| l["type"] == "frame" || l["type"] == "event")
             .map(|mut line| {
@@ -68,6 +62,8 @@ fn read_segments(args: &Args, since: f64) -> Result<Vec<Segment>> {
                 line
             })
             .collect();
+        // A touch is written when it ends but stamped when it went down, so its line can come after later frames.
+        kept.sort_by(|a, b| f(&a["at"]).total_cmp(&f(&b["at"])));
         segments.push(Segment { header, lines: kept });
     }
     if segments.is_empty() {
@@ -80,17 +76,41 @@ fn read_segments(args: &Args, since: f64) -> Result<Vec<Segment>> {
     Ok(segments)
 }
 
-fn android_files(args: &Args, since: f64) -> Result<BTreeMap<String, Vec<u8>>> {
+fn local_files(dir: &Path) -> BTreeMap<String, Vec<u8>> {
+    std::fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .filter_map(|e| Some((e.file_name().to_string_lossy().into_owned(), std::fs::read(e.path()).ok()?)))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The app's history files: straight from the simulator's container on iOS, through `run-as` on Android.
+fn app_files(args: &Args, since: f64) -> Result<BTreeMap<String, Vec<u8>>> {
     let (platform, device, app) = target(args)?;
     let Some(app) = app else {
         fail!("no app", "missing_option", "ddp connect DEVICE --app ID first, or pass --app");
     };
-    if platform != "android" {
-        fail!("history is Android only for now", "unsupported_platform", "record a take with ddp read --for 3s");
+    if platform == "ios" {
+        let dir = Path::new(&model::app_container(&device, &app)?).join(IOS_DIR).join("history");
+        if !dir.exists() {
+            fail!(
+                "no history in the app",
+                "no_history",
+                format!("update the library in the app; ddp doctor {device} --app {app}")
+            );
+        }
+        return Ok(local_files(&dir));
     }
+    android_files(&device, &app, since)
+}
+
+fn android_files(device: &str, app: &str, since: f64) -> Result<BTreeMap<String, Vec<u8>>> {
     let adb = adb_path()?;
     let run_as =
-        |command: &[&str]| Command::new(&adb).args(["-s", &device, "exec-out", "run-as", &app]).args(command).output();
+        |command: &[&str]| Command::new(&adb).args(["-s", device, "exec-out", "run-as", app]).args(command).output();
     let listing = run_as(&["ls", &format!("{ANDROID_DIR}/history")])
         .map_err(|e| crate::state::failure(e.to_string(), "command_failed", None))?;
     if !listing.status.success() {

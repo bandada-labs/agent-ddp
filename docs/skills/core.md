@@ -73,7 +73,7 @@ ddp record --on ios,android --for 3s --then "<cmd with {platform}>"   # both pla
 
 Sessions for `--on` are named: `ddp connect <sim> --app ID --session ios` and `... --session android`.
 
-## What happened a while ago (Android)
+## What happened a while ago
 
 The app keeps the last 15 minutes by itself: every change, tap and screen. When someone says "a minute ago I saw a flicker", look it up instead of reproducing it:
 

@@ -25,10 +25,8 @@ import kotlin.math.hypot
 internal object History {
     private const val SEGMENT_MS = 60_000L
     private const val KEEP_MS = 15 * 60_000L
-    /** An element that changed in every capture for this long is busy: a clock, a spinner, a loop. */
-    private const val BUSY_AFTER_MS = 2_000L
     /** While only busy elements change, capture at most this often. Anything else changing goes back to every frame. */
-    private const val BUSY_INTERVAL_MS = 100L
+    private const val BUSY_INTERVAL_MS = 250L
 
     private lateinit var directory: File
     private val writer = Executors.newSingleThreadExecutor { Thread(it, "agentddp-history").apply { isDaemon = true } }
@@ -36,9 +34,8 @@ internal object History {
     // Main thread only.
     private val watchedWindows = WeakHashMap<Window, Unit>()
     private var captureScheduled = false
-    private var lastSignatures = emptyMap<String, String>()
-    private val changingSince = mutableMapOf<String, Long>()
-    private var onlyBusyChanging = false
+    // The quiet gap must be longer than BUSY_INTERVAL_MS: while throttled, a busy element is only seen that often.
+    private val tracker = ChangeTracker(busyAfterMs = 2_000, quietMs = 2 * BUSY_INTERVAL_MS)
     private var lastCaptureAt = 0L
     private val capture = Choreographer.FrameCallback { captureNow() }
 
@@ -71,15 +68,15 @@ internal object History {
         keep(frame)
     }
 
-    fun event(kind: String, fields: JSONObject = JSONObject()) {
-        val wall = System.currentTimeMillis()
+    /** [wall]: when it happened; a touch is stamped when it went down, before what it caused. */
+    fun event(kind: String, fields: JSONObject = JSONObject(), wall: Long = System.currentTimeMillis()) {
         writer.execute { segmentAt(wall).write(fields.put("type", "event").put("kind", kind), wall) }
     }
 
     private fun onDraw() {
         if (captureScheduled || FrameStream.active > 0) return
         captureScheduled = true
-        val wait = if (onlyBusyChanging) BUSY_INTERVAL_MS - (SystemClock.uptimeMillis() - lastCaptureAt) else 0
+        val wait = if (tracker.onlyBusyChanging) BUSY_INTERVAL_MS - (SystemClock.uptimeMillis() - lastCaptureAt) else 0
         Choreographer.getInstance().postFrameCallbackDelayed(capture, wait.coerceAtLeast(0))
     }
 
@@ -93,14 +90,7 @@ internal object History {
     }
 
     private fun keep(frame: JSONObject, captureMs: Double? = null) {
-        val now = SystemClock.uptimeMillis()
-        val signatures = signatures(frame)
-        val changed = (signatures.keys + lastSignatures.keys).filter { signatures[it] != lastSignatures[it] }
-        lastSignatures = signatures
-        changingSince.keys.retainAll(changed.toSet())
-        changed.forEach { changingSince.putIfAbsent(it, now) }
-        onlyBusyChanging = changed.isNotEmpty() && changed.all { now - changingSince.getValue(it) >= BUSY_AFTER_MS }
-        if (changed.isEmpty()) return
+        if (tracker.changed(signatures(frame), SystemClock.uptimeMillis()).isEmpty()) return
         val wall = System.currentTimeMillis()
         writer.execute { segmentAt(wall).writeFrame(frame, wall, captureMs) }
     }
@@ -192,10 +182,11 @@ private class TouchWatcher(private val inner: Window.Callback, private val slop:
             }
             MotionEvent.ACTION_UP -> {
                 val moved = hypot(event.x - downX, event.y - downY) > slop
+                val downWall = System.currentTimeMillis() - (SystemClock.uptimeMillis() - event.downTime)
                 History.event(if (moved) "swipe" else "tap", JSONObject().put("x", round2(downX.toDouble()))
                     .put("y", round2(downY.toDouble())).apply {
                         if (moved) put("toX", round2(event.x.toDouble())).put("toY", round2(event.y.toDouble()))
-                    })
+                    }, downWall)
             }
         }
         return inner.dispatchTouchEvent(event)

@@ -27,10 +27,14 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-      - run: ./samples/android/gradlew -p samples/android :agent-ddp:assembleRelease :app:assembleDebug
+      - run: ./samples/android/gradlew -p samples/android :agent-ddp:testDebugUnitTest :agent-ddp:assembleRelease :app:assembleDebug
 
   ios:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       - run: xcodebuild -scheme AgentDDP -destination 'generic/platform=iOS Simulator' build
+      - name: Unit tests on the first available iPhone simulator
+        run: |
+          udid=$(xcrun simctl list devices available -j | python3 -c "import json,sys; print(next(d['udid'] for r in json.load(sys.stdin)['devices'].values() for d in r if d['name'].startswith('iPhone')))")
+          xcodebuild test -scheme AgentDDP -destination "id=$udid"

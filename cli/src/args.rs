@@ -192,7 +192,7 @@ pub fn parser() -> Command {
         .subcommand(file(device_options(sub("logs", "the app's log lines during the last take, at their time in it")
             .arg(opt("grep", "only lines holding this text"))
             .arg(opt("limit", "at most this many lines").value_parser(clap::value_parser!(usize)).default_value("50")))))
-        .subcommand(device_options(sub("history", "the last 15 minutes from the app's flight recorder (Android)")
+        .subcommand(device_options(sub("history", "the last 15 minutes from the app's flight recorder")
             .arg(choices("action", &["list", "at"]).default_value("list"))
             .arg(positional("time", "at: a time from the list, e.g. 14:31:02.5"))
             .arg(opt("since", "list: how far back (90s, 5m); default 15m").default_value("15m"))

@@ -6,5 +6,8 @@ let package = Package(
     name: "AgentDDP",
     platforms: [.iOS(.v15)],
     products: [.library(name: "AgentDDP", targets: ["AgentDDP"])],
-    targets: [.target(name: "AgentDDP", path: "ios/AgentDDP/Sources/AgentDDP")]
+    targets: [
+        .target(name: "AgentDDP", path: "ios/AgentDDP/Sources/AgentDDP"),
+        .testTarget(name: "AgentDDPTests", dependencies: ["AgentDDP"], path: "ios/AgentDDP/Tests/AgentDDPTests"),
+    ]
 )

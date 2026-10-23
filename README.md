@@ -89,7 +89,7 @@ check all over 300 frames: overlap 1 (ran overlap, corners, jank, settle, a11y)
 - Watches a value until a condition, waits for an element or for the screen to settle, and pauses or steps the app's time.
 - Checks: overlap, corners past their radius, jank, animations that never settle, accessibility (touch targets, labels, contrast), an expected timeline, iOS vs Android parity and a saved baseline.
 - Taps, deep links, appearance, text size, reduce motion and locale. Logs and network requests from the take, secrets redacted.
-- Keeps the last 15 minutes inside the app (Android): every change, tap and screen. `ddp history` shows them, `ddp history at <time>` turns one moment into a take to check.
+- Keeps the last 15 minutes inside the app: every change, tap and screen. `ddp history` shows them, `ddp history at <time>` turns one moment into a take to check.
 - `explore` taps every control on a screen and runs every check after each tap.
 - Output made for agents: element refs (`@e3`), small trees, a size cap, batches and an MCP server.
 
@@ -158,7 +158,7 @@ Without npm: `cargo install --git https://github.com/bandada-labs/agent-ddp agen
 
 ## Limits
 
-Debug builds only. iOS works on the simulator, not on devices yet. Not seen yet: the single shapes inside a SwiftUI `Canvas` (read by their pixels instead), and system UI outside the app such as iOS alerts. `ddp history` is Android only for now.
+Debug builds only. iOS works on the simulator, not on devices yet. Not seen yet: the single shapes inside a SwiftUI `Canvas` (read by their pixels instead), and system UI outside the app such as iOS alerts.
 
 ## Contributing
 

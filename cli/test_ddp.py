@@ -443,8 +443,9 @@ with tempfile.TemporaryDirectory() as directory:
     Path(history_dir, f"{start}.jsonl.gz").write_bytes(gzip.compress("\n".join(map(json.dumps, first)).encode()))
     second = [{"type": "header", "platform": "android", "unit": "px", "scale": 1, "frames": 0,
                "startedAt": start + 60_000, "history": True},
-              {"type": "event", "kind": "tap", "t": 1_000, "x": 50, "y": 25},
-              screen(1_100, "Total 12", 3)]
+              screen(1_100, "Total 12", 3),
+              # Written when the finger lifts, stamped when it went down: before the frame it caused.
+              {"type": "event", "kind": "tap", "t": 1_000, "x": 50, "y": 25}]
     Path(history_dir, f"{start + 60_000}.jsonl").write_text("\n".join(map(json.dumps, second)) + '\n{"type": "fr')
     listed = ddp_in(directory, "history", "--dir", str(history_dir))
     assert listed.returncode == 0, listed.stdout + listed.stderr

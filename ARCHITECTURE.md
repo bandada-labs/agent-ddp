@@ -37,12 +37,12 @@ Both platforms have the same pieces, with the same names where the language allo
 | Piece | iOS | Android |
 | --- | --- | --- |
 | Entry point | `AgentDDP.start()` in `AgentDDP.swift` | `AgentDdpStarter`, a ContentProvider, in `AgentDdp.kt` |
-| One frame | `FrameCapture`, `LayerReader`, `AccessibilityReader`, `PixelSampler` | `FrameCapture`, `Capture`, `DrawRecorder` |
+| One frame | `FrameCapture` in `AgentDDP.swift`; `LayerReader`, `AccessibilityReader`, `PixelSampler` in `Capture.swift` | `FrameCapture` in `AgentDdp.kt`; `Capture`, `Hidden` in `Capture.kt`; `DrawRecorder` |
 | Frames over time | `FrameRecorder` (offline), `FrameStream` (live) | same |
 | Live endpoint | `LiveServer`, `LiveSession`, `LiveEval` in `Live.swift` | same in `Live.kt` |
 | Network log | `NetworkLog`, `Redactor` in `Network.swift` | `AgentDdpNetwork`, `AgentDdpInterceptor`, `NetworkLog` in `Network.kt` |
 | Virtual clock | `TimeControl` in `Time.swift` | `AgentDdpTime`, `TimeControl` in `Time.kt` |
-| Flight recorder | not yet | `History` in `History.kt` |
+| Flight recorder | `History`, `ChangeTracker`, `FrameSignatures` in `History.swift` and `ChangeTracker.swift` | `History`, `ChangeTracker` in `History.kt` and `ChangeTracker.kt` |
 
 The iOS library has no dependencies. The Android one depends on Compose UI (the app's version wins) and compiles against OkHttp only for the optional interceptor. New dependencies in the library need a strong reason, because they end up in every app that adds it.
 
@@ -59,7 +59,7 @@ One binary, one module per area. `main.rs` maps each command to its handler.
 | `model.rs` | loading recordings, naming elements, which element owns each node |
 | `queries.rs` | `tree`, `get`, `find`, `diff` and `@eN` refs |
 | `summary.rs` | `read`, sparklines, `get --curve` |
-| `checks.rs` | every `check` and `baseline` |
+| `checks/` | one file per check family, `mod.rs` holds `check all` and the list of checks |
 | `history.rs` | `ddp history` over the flight recorder files |
 | `tools.rs` | `view`, `mcp`, `skills`, `doctor`, `batch` |
 | `py.rs` | number and JSON printing. The first CLI was Python, and the output stays byte for byte the same |

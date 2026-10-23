@@ -5,6 +5,11 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 ## Unreleased
 
 - Protocol version 1: the libraries send `"protocol": 1` in every header. The CLI stops with `protocol_too_new` when a library is newer than it, and still reads older ones.
+- `ddp history` works on iOS. The library records every change, tap, swipe and screen for the last 15 minutes, like on Android.
+- History throttles to 4 captures a second (was 10) while only a clock or spinner changes, and detects those animations even when they skip captures. About 4% CPU on the samples with a clock that never stops.
+- History stamps a touch when the finger went down, so a swipe shows before what it caused.
+- The libraries have unit tests (`ChangeTracker`, frame signatures, gzip), run in CI.
+- Code layout: `checks/` has one file per check; capture code moved to `Capture.kt` and `Capture.swift`.
 - README rewritten with real output, prompts to give an agent, MCP setup and a FAQ.
 - ARCHITECTURE.md, docs/protocol.md, CONTRIBUTING.md, SECURITY.md and AGENTS.md for contributors.
 - CI also checks `rustfmt` and `clippy`, and builds the iOS and Android libraries.

@@ -13,7 +13,7 @@ You only need the toolchain of the part you change.
 | Part | Needs | Build |
 | --- | --- | --- |
 | CLI (`cli/`) | Rust stable, Python 3 for the black-box tests | `cargo build --release --manifest-path cli/Cargo.toml` |
-| iOS library (`ios/AgentDDP`) | Xcode 15 or newer | `xcodebuild -scheme AgentDDP -destination 'generic/platform=iOS Simulator' build` |
+| iOS library (`ios/AgentDDP`) | Xcode 16 or newer | `xcodebuild -scheme AgentDDP -destination 'generic/platform=iOS Simulator' build` |
 | Android library (`android/agent-ddp`) | JDK 17, Android SDK | `./samples/android/gradlew -p samples/android :agent-ddp:assembleRelease` |
 | Sample apps | the platform's toolchain, [XcodeGen](https://github.com/yonaskolb/XcodeGen) for iOS | `xcodegen` in `samples/ios`, `:app:installDebug` in `samples/android` |
 
@@ -32,7 +32,14 @@ cargo build --release --manifest-path cli/Cargo.toml && python3 cli/test_ddp.py
 
 `cli/test_ddp.py` runs the built binary from the outside against small recordings and a fake app. Most CLI changes need a case there. Set `DDP_BIN` to test another binary.
 
-The libraries have no unit tests yet. A change there is checked on a simulator or emulator with the sample app:
+The libraries have unit tests for their pure logic (what changed between frames, busy elements, gzip):
+
+```bash
+xcodebuild test -scheme AgentDDP -destination 'platform=iOS Simulator,name=<a simulator you have>'
+./samples/android/gradlew -p samples/android :agent-ddp:testDebugUnitTest
+```
+
+Most of a library change still needs the real thing. Check it on a simulator or emulator with the sample app:
 
 ```bash
 ddp doctor <udid or serial> --app dev.agentddp.sample
