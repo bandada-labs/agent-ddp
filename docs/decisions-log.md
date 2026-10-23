@@ -44,3 +44,6 @@ Asked to choose between Python and Rust before publishing: "Rust primero" (Rust 
 ### Protocol version, weak points, iOS history, project memory
 "arregla lo del protocol, luego los puntos débiles y luego agrega iOS porque creo que falta para lo de la caja negra, no? y porfa continúa hablándome en inglés y copia la estructura de memoria y decisions"
 (Fix the protocol version, then the weak points, then add iOS, which I think is missing for the black box. Keep talking to me in English, and copy the memory and decisions structure.)
+
+### Release 0.1.5 and security reports
+Asked to push and release 0.1.5: "yes". Asked to turn on private vulnerability reporting and give a contact email for a code of conduct: "yes but no notifications". Private reporting is on; no contact email, so no code of conduct for now.
