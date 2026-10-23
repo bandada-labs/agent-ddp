@@ -6,6 +6,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 
 - The library also serves the Chrome DevTools Protocol (ADR 0007): discovery on `/json/version` and `/json/list`, a WebSocket with `Browser.getVersion`, `Target.getTargets` and `Schema.getDomains`. On Android `chrome://inspect` lists the app. The v1 endpoint is unchanged.
 - CDP: flat Target sessions, `Accessibility.getFullAXTree` and `Page.captureScreenshot`. agent-browser can `connect`, `snapshot` and `screenshot` an app on both platforms.
+- CDP DOM over the elements: `getDocument`, `querySelector(All)` with `button#saveButton` or `[label='Save']` on both platforms, `getBoxModel`, `getOuterHTML`.
 - Elements have a `role` (`button`, `textbox`, `checkbox` and so on), the same words on iOS and Android.
 
 ## 0.1.5 (2026-10-23)

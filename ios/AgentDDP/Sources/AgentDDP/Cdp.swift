@@ -257,12 +257,30 @@ final class CdpSession {
         },
         "Schema.getDomains": { _ in ["domains": Cdp.domains.map { ["name": $0, "version": Cdp.protocolVersion] }] },
         "Runtime.runIfWaitingForDebugger": { _ in [:] },
-        "Accessibility.getFullAXTree": { [target] _ in
-            ["nodes": Cdp.axTree(title: target.title, elements: onMain {
-                FrameCapture.visibleWindows().flatMap(AccessibilityReader.elements(in:))
-            })]
-        },
+        "Accessibility.getFullAXTree": { [target] _ in ["nodes": Cdp.axTree(title: target.title, elements: Dom.read())] },
         "Page.captureScreenshot": { params in try Cdp.screenshot(params) },
+        "DOM.getDocument": { [target] params in
+            ["root": Dom(title: target.title, elements: Dom.read()).document(depth: params["depth"] as? Int ?? 1)]
+        },
+        "DOM.requestChildNodes": { _ in [:] },
+        "DOM.describeNode": { [target] params in
+            ["node": try Dom(title: target.title, elements: Dom.read()).node(Dom.nodeId(params))]
+        },
+        "DOM.getAttributes": { [target] params in
+            ["attributes": try Dom(title: target.title, elements: Dom.read()).node(Dom.nodeId(params))["attributes"] ?? []]
+        },
+        "DOM.getOuterHTML": { [target] params in
+            ["outerHTML": try Dom(title: target.title, elements: Dom.read()).outerHTML(Dom.nodeId(params))]
+        },
+        "DOM.querySelector": { [target] params in
+            ["nodeId": try Dom(title: target.title, elements: Dom.read()).query(params["selector"] as? String ?? "").first ?? 0]
+        },
+        "DOM.querySelectorAll": { [target] params in
+            ["nodeIds": try Dom(title: target.title, elements: Dom.read()).query(params["selector"] as? String ?? "")]
+        },
+        "DOM.getBoxModel": { [target] params in
+            ["model": try Dom(title: target.title, elements: Dom.read()).boxModel(Dom.nodeId(params))]
+        },
     ].merging(Cdp.toggledDomains.flatMap { domain -> [(String, ([String: Any]) throws -> [String: Any])] in
         [("\(domain).enable", { _ in [:] }), ("\(domain).disable", { _ in [:] })]
     }) { $1 }
@@ -311,6 +329,154 @@ final class CdpSession {
     }
 }
 
+/// The DOM over the captured elements: `#document > html > body`, then one node per element in reading order,
+/// the same order as the accessibility tree. The tag is the element's role (`text` for StaticText), and every node
+/// has the same attributes on both platforms: `role`, `id`, `label`. Node ids are positions in one read, so they
+/// hold only until the screen changes.
+// ponytail: flat, no view hierarchy and no text nodes. Add the hierarchy when a client needs ancestors.
+struct Dom {
+    static let documentId = 1, htmlId = 2, bodyId = 3, firstElementId = 4
+
+    let title: String
+    let elements: [[String: Any]]
+
+    static func read() -> [[String: Any]] { onMain { FrameCapture.visibleWindows().flatMap(AccessibilityReader.elements(in:)) } }
+
+    /// `nodeId` or `backendNodeId`, which are the same number here.
+    static func nodeId(_ params: [String: Any]) throws -> Int {
+        guard let id = params["nodeId"] as? Int ?? params["backendNodeId"] as? Int else {
+            throw Cdp.Failure(description: "Either nodeId, backendNodeId or objectId must be specified")
+        }
+        return id
+    }
+
+    /// `depth` -1 is the whole tree, as in Chrome.
+    func document(depth: Int) -> [String: Any] { node(Dom.documentId, depth: depth) }
+
+    func node(_ id: Int) throws -> [String: Any] {
+        guard id >= Dom.documentId, id < Dom.firstElementId + elements.count else { throw Cdp.Failure(description: "Could not find node with given id") }
+        return node(id, depth: 0)
+    }
+
+    private func node(_ id: Int, depth: Int) -> [String: Any] {
+        let childIds: [Int] = switch id {
+        case Dom.documentId: [Dom.htmlId]
+        case Dom.htmlId: [Dom.bodyId]
+        case Dom.bodyId: Array(Dom.firstElementId..<(Dom.firstElementId + elements.count))
+        default: []
+        }
+        var node: [String: Any] = ["nodeId": id, "backendNodeId": id, "childNodeCount": childIds.count]
+        if id == Dom.documentId {
+            node.merge(["nodeType": 9, "nodeName": "#document", "localName": "", "nodeValue": "",
+                        "documentURL": "", "baseURL": ""]) { $1 }
+        } else {
+            let tag = self.tag(id)
+            node.merge(["nodeType": 1, "nodeName": tag.uppercased(), "localName": tag, "nodeValue": "",
+                        "attributes": attributes(id).flatMap { [$0.0, $0.1] }]) { $1 }
+        }
+        if id > Dom.documentId { node["parentId"] = id == Dom.htmlId ? Dom.documentId : id == Dom.bodyId ? Dom.htmlId : Dom.bodyId }
+        if depth != 0 { node["children"] = childIds.map { self.node($0, depth: depth - 1) } }
+        return node
+    }
+
+    private func element(_ id: Int) -> [String: Any]? {
+        id >= Dom.firstElementId && id - Dom.firstElementId < elements.count ? elements[id - Dom.firstElementId] : nil
+    }
+
+    private func tag(_ id: Int) -> String {
+        switch id {
+        case Dom.htmlId: return "html"
+        case Dom.bodyId: return "body"
+        default:
+            let role = element(id)?["role"] as? String ?? "generic"
+            return role == "StaticText" ? "text" : role
+        }
+    }
+
+    private func attributes(_ id: Int) -> [(String, String)] {
+        guard let element = element(id) else { return id == Dom.htmlId ? [("title", title)] : [] }
+        return ["role", "id", "label"].compactMap { name in (element[name] as? String).map { (name, $0) } }
+    }
+
+    func outerHTML(_ id: Int) throws -> String {
+        _ = try node(id)
+        let tag = id == Dom.documentId ? "" : self.tag(id)
+        let attributes = attributes(id).map { " \($0.0)=\"\(Dom.escape($0.1))\"" }.joined()
+        let inner: String = switch id {
+        case Dom.documentId: try outerHTML(Dom.htmlId)
+        case Dom.htmlId: try outerHTML(Dom.bodyId)
+        case Dom.bodyId: try (0..<elements.count).map { try outerHTML(Dom.firstElementId + $0) }.joined()
+        default: Dom.escape(element(id)?["label"] as? String ?? "")
+        }
+        return tag.isEmpty ? inner : "<\(tag)\(attributes)>\(inner)</\(tag)>"
+    }
+
+    private static func escape(_ text: String) -> String {
+        text.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+    }
+
+    /// `DOM.getBoxModel`: no padding, border or margin, so the four quads are the frame.
+    func boxModel(_ id: Int) throws -> [String: Any] {
+        _ = try node(id)
+        guard let frame = element(id)?["frame"] as? [Double] else { throw Cdp.Failure(description: "Could not compute box model.") }
+        let (x, y, width, height) = (frame[0], frame[1], frame[2], frame[3])
+        let quad = [x, y, x + width, y, x + width, y + height, x, y + height].map { round2($0) }
+        return ["content": quad, "padding": quad, "border": quad, "margin": quad, "width": width, "height": height]
+    }
+
+    /// Selector lists of compound selectors: `button`, `#saveButton`, `[label='Save']`, `button[label^='Sa']`, `*`.
+    /// Attribute operators `=`, `^=`, `$=`, `*=`. Combinators throw, since the tree is flat.
+    func query(_ selector: String) throws -> [Int] {
+        let compounds = try selector.split(separator: ",").map { try SimpleSelector(String($0)) }
+        return (Dom.firstElementId..<(Dom.firstElementId + elements.count)).filter { id in
+            let attributes = Dictionary(attributes(id), uniquingKeysWith: { first, _ in first })
+            return compounds.contains { $0.matches(tag: tag(id), attributes: attributes) }
+        }
+    }
+}
+
+struct SimpleSelector {
+    private var tag: String?
+    private var conditions: [(name: String, operation: String, value: String?)] = []
+
+    init(_ text: String) throws {
+        let invalid = Cdp.Failure(description: "DOM Error while querying")
+        let pattern = try NSRegularExpression(pattern: #"^\s*([a-zA-Z*][\w-]*)?((?:#[\w-]+|\[\s*[\w-]+\s*(?:[\^$*]?=\s*(?:'[^']*'|"[^"]*"|[^\]\s]+))?\s*\])*)\s*$"#)
+        let range = NSRange(text.startIndex..., in: text)
+        guard let match = pattern.firstMatch(in: text, range: range),
+              let restRange = Range(match.range(at: 2), in: text),
+              !text.trimmingCharacters(in: .whitespaces).isEmpty else { throw invalid }
+        let tagText = Range(match.range(at: 1), in: text).map { String(text[$0]) } ?? "*"
+        tag = tagText == "*" ? nil : tagText.lowercased()
+        let parts = try NSRegularExpression(pattern: #"#([\w-]+)|\[\s*([\w-]+)\s*(?:([\^$*]?=)\s*('[^']*'|"[^"]*"|[^\]\s]+))?\s*\]"#)
+        let rest = String(text[restRange])
+        for part in parts.matches(in: rest, range: NSRange(rest.startIndex..., in: rest)) {
+            func group(_ index: Int) -> String? { Range(part.range(at: index), in: rest).map { String(rest[$0]) } }
+            if let id = group(1) {
+                conditions.append(("id", "=", id))
+            } else if let name = group(2) {
+                let value = group(4).map { $0.first == "'" || $0.first == "\"" ? String($0.dropFirst().dropLast()) : $0 }
+                conditions.append((name, group(3) ?? "", value))
+            }
+        }
+    }
+
+    func matches(tag: String, attributes: [String: String]) -> Bool {
+        if let wanted = self.tag, wanted != tag { return false }
+        return conditions.allSatisfy { condition in
+            guard let actual = attributes[condition.name] else { return false }
+            guard let value = condition.value else { return true }
+            switch condition.operation {
+            case "^=": return actual.hasPrefix(value)
+            case "$=": return actual.hasSuffix(value)
+            case "*=": return actual.contains(value)
+            default: return actual == value
+            }
+        }
+    }
+}
+
 /// The CDP queue waits for UIKit; tests call in from the main thread already.
 func onMain<T>(_ work: () -> T) -> T { Thread.isMainThread ? work() : DispatchQueue.main.sync(execute: work) }
 
@@ -328,7 +494,7 @@ enum Cdp {
     /// Ids are positions in this read, so they hold only until the screen changes.
     static func axTree(title: String, elements: [[String: Any]]) -> [[String: Any]] {
         let children = elements.enumerated().map { index, element -> [String: Any] in
-            ["nodeId": String(index + 2), "parentId": "1", "backendDOMNodeId": index + 2, "ignored": false,
+            ["nodeId": String(index + 2), "parentId": "1", "backendDOMNodeId": Dom.firstElementId + index, "ignored": false,
              "role": ["type": "role", "value": element["role"] as? String ?? "generic"],
              "name": ["type": "computedString", "value": element["label"] as? String ?? element["id"] as? String ?? ""],
              "childIds": [String]()]

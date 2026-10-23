@@ -80,6 +80,35 @@ final class CdpTests: XCTestCase {
         XCTAssertEqual(nodes[2]["parentId"] as? String, "1")
     }
 
+    func testSelectorsMatchRoleIdAndLabel() throws {
+        let dom = Dom(title: "Example", elements: [
+            ["role": "button", "id": "saveButton", "label": "Save"], ["role": "StaticText", "label": "Saved at 10:00"],
+            ["role": "button", "label": "Cancel"],
+        ])
+        XCTAssertEqual(try dom.query("button"), [4, 6])
+        XCTAssertEqual(try dom.query("button#saveButton"), [4])
+        XCTAssertEqual(try dom.query("[label='Save']"), [4])
+        XCTAssertEqual(try dom.query("text[label^=Saved]"), [5])
+        XCTAssertEqual(try dom.query("[label*=\"ance\"], #saveButton"), [4, 6])
+        XCTAssertEqual(try dom.query("[id]"), [4])
+        XCTAssertThrowsError(try dom.query("body button"))
+        XCTAssertEqual(try dom.outerHTML(4), "<button role=\"button\" id=\"saveButton\" label=\"Save\">Save</button>")
+    }
+
+    func testTheDocumentStopsAtTheAskedDepth() {
+        let dom = Dom(title: "Example", elements: [["role": "button"]])
+        let html = (dom.document(depth: 1)["children"] as? [[String: Any]])?.first
+        XCTAssertEqual(html?["nodeName"] as? String, "HTML")
+        XCTAssertNil(html?["children"])
+        XCTAssertEqual(dom.document(depth: -1).description.contains("BUTTON"), true)
+    }
+
+    func testTheBoxModelIsTheFrame() throws {
+        let model = try Dom(title: "Example", elements: [["frame": [10.0, 20.0, 30.0, 40.0]]]).boxModel(4)
+        XCTAssertEqual(model["content"] as? [Double], [10, 20, 40, 20, 40, 60, 10, 60])
+        XCTAssertThrowsError(try Dom(title: "Example", elements: []).boxModel(4))
+    }
+
     private func messages(after input: [String], browserLevel: Bool = true) -> [[String: Any]] {
         var sent: [[String: Any]] = []
         let session = CdpSession(target: CdpTarget(bundleIdentifier: "com.example", title: "Example"),

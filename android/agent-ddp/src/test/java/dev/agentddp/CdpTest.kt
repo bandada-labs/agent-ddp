@@ -82,6 +82,38 @@ class CdpTest {
         assertEquals("1", nodes.getJSONObject(2).getString("parentId"))
     }
 
+    @Test
+    fun selectorsMatchRoleIdAndLabel() {
+        val dom = Dom("Example", JSONArray()
+            .put(JSONObject().put("role", "button").put("id", "saveButton").put("label", "Save"))
+            .put(JSONObject().put("role", "StaticText").put("label", "Saved at 10:00"))
+            .put(JSONObject().put("role", "button").put("label", "Cancel")))
+        assertEquals(listOf(4, 6), dom.query("button"))
+        assertEquals(listOf(4), dom.query("button#saveButton"))
+        assertEquals(listOf(4), dom.query("[label='Save']"))
+        assertEquals(listOf(5), dom.query("text[label^=Saved]"))
+        assertEquals(listOf(4, 6), dom.query("[label*=\"ance\"], #saveButton"))
+        assertEquals(listOf(4), dom.query("[id]"))
+        assertTrue(runCatching { dom.query("body button") }.isFailure)
+        assertEquals("<button role=\"button\" id=\"saveButton\" label=\"Save\">Save</button>", dom.outerHTML(4))
+    }
+
+    @Test
+    fun theDocumentStopsAtTheAskedDepth() {
+        val dom = Dom("Example", JSONArray().put(JSONObject().put("role", "button")))
+        val html = dom.document(1).getJSONArray("children").getJSONObject(0)
+        assertEquals("HTML", html.getString("nodeName"))
+        assertFalse(html.has("children"))
+        assertTrue(dom.document(-1).toString().contains("BUTTON"))
+    }
+
+    @Test
+    fun theBoxModelIsTheFrameInDp() {
+        val dom = Dom("Example", JSONArray().put(JSONObject().put("frame", JSONArray(listOf(20, 40, 60, 80)))), density = 2f)
+        assertEquals("[10,20,40,20,40,60,10,60]", dom.boxModel(4).getJSONArray("content").toString())
+        assertTrue(runCatching { Dom("Example", JSONArray()).boxModel(4) }.isFailure)
+    }
+
     private fun messagesAfter(message: String, browserLevel: Boolean = true): List<JSONObject> {
         val sent = mutableListOf<JSONObject>()
         CdpSession(CdpTarget("com.example", "Example"), browserLevel) { sent += JSONObject(it) }.receive(message)

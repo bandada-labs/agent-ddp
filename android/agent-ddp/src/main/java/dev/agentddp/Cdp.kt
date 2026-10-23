@@ -217,8 +217,20 @@ internal class CdpSession(
         "Target.detachFromTarget" to { params -> sessionIds.remove(params.optString("sessionId")); JSONObject() },
         "Schema.getDomains" to { _ -> JSONObject().put("domains", JSONArray(Cdp.DOMAINS.map { JSONObject().put("name", it).put("version", Cdp.PROTOCOL_VERSION) })) },
         "Runtime.runIfWaitingForDebugger" to { _ -> JSONObject() },
-        "Accessibility.getFullAXTree" to { _ -> JSONObject().put("nodes", Cdp.axTree(target.title, onMain { FrameCapture.frame(0, 0.0) }.getJSONArray("elements"))) },
+        "Accessibility.getFullAXTree" to { _ -> JSONObject().put("nodes", Cdp.axTree(target.title, Dom.read(target.title).elements)) },
         "Page.captureScreenshot" to { params -> Cdp.screenshot(params) },
+        "DOM.getDocument" to { params -> JSONObject().put("root", Dom.read(target.title).document(params.optInt("depth", 1))) },
+        "DOM.requestChildNodes" to { _ -> JSONObject() },
+        "DOM.describeNode" to { params -> JSONObject().put("node", Dom.read(target.title).node(Dom.nodeId(params))) },
+        "DOM.getAttributes" to { params ->
+            JSONObject().put("attributes", Dom.read(target.title).node(Dom.nodeId(params)).optJSONArray("attributes") ?: JSONArray())
+        },
+        "DOM.getOuterHTML" to { params -> JSONObject().put("outerHTML", Dom.read(target.title).outerHTML(Dom.nodeId(params))) },
+        "DOM.querySelector" to { params ->
+            JSONObject().put("nodeId", Dom.read(target.title).query(params.optString("selector")).firstOrNull() ?: 0)
+        },
+        "DOM.querySelectorAll" to { params -> JSONObject().put("nodeIds", JSONArray(Dom.read(target.title).query(params.optString("selector")))) },
+        "DOM.getBoxModel" to { params -> JSONObject().put("model", Dom.read(target.title).boxModel(Dom.nodeId(params))) },
     ) + Cdp.TOGGLED_DOMAINS.flatMap { listOf("$it.enable", "$it.disable") }.associateWith { { _: JSONObject -> JSONObject() } }
 
     private fun attach(): String {
@@ -240,6 +252,146 @@ internal class CdpSession(
             .getOrElse { Cdp.error(id, -32000, it.message ?: it.toString()) }
         message.opt("sessionId")?.let { answer.put("sessionId", it) }
         send(answer.toString())
+    }
+}
+
+/**
+ * The DOM over the captured elements: `#document > html > body`, then one node per element in reading order, the same
+ * order as the accessibility tree. The tag is the element's role (`text` for StaticText), and every node has the same
+ * attributes on both platforms: `role`, `id`, `label`. Frames are in dp, Android's CSS pixel. Node ids are positions in
+ * one read, so they hold only until the screen changes.
+ */
+// ponytail: flat, no view hierarchy and no text nodes. Add the hierarchy when a client needs ancestors.
+internal class Dom(private val title: String, val elements: JSONArray, private val density: Float = 1f) {
+    companion object {
+        const val DOCUMENT_ID = 1
+        const val HTML_ID = 2
+        const val BODY_ID = 3
+        const val FIRST_ELEMENT_ID = 4
+
+        fun read(title: String): Dom = onMain {
+            val density = FrameRecorder.resumedActivity?.resources?.displayMetrics?.density ?: 1f
+            Dom(title, FrameCapture.frame(0, 0.0).getJSONArray("elements"), density)
+        }
+
+        /** `nodeId` or `backendNodeId`, which are the same number here. */
+        fun nodeId(params: JSONObject): Int = (params.opt("nodeId") ?: params.opt("backendNodeId")) as? Int
+            ?: throw IllegalArgumentException("Either nodeId, backendNodeId or objectId must be specified")
+    }
+
+    private val elementIds = FIRST_ELEMENT_ID until FIRST_ELEMENT_ID + elements.length()
+
+    /** [depth] -1 is the whole tree, as in Chrome. */
+    fun document(depth: Int): JSONObject = node(DOCUMENT_ID, depth)
+
+    fun node(id: Int): JSONObject {
+        if (id < DOCUMENT_ID || id > elementIds.last.coerceAtLeast(BODY_ID)) throw IllegalArgumentException("Could not find node with given id")
+        return node(id, depth = 0)
+    }
+
+    private fun node(id: Int, depth: Int): JSONObject {
+        val childIds = when (id) {
+            DOCUMENT_ID -> listOf(HTML_ID)
+            HTML_ID -> listOf(BODY_ID)
+            BODY_ID -> elementIds.toList()
+            else -> emptyList()
+        }
+        val node = JSONObject().put("nodeId", id).put("backendNodeId", id).put("childNodeCount", childIds.size)
+        if (id == DOCUMENT_ID) {
+            node.put("nodeType", 9).put("nodeName", "#document").put("localName", "").put("nodeValue", "")
+                .put("documentURL", "").put("baseURL", "")
+        } else {
+            val tag = tag(id)
+            node.put("nodeType", 1).put("nodeName", tag.uppercase()).put("localName", tag).put("nodeValue", "")
+                .put("attributes", JSONArray(attributes(id).flatMap { listOf(it.first, it.second) }))
+                .put("parentId", when (id) { HTML_ID -> DOCUMENT_ID; BODY_ID -> HTML_ID; else -> BODY_ID })
+        }
+        if (depth != 0) node.put("children", JSONArray(childIds.map { node(it, depth - 1) }))
+        return node
+    }
+
+    private fun element(id: Int): JSONObject? = if (id in elementIds) elements.getJSONObject(id - FIRST_ELEMENT_ID) else null
+
+    private fun tag(id: Int): String = when (id) {
+        HTML_ID -> "html"
+        BODY_ID -> "body"
+        else -> element(id)?.optString("role", "generic").let { if (it == "StaticText") "text" else it ?: "generic" }
+    }
+
+    private fun attributes(id: Int): List<Pair<String, String>> {
+        val element = element(id) ?: return if (id == HTML_ID) listOf("title" to title) else emptyList()
+        return listOf("role", "id", "label").mapNotNull { name -> element.optString(name).takeIf { element.has(name) }?.let { name to it } }
+    }
+
+    fun outerHTML(id: Int): String {
+        node(id)
+        val inner = when (id) {
+            DOCUMENT_ID -> outerHTML(HTML_ID)
+            HTML_ID -> outerHTML(BODY_ID)
+            BODY_ID -> elementIds.joinToString("") { outerHTML(it) }
+            else -> escape(element(id)?.optString("label").orEmpty())
+        }
+        if (id == DOCUMENT_ID) return inner
+        val tag = tag(id)
+        return "<$tag${attributes(id).joinToString("") { " ${it.first}=\"${escape(it.second)}\"" }}>$inner</$tag>"
+    }
+
+    private fun escape(text: String) = text.replace("&", "&amp;").replace("<", "&lt;").replace("\"", "&quot;")
+
+    /** `DOM.getBoxModel`: no padding, border or margin, so the four quads are the frame. */
+    fun boxModel(id: Int): JSONObject {
+        node(id)
+        val frame = element(id)?.optJSONArray("frame") ?: throw IllegalStateException("Could not compute box model.")
+        val (x, y, width, height) = (0 until 4).map { round2(frame.getDouble(it) / density) }
+        val quad = JSONArray(listOf(x, y, x + width, y, x + width, y + height, x, y + height).map(::round2))
+        return JSONObject().put("content", quad).put("padding", quad).put("border", quad).put("margin", quad)
+            .put("width", width).put("height", height)
+    }
+
+    /**
+     * Selector lists of compound selectors: `button`, `#saveButton`, `[label='Save']`, `button[label^='Sa']`, `*`.
+     * Attribute operators `=`, `^=`, `$=`, `*=`. Combinators throw, since the tree is flat.
+     */
+    fun query(selector: String): List<Int> {
+        val compounds = selector.split(",").map(::SimpleSelector)
+        return elementIds.filter { id ->
+            val attributes = attributes(id).toMap()
+            compounds.any { it.matches(tag(id), attributes) }
+        }
+    }
+}
+
+internal class SimpleSelector(text: String) {
+    private val tag: String?
+    private val conditions: List<Triple<String, String, String?>>
+
+    init {
+        val match = COMPOUND.matchEntire(text.trim())?.takeIf { text.isNotBlank() } ?: throw IllegalArgumentException("DOM Error while querying")
+        tag = match.groupValues[1].lowercase().takeUnless { it.isEmpty() || it == "*" }
+        conditions = PART.findAll(match.groupValues[2]).map { part ->
+            val (id, name, operation, value) = part.destructured
+            if (id.isNotEmpty()) Triple("id", "=", id)
+            else Triple(name, operation, value.takeIf { it.isNotEmpty() }?.removeSurrounding("'")?.removeSurrounding("\""))
+        }.toList()
+    }
+
+    fun matches(tag: String, attributes: Map<String, String>): Boolean {
+        if (this.tag != null && this.tag != tag) return false
+        return conditions.all { (name, operation, value) ->
+            val actual = attributes[name] ?: return@all false
+            when {
+                value == null -> true
+                operation == "^=" -> actual.startsWith(value)
+                operation == "$=" -> actual.endsWith(value)
+                operation == "*=" -> value in actual
+                else -> actual == value
+            }
+        }
+    }
+
+    private companion object {
+        val COMPOUND = Regex("""([a-zA-Z*][\w-]*)?((?:#[\w-]+|\[\s*[\w-]+\s*(?:[\^$*]?=\s*(?:'[^']*'|"[^"]*"|[^\]\s]+))?\s*])*)""")
+        val PART = Regex("""#([\w-]+)|\[\s*([\w-]+)\s*(?:([\^$*]?=)\s*('[^']*'|"[^"]*"|[^\]\s]+))?\s*]""")
     }
 }
 
@@ -271,7 +423,7 @@ internal object Cdp {
         val children = (0 until elements.length()).map { index ->
             val element = elements.getJSONObject(index)
             axNode(index + 2, element.optString("role", "generic"), element.optString("label", element.optString("id")))
-                .put("parentId", "1")
+                .put("parentId", "1").put("backendDOMNodeId", Dom.FIRST_ELEMENT_ID + index)
         }
         return JSONArray().put(axNode(1, "RootWebArea", title).put("childIds", JSONArray(children.map { it.getString("nodeId") })))
             .apply { children.forEach(::put) }
