@@ -145,7 +145,8 @@ final class FrameStream {
 
 enum FrameCapture {
     static func header(frames: Int) -> [String: Any] {
-        ["type": "header", "platform": "ios", "unit": "pt", "scale": UIScreen.main.scale, "frames": frames]
+        ["type": "header", "platform": "ios", "unit": "pt", "scale": UIScreen.main.scale, "frames": frames,
+         "startedAt": (Date().timeIntervalSince1970 * 1000).rounded()]
     }
 
     /// Main thread only.
@@ -153,7 +154,7 @@ enum FrameCapture {
         let windows = visibleWindows()
         return ["type": "frame", "i": index, "t": round2(milliseconds),
                 "elements": windows.flatMap(AccessibilityReader.elements(in:)),
-                "nodes": LayerReader.paintedNodes(in: windows)]
+                "nodes": LayerReader.paintedNodes(in: windows, textColors: index == 0)]
     }
 
     static func visibleWindows() -> [UIWindow] {
@@ -189,6 +190,7 @@ enum AccessibilityReader {
             var element: [String: Any] = ["frame": rectArray(object.accessibilityFrame)]
             if let id = identifier(of: object) { element["id"] = id }
             if let label = object.accessibilityLabel, !label.isEmpty { element["label"] = label }
+            if !object.accessibilityTraits.intersection([.button, .link, .adjustable]).isEmpty { element["tap"] = true }
             found.append(element)
         }
         return found
@@ -238,19 +240,21 @@ enum LayerReader {
     }
 
     /// Layers in paint order (later covers earlier). Only layers that draw something are kept.
-    static func paintedNodes(in windows: [UIWindow]) -> [[String: Any]] {
+    /// `textColors`: also read the color of each text bitmap from its pixels (SwiftUI `Text` has no other trace of it).
+    static func paintedNodes(in windows: [UIWindow], textColors: Bool = false) -> [[String: Any]] {
         var nodes: [[String: Any]] = []
         for window in windows {
             let root = window.layer.presentation() ?? window.layer
             let windowClip = CGRect(origin: .zero, size: window.bounds.size)
-            walk(window.layer, root: root, clip: windowClip, opacity: 1, offset: window.frame.origin, into: &nodes)
+            walk(window.layer, root: root, clip: windowClip, opacity: 1, offset: window.frame.origin,
+                 textColors: textColors, into: &nodes)
         }
         return nodes
     }
 
-    // ponytail: paint order is sublayer order; zPosition and 3D transforms are ignored.
+    // ponytail: paint order is sublayer order, re-sorted by zPosition; 3D transforms are ignored.
     private static func walk(_ layer: CALayer, root: CALayer, clip: CGRect, opacity: Float,
-                             offset: CGPoint, into nodes: inout [[String: Any]]) {
+                             offset: CGPoint, textColors: Bool, into nodes: inout [[String: Any]]) {
         let shown = layer.presentation() ?? layer
         let effectiveOpacity = opacity * shown.opacity
         guard !shown.isHidden, effectiveOpacity > 0.001 else { return }
@@ -267,14 +271,46 @@ enum LayerReader {
             if let view = layer.delegate as? UIView, !NSStringFromClass(type(of: view)).hasPrefix("_Tt") {
                 node["source"] = NSStringFromClass(type(of: view))
             }
+            if let text = textStyle(of: layer, sampling: textColors) { node["text"] = text }
             nodes.append(node)
         }
 
         let childClip = shown.masksToBounds ? clip.intersection(frame) : clip
         guard !childClip.isEmpty else { return }
-        layer.sublayers?.forEach {
-            walk($0, root: root, clip: childClip, opacity: effectiveOpacity, offset: offset, into: &nodes)
+        // A stable sort keeps sublayer order among equal zPosition, which is how Core Animation draws them.
+        let ordered = (layer.sublayers ?? []).enumerated()
+            .sorted { ($0.element.zPosition, $0.offset) < ($1.element.zPosition, $1.offset) }.map(\.element)
+        ordered.forEach {
+            walk($0, root: root, clip: childClip, opacity: effectiveOpacity, offset: offset, textColors: textColors,
+                 into: &nodes)
         }
+    }
+
+    /// Size and color of the text a layer draws: from UILabel / UITextField / UITextView when there is one,
+    /// otherwise (SwiftUI `Text`) the main color of its pixels, when asked to sample.
+    private static func textStyle(of layer: CALayer, sampling: Bool) -> [String: Any]? {
+        if let label = layer.delegate as? UILabel, let font = label.font {
+            return ["size": round2(font.pointSize), "color": hex(label.textColor.cgColor) ?? "transparent",
+                    "weight": weight(of: font)]
+        }
+        if let field = layer.delegate as? UITextField, let font = field.font {
+            return ["size": round2(font.pointSize), "color": hex(field.textColor?.cgColor) ?? "transparent",
+                    "weight": weight(of: font)]
+        }
+        guard sampling, NSStringFromClass(type(of: layer)).contains("CGDrawingLayer"),
+              let pixels = PixelSampler.sample(layer),
+              let main = (pixels["colors"] as? [[String: Any]])?.first?["color"] as? String else { return nil }
+        // The bitmap's line height is about 1.2 times the font size.
+        return ["color": main, "size": round2(layer.bounds.height / 1.2), "estimated": true]
+    }
+
+    private static func weight(of font: UIFont) -> Double {
+        let traits = font.fontDescriptor.object(forKey: .traits) as? [UIFontDescriptor.TraitKey: Any]
+        let value = traits?[.weight] as? CGFloat ?? 0
+        // UIFont.Weight to the CSS scale (regular 400, bold 700) by the nearest named weight.
+        let named: [(UIFont.Weight, Double)] = [(.ultraLight, 100), (.thin, 200), (.light, 300), (.regular, 400),
+                                                (.medium, 500), (.semibold, 600), (.bold, 700), (.heavy, 800), (.black, 900)]
+        return named.min { abs($0.0.rawValue - value) < abs($1.0.rawValue - value) }!.1
     }
 
     private static func paintDescription(of layer: CALayer, shown: CALayer) -> [String: Any]? {

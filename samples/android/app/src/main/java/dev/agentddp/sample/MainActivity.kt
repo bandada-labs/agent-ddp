@@ -1,6 +1,7 @@
 package dev.agentddp.sample
 
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.animateColorAsState
@@ -23,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
@@ -34,7 +36,9 @@ import kotlin.concurrent.thread
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { MaterialTheme { SampleScreen() } }
+        // A deep link (ddpsample://...) shows up as the last action, for `ddp open`.
+        val link = intent?.data?.let { "link $it" } ?: "none"
+        setContent { MaterialTheme { SampleScreen(link) } }
     }
 }
 
@@ -47,9 +51,9 @@ class CoveredActivity : ComponentActivity() {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun SampleScreen() {
+fun SampleScreen(initialAction: String = "none") {
     var isSelected by remember { mutableStateOf(false) }
-    var lastAction by remember { mutableStateOf("none") }
+    var lastAction by remember { mutableStateOf(initialAction) }
     var menuOpen by remember { mutableStateOf(false) }
     var isFlashing by remember { mutableStateOf(false) }
     // Planted bug for the v1 proof: a border that exists only while animating.
@@ -73,7 +77,11 @@ fun SampleScreen() {
                 .testTag("animatedButton")
                 .background(fill, shape)
                 .border(borderWidth, borderColor, shape)
-                .clickable { isSelected = !isSelected; tapCount++ }
+                .clickable {
+                    isSelected = !isSelected
+                    tapCount++
+                    Log.i("DDPSample", "animatedButton tapped, selected=$isSelected")
+                }
                 .padding(horizontal = 32.dp, vertical = 14.dp)
         ) {
             Text(if (isSelected) "Selected" else "Tap me", color = if (isSelected) Color.White else Color.Blue)
@@ -145,6 +153,26 @@ fun SampleScreen() {
                     }
                 }
             }
+            item {
+                Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    // A plain Box with no semantics over a tagged label: only a walk of every layout node sees it.
+                    Box {
+                        Text("Under a box", Modifier.testTag("boxCovered").padding(4.dp))
+                        Box(Modifier.matchParentSize().background(Color(0xFF9E9E9E)))
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    // zIndex: the blue box comes first in code but draws on top of the label.
+                    Box {
+                        Box(Modifier.zIndex(1f).size(48.dp).background(Color(0xFF3F51B5)))
+                        Text("Low z", Modifier.testTag("zCovered").size(48.dp))
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    // Too small to tap comfortably (24 dp, Material asks for 48).
+                    Box(Modifier.testTag("smallTarget").size(24.dp).background(Color.LightGray).clickable { lastAction = "small" })
+                    Spacer(Modifier.width(8.dp))
+                    Text("Faint text", Modifier.testTag("faintText"), color = Color(0xFFCCCCCC))
+                }
+            }
             item { Text("Last action: $lastAction", Modifier.padding(16.dp)) }
             item {
                 Text("Load", Modifier.testTag("netButton").clickable {
@@ -161,7 +189,7 @@ object SampleNetwork {
     private val client = observedHttpClient(OkHttpClient.Builder())
 
     fun load(): String = runCatching {
-        val request = Request.Builder().url("http://10.0.2.2:18765/build.json?token=abc&page=1")
+        val request = Request.Builder().url("http://10.0.2.2:18765/items.json?token=abc&page=1")
             .header("Authorization", "Bearer $DEV_SECRET").header("X-Client", "sample").build()
         client.newCall(request).execute().use { "loaded ${it.code}" }
     }.getOrDefault("load failed")

@@ -10,6 +10,12 @@ targets:
     platform: iOS
     deploymentTarget: "17.0"
     sources: [DDPSample]
+    info:
+      path: DDPSample/Info.plist
+      properties:
+        CFBundleURLTypes:
+          - CFBundleURLName: dev.agentddp.sample
+            CFBundleURLSchemes: [ddpsample]
     dependencies:
       - package: AgentDDP
     settings:

@@ -1,4 +1,5 @@
 import AgentDDP
+import OSLog
 import SwiftUI
 
 @main
@@ -21,6 +22,7 @@ struct ContentView: View {
     var body: some View {
         VStack(spacing: 24) {
             Button {
+                Logger(subsystem: "dev.agentddp.sample", category: "ui").info("animatedButton tapped")
                 withAnimation(.easeInOut(duration: 2.0)) { isSelected.toggle() }
                 // Planted bug for the v1 proof: a border that exists only while animating.
                 withAnimation(.easeInOut(duration: 0.4)) { isFlashing = true }
@@ -85,6 +87,16 @@ struct ContentView: View {
                     .overlay(Rectangle().fill(Color.gray).frame(width: 140, height: 30))
             }
 
+            HStack(spacing: 24) {
+                // Too small to tap comfortably (24 pt, Apple asks for 44).
+                Button { lastAction = "small" } label: { Color.gray.opacity(0.3).frame(width: 24, height: 24) }
+                    .accessibilityIdentifier("smallTarget")
+                    .accessibilityLabel("Small")
+                Text("Faint text")
+                    .foregroundStyle(Color(white: 0.8))
+                    .accessibilityIdentifier("faintText")
+            }
+
             // An app timeline on ddp's clock: `ddp time pause/step/seek` freeze, step and rewind it.
             TimelineView(.animation) { _ in
                 let phase = AgentDDP.elapsedTime().truncatingRemainder(dividingBy: 2) / 2
@@ -106,6 +118,8 @@ struct ContentView: View {
             }
         }
         .padding(.top, 60)
+        // A deep link (ddpsample://...) shows up as the last action, for `ddp open`.
+        .onOpenURL { lastAction = "link \($0.absoluteString)" }
     }
 }
 
@@ -147,7 +161,7 @@ enum SampleNetwork {
     static let session = ObservedSession(session: .shared)
 
     static func load() async -> String {
-        var request = URLRequest(url: URL(string: "http://127.0.0.1:18765/build.json?token=abc&page=1")!)
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:18765/items.json?token=abc&page=1")!)
         request.setValue("Bearer \(devSecret)", forHTTPHeaderField: "Authorization")
         request.setValue("sample", forHTTPHeaderField: "X-Client")
         do {

@@ -101,6 +101,18 @@ private final class LiveSession {
                 _ = send(LiveEval.evaluate(name: message["id"] as? String ?? "", path: message["path"] as? String ?? ""))
                 finish()
             }
+        case "tap":
+            // Not a touch: it runs the element's accessibility action (what VoiceOver's double tap does),
+            // so a button's action runs but its pressed look does not show. agent-device gives a real touch.
+            DispatchQueue.main.async { [self] in
+                let name = message["id"] as? String ?? ""
+                if let element = AccessibilityReader.object(named: name, in: FrameCapture.visibleWindows()) {
+                    _ = send(["type": "value", "path": "tap", "value": element.accessibilityActivate()])
+                } else {
+                    _ = send(["type": "error", "error": "no element '\(name)'"])
+                }
+                finish()
+            }
         case "time":
             DispatchQueue.main.async { [self] in
                 _ = send(TimeControl.handle(action: message["action"] as? String ?? "", value: message["value"] as? Double))
