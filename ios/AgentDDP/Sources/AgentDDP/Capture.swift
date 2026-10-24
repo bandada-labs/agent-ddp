@@ -10,8 +10,11 @@ enum AccessibilityReader {
     static func enableAutomationTree() {
         typealias SetEnabled = @convention(c) (Bool) -> Void
         guard let library = dlopen("/usr/lib/libAccessibility.dylib", RTLD_NOW),
-              let symbol = dlsym(library, "_AXSSetAutomationEnabled") else { return }
+              let symbol = dlsym(library, "_AXSSetAutomationEnabled") else {
+            return Hooks.failed("accessibility.automation", "no _AXSSetAutomationEnabled")
+        }
         unsafeBitCast(symbol, to: SetEnabled.self)(true)
+        Hooks.ok("accessibility.automation")
     }
 
     static func elements(in window: UIWindow) -> [[String: Any]] {

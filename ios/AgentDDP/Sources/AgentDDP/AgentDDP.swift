@@ -10,6 +10,7 @@ public enum AgentDDP {
     public static func start() {
         #if DEBUG && canImport(UIKit)
         FrameRecorder.shared.listenForRequests()
+        TouchRadius.watch()
         ControlServer.shared.start(directory: FrameRecorder.shared.outputDirectory)
         History.shared.start(directory: FrameRecorder.shared.outputDirectory.appendingPathComponent("history"))
         #endif

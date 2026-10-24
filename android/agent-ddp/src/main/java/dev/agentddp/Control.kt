@@ -104,7 +104,11 @@ internal class ControlSession(private val app: ControlApp, private val send: (St
         "app.run" to AgentDdpCommands::run,
         "screen.elements" to { _ -> JSONObject().put("elements", onMain { FrameCapture.frame(0, 0.0).getJSONArray("elements") }) },
         "screen.capture" to { params -> Control.capture(params) },
-        "screen.hit" to { params -> JSONObject().put("elements", onMain { Hit.check(params.optString("id").ifEmpty { null }) }) },
+        "app.hooks" to { _ -> JSONObject().put("hooks", onMain { Hooks.report() }) },
+        "screen.hit" to { params ->
+            val touch = params.optDouble("touch", 0.0).toFloat()
+            JSONObject().put("elements", onMain { Hit.check(params.optString("id").ifEmpty { null }, touch) })
+        },
         "screen.frame" to { _ -> onMain { FrameCapture.frame(0, 0.0) } },
         "screen.watch" to { params -> watchScreen(params.optInt("frames", 0)); JSONObject() },
         "screen.unwatch" to { _ -> onMain { screenStream?.stop() }; JSONObject() },

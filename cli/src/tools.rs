@@ -1,6 +1,6 @@
 //! For people and other tools: the HTML view, the MCP server, the guides, doctor, batch.
 use crate::args::Args;
-use crate::live::{android_socket, library_too_old, older_library, platform_of, snapshot_messages};
+use crate::live::{android_socket, library_too_old, older_library, open, platform_of, snapshot_messages};
 use crate::model::{element_alpha, element_key, element_keys, element_state, load};
 use crate::py;
 use crate::state::{self, adb_path, capture, ctx, read_json, which, write_file, Result, IOS_DIR};
@@ -316,6 +316,7 @@ fn doctor_checks(platform: &str, device: &str, app: &str) -> Result<Vec<Step>> {
         json!({"platform": "android", "app": app, "device": device, "port": forwarded.stdout.trim().parse::<u64>().unwrap_or(0)})
     };
     let answer = snapshot_messages(&session);
+    let hooks = hook_steps(&session);
     if platform == "android" && session["port"].as_u64().unwrap_or(0) > 0 {
         capture(&adb_path()?, &["-s", device, "forward", "--remove", &format!("tcp:{}", py::str(&session["port"]))]);
     }
@@ -349,7 +350,42 @@ fn doctor_checks(platform: &str, device: &str, app: &str) -> Result<Vec<Step>> {
             "give the elements you need a testTag, text or contentDescription".into()
         },
     ));
+    steps.extend(hooks);
     Ok(steps)
+}
+
+/// One step per engine hook the library reaches outside public API (`app.hooks`), after one `screen.hit` so the hit
+/// test's hooks have run. A failing hook fails doctor: the checks it feeds say nothing until it works again.
+fn hook_steps(session: &Value) -> Vec<Step> {
+    let Ok(mut control) = open(session) else { return Vec::new() };
+    let _ = control.call("screen.hit", json!({}));
+    let answer = control.call("app.hooks", json!({}));
+    control.close();
+    let Ok(answer) = answer else { return Vec::new() }; // a library from before app.hooks
+    answer["hooks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|hook| {
+            let (name, kind, feeds) = (py::str(&hook["name"]), py::str(&hook["kind"]), py::str(&hook["feeds"]));
+            let error = hook.get("error").map(py::str).unwrap_or_default();
+            let count = |field: &str| hook[field].as_u64().unwrap_or(0);
+            let times = |n: u64| if n == 1 { "once".to_string() } else { format!("{n} times") };
+            let state = match hook["status"].as_str().unwrap_or("") {
+                "ok" => format!("answered {}", times(count("ok"))),
+                "fallback" => format!("the platform's rule answers instead, {} ({error})", times(count("fallback"))),
+                "mixed" => format!("answered {}, failed {} ({error})", times(count("ok") + count("fallback")), times(count("failed"))),
+                "failing" => format!("failing ({error})"),
+                _ => "not used yet".to_string(),
+            };
+            let value = hook.get("value").map(|v| format!(", {} from {}", py::str(v), py::str(&hook["source"])));
+            (
+                hook["status"] != "failing",
+                format!("hook {name} ({kind}): {state}{}", value.unwrap_or_default()),
+                format!("update agent-ddp, or report it with this iOS / Android / Compose version; until then: {feeds} say nothing"),
+            )
+        })
+        .collect()
 }
 
 pub fn doctor(args: &mut Args) -> Result<i32> {

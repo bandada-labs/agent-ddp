@@ -198,7 +198,9 @@ internal object FrameCapture {
      * WindowManagerGlobal is hidden API; Debug builds may use it. Falls back to the activity window alone.
      */
     fun windowRoots(decor: View): List<View> = runCatching {
-        val (instance, getNames, getRootView) = Hidden.windowManager ?: return listOf(decor)
+        val (instance, getNames, getRootView) = Hidden.windowManager
+            ?: return listOf(decor).also { Hooks.failed("windowManager.roots", "WindowManagerGlobal is blocked") }
+        Hooks.ok("windowManager.roots")
         @Suppress("UNCHECKED_CAST")
         val names = getNames.invoke(instance) as Array<String>
         names.mapNotNull { getRootView.invoke(instance, it) as? View }

@@ -180,7 +180,7 @@ private class Segment(private val directory: File, val startedAt: Long, scale: D
 }
 
 /** Taps and swipes in the activity window's coordinates (the recording's), the ones adb sends included. */
-private class TouchWatcher(private val inner: Window.Callback, private val slop: Float) : Window.Callback by inner {
+internal class TouchWatcher(val inner: Window.Callback, private val slop: Float) : Window.Callback by inner {
     private var downX = 0f
     private var downY = 0f
 

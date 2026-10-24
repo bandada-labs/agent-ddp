@@ -97,6 +97,11 @@ struct ContentView: View {
                 Text("Faint text")
                     .foregroundStyle(Color(white: 0.8))
                     .accessibilityIdentifier("faintText")
+                // Must stay quiet: its touch area is 12 pt wider than its frame on every side, so a touch just
+                // outside the frame still reaches it. ddp must not call it covered or small.
+                Button("Wide") { lastAction = "wide" }
+                    .contentShape(Rectangle().inset(by: -12))
+                    .accessibilityIdentifier("wideHit")
             }
 
             // An app timeline on ddp's clock: `ddp time pause/step/seek` freeze, step and rewind it.

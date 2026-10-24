@@ -102,6 +102,7 @@ enum Input {
         setSender(hand, senderId)
         setDigitizerInfo(hand, contextId, false, false, nil, 0, 0)
         unsafeBitCast(UIApplication.shared.method(for: selector), to: Enqueue.self)(UIApplication.shared, selector, hand)
+        Hooks.ok("input.hid")
     }
 
     private static func symbol<T>(_ name: String) throws -> T {
@@ -110,7 +111,8 @@ enum Input {
     }
 
     private static func unsupported(_ name: String) -> Control.Failure {
-        Control.Failure(description: "Touches need \(name), which this iOS version does not have")
+        Hooks.failed("input.hid", "no \(name)")
+        return Control.Failure(description: "Touches need \(name), which this iOS version does not have")
     }
 }
 #endif

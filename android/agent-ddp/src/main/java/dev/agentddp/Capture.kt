@@ -118,7 +118,9 @@ internal class Capture(private val density: Float) {
 
     /** GradientDrawable has no public stroke getter; its stroke Paint is a hidden field. Null when it can't be read. */
     private fun strokeOf(drawable: GradientDrawable): JSONObject? = runCatching {
-        val paint = Hidden.strokePaint?.get(drawable) as? Paint ?: return null
+        val paint = Hidden.strokePaint?.get(drawable) as? Paint
+            ?: return null.also { Hooks.failed("gradientDrawable.stroke", "GradientDrawable.mStrokePaint is blocked") }
+        Hooks.ok("gradientDrawable.stroke")
         val color = hex(paint.color) ?: return null
         if (paint.strokeWidth <= 0f) return null
         JSONObject().put("width", round2(paint.strokeWidth.toDouble())).put("color", color)
@@ -194,10 +196,10 @@ internal class Capture(private val density: Float) {
 
     /** A layout node's children in draw order (zIndex, then placement order). The getter is public on an internal class. */
     private fun zSortedChildren(node: LayoutInfo): List<LayoutInfo> = runCatching {
-        val (getChildren, asList) = Hidden.layoutChildren(node) ?: return emptyList()
+        val (getChildren, asList) = Hidden.layoutChildren(node) ?: error("no LayoutNode.getZSortedChildren")
         @Suppress("UNCHECKED_CAST")
-        asList.invoke(getChildren.invoke(node)) as List<LayoutInfo>
-    }.getOrDefault(emptyList())
+        (asList.invoke(getChildren.invoke(node)) as List<LayoutInfo>).also { Hooks.ok("compose.zSortedChildren") }
+    }.getOrElse { Hooks.failed("compose.zSortedChildren", it.toString()); emptyList() }
 
     // Walks every Compose layout node, not only the ones with semantics, so a plain Box with a background is
     // seen too (it paints, and it can cover something). Children come in draw order, so zIndex counts.
@@ -377,6 +379,8 @@ internal object Hidden {
             Class.forName("android.view.View\$ListenerInfo").getDeclaredField("mOnTouchListener").apply { isAccessible = true }
         }.getOrNull()
     }
+
+    val touchListenerReadable get() = listenerInfo != null && onTouchListener != null
 
     fun touchListener(view: View): Any? = runCatching {
         listenerInfo?.get(view)?.let { onTouchListener?.get(it) }
