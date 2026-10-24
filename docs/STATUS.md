@@ -1,6 +1,6 @@
 # Status
 
-Last update: 2026-10-23. Read this after a break, then [DECISIONS.md](DECISIONS.md).
+Last update: 2026-10-24. Read this after a break, then [DECISIONS.md](DECISIONS.md).
 
 ## In one paragraph
 
@@ -20,9 +20,10 @@ A small library inside a Debug build of an iOS or Android app serves what the ap
    5. Frames and history over the endpoint. Done: `screen.frame`, `screen.watch`, `screen.value`, `time.*`, `history.files`, `history.read`. The v1 `tap` (iOS accessibility action) is not carried over: `input.touch` is a real finger.
    6. The CLI on top. Done: every live command (`connect`, `tree`, `read`, `watch`, `wait`, `tap`, `eval`, `time`, `net`, `history`, `doctor`) talks to the control endpoint, with the same output. `tap` is a real touch on both platforms. New: `type`, `press`, `net send`, `net mock`, `net fail`, `prefs`, `run`, `logs --follow`.
    7. v1 goes. Done: the JSON lines endpoint (`live.json`, the socket `agentddp.<package>`) is gone from both libraries, and the protocol is version 2 in `app.info` and every header. All seven phases are done.
-2. A code of conduct, once the maintainer gives a contact address.
-3. iOS on physical devices (today the CLI uses `simctl`).
-4. History on iOS for `UIView.animate` animations, if users need more than their start and end (ADR 0005).
+2. Tappability (`screen.hit`, `ddp tap` checks, `ddp check tappable`). Done on both platforms; checked on four trap buttons in each sample app (disabled, covered by a clear view, a parent that takes no touches, outside its parent's bounds).
+3. A code of conduct, once the maintainer gives a contact address.
+4. iOS on physical devices (today the CLI uses `simctl`).
+5. History on iOS for `UIView.animate` animations, if users need more than their start and end (ADR 0005).
 
 ## Known limits
 

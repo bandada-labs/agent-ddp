@@ -4,6 +4,9 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 
 ## Unreleased
 
+- `screen.hit`: where a touch on an element would land, from the platform's own hit test, without touching. Elements carry `disabled` when the platform says so.
+- `ddp tap` checks before it touches (output changed): it waits up to 2 s for the element to hold still, be enabled and have a point a touch reaches, fails with `disabled`, `covered`, `untouchable` or `outside` otherwise, and prints what changed after the touch (`nothing changed within 1000ms` when nothing did). `--force` is the old tap at the center.
+- `ddp check tappable`: every control on screen that a touch does not reach, and why. `ddp explore` skips those controls and says why.
 - Protocol version 2 (breaking): the v1 JSON lines endpoint is gone from both libraries. iOS no longer writes `live.json`, Android no longer opens the socket `agentddp.<package>`. `app.info` and every header say `"protocol": 2`. A CLI before this version cannot reach the app; recordings and history files from older libraries still read.
 - New control endpoint in the library (ADR 0008): JSON-RPC over a WebSocket, with names taken from the app. Android: the abstract socket `agentddp.<package>.control`. iOS simulator: the port in `Library/Caches/agent-ddp/control.json`. Web pages may not connect.
 - `screen.elements` and `screen.capture`: the elements of the screen, in the same shape as in frames, and an image of every window.

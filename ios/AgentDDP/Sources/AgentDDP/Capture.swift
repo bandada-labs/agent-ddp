@@ -16,15 +16,25 @@ enum AccessibilityReader {
 
     static func elements(in window: UIWindow) -> [[String: Any]] {
         var found: [[String: Any]] = []
-        visitElements(window) { object in
-            var element: [String: Any] = ["frame": rectArray(object.accessibilityFrame)]
-            if let id = identifier(of: object) { element["id"] = id }
-            if let label = object.accessibilityLabel, !label.isEmpty { element["label"] = label }
-            if !object.accessibilityTraits.intersection([.button, .link, .adjustable]).isEmpty { element["tap"] = true }
-            element["role"] = role(of: object)
-            found.append(element)
-        }
+        visitElements(window) { found.append(element(for: $0)) }
         return found
+    }
+
+    /// Every element with its accessibility object, for checks that need the object (`screen.hit`).
+    static func objects(in windows: [UIWindow]) -> [(object: NSObject, element: [String: Any])] {
+        var found: [(NSObject, [String: Any])] = []
+        windows.forEach { visitElements($0) { found.append(($0, element(for: $0))) } }
+        return found
+    }
+
+    private static func element(for object: NSObject) -> [String: Any] {
+        var element: [String: Any] = ["frame": rectArray(object.accessibilityFrame)]
+        if let id = identifier(of: object) { element["id"] = id }
+        if let label = object.accessibilityLabel, !label.isEmpty { element["label"] = label }
+        if !object.accessibilityTraits.intersection([.button, .link, .adjustable]).isEmpty { element["tap"] = true }
+        if object.accessibilityTraits.contains(.notEnabled) { element["disabled"] = true }
+        element["role"] = role(of: object)
+        return element
     }
 
     /// The accessibility element named by id or label, for `ddp eval`.
@@ -56,7 +66,7 @@ enum AccessibilityReader {
         return "generic"
     }
 
-    private static func identifier(of object: NSObject) -> String? {
+    static func identifier(of object: NSObject) -> String? {
         // SwiftUI's element objects answer the selector without declaring the protocol.
         guard object.responds(to: accessibilityIdentifierSelector),
               let id = object.value(forKey: "accessibilityIdentifier") as? String, !id.isEmpty else { return nil }

@@ -43,10 +43,24 @@ import androidx.compose.ui.unit.isSpecified
 import org.json.JSONArray
 import org.json.JSONObject
 
+/** Children in the order they draw: a custom drawing order (API 29+ exposes it), then by Z, stable. */
+internal fun drawingOrder(group: ViewGroup): List<View> {
+    val ordered = (0 until group.childCount).map { position ->
+        group.getChildAt(if (Build.VERSION.SDK_INT >= 29) group.getChildDrawingOrder(position) else position)
+    }
+    return ordered.sortedBy { it.z }
+}
+
+/** An element's View, or its Compose layout node and the compose view that holds it. */
+internal class Target(val view: View, val layout: LayoutInfo?)
+
 /** One frame: elements (what an agent names) and painted nodes in draw order (later covers earlier). */
 internal class Capture(private val density: Float) {
     val elements = JSONArray()
     val nodes = JSONArray()
+    /** What each element is, by index in [elements]: a View, or a Compose layout node with its compose view. */
+    val targets = mutableListOf<Target>()
+    private var composeView: View? = null
     /** Where the window being walked sits relative to the activity window. */
     var windowOffset = PointF(0f, 0f)
     /** Index in [elements] of the element whose subtree is being walked, -1 for none: each node's `own`. */
@@ -74,6 +88,7 @@ internal class Capture(private val density: Float) {
         }
 
         if (view is ViewRootForTest) {
+            composeView = view
             val semantics = mutableMapOf<Int, SemanticsNode>()
             collectSemantics(view.semanticsOwner.unmergedRootSemanticsNode, semantics)
             walkLayout(view.semanticsOwner.unmergedRootSemanticsNode.layoutInfo, semantics, visible, alpha)
@@ -85,13 +100,6 @@ internal class Capture(private val density: Float) {
         owner = outerOwner
     }
 
-    /** Children in the order they draw: a custom drawing order (API 29+ exposes it), then by Z, stable. */
-    private fun drawingOrder(group: ViewGroup): List<View> {
-        val ordered = (0 until group.childCount).map { position ->
-            group.getChildAt(if (Build.VERSION.SDK_INT >= 29) group.getChildDrawingOrder(position) else position)
-        }
-        return ordered.sortedBy { it.z }
-    }
 
     private fun drawableNode(drawable: Drawable): JSONObject {
         val node = JSONObject()
@@ -138,8 +146,10 @@ internal class Capture(private val density: Float) {
             id?.let { put("id", it) }
             label?.let { put("label", it) }
             if (view.isClickable && view.hasOnClickListeners()) put("tap", true)
+            if (!view.isEnabled) put("disabled", true)
             put("role", viewRole(view))
         })
+        targets.add(Target(view, null))
         return elements.length() - 1
     }
 
@@ -232,7 +242,9 @@ internal class Capture(private val density: Float) {
                     val touch = modifierInfo.map { windowRect(it.coordinates) }.fold(RectF(frame)) { all, r -> all.apply { union(r) } }
                     if (touch != frame) put("touch", rectArray(touch))
                 }
+                if (node.config.getOrNull(SemanticsProperties.Disabled) != null) put("disabled", true)
             })
+            targets.add(Target(composeView!!, layout))
         }
 
         val clipLayer = modifiers.firstOrNull { it.name == "graphicsLayer" && it.props["clip"] == true }
@@ -355,6 +367,48 @@ internal object Hidden {
     val strokePaint: java.lang.reflect.Field? by lazy {
         runCatching { GradientDrawable::class.java.getDeclaredField("mStrokePaint").apply { isAccessible = true } }.getOrNull()
     }
+
+    /** View.mListenerInfo.mOnTouchListener: a view with a touch listener takes touches without being clickable. */
+    private val listenerInfo: java.lang.reflect.Field? by lazy {
+        runCatching { View::class.java.getDeclaredField("mListenerInfo").apply { isAccessible = true } }.getOrNull()
+    }
+    private val onTouchListener: java.lang.reflect.Field? by lazy {
+        runCatching {
+            Class.forName("android.view.View\$ListenerInfo").getDeclaredField("mOnTouchListener").apply { isAccessible = true }
+        }.getOrNull()
+    }
+
+    fun touchListener(view: View): Any? = runCatching {
+        listenerInfo?.get(view)?.let { onTouchListener?.get(it) }
+    }.getOrNull()
+
+    /** Compose's touch hit test: AndroidComposeView.getRoot, LayoutNode.hitTest, HitTestResult, requireLayoutNode. */
+    class ComposeHitTest(
+        val getRoot: java.lang.reflect.Method,
+        val hitTest: java.lang.reflect.Method,
+        val newResult: java.lang.reflect.Constructor<*>,
+        val requireLayoutNode: java.lang.reflect.Method,
+    )
+
+    private var composeHit: ComposeHitTest? = null
+
+    fun composeHitTest(composeView: View): ComposeHitTest? {
+        composeHit?.let { return it }
+        return runCatching {
+            val getRoot = composeView.javaClass.getMethod("getRoot")
+            // Internal with a mangled name (hitTest-M_7yMNQ$ui_release in 1.7): matched by prefix and arity.
+            val hitTest = getRoot.returnType.methods.first {
+                it.name.startsWith("hitTest-") && !it.name.endsWith("\$default") && it.parameterTypes.size == 4
+            }
+            val newResult = Class.forName("androidx.compose.ui.node.HitTestResult").getConstructor()
+            val requireLayoutNode = Class.forName("androidx.compose.ui.node.DelegatableNodeKt")
+                .getMethod("requireLayoutNode", Class.forName("androidx.compose.ui.node.DelegatableNode"))
+            ComposeHitTest(getRoot, hitTest, newResult, requireLayoutNode).also { composeHit = it }
+        }.getOrNull()
+    }
+
+    /** The layout node of an AndroidView's holder view. */
+    fun interopLayout(holder: View): Any? = runCatching { holder.javaClass.getMethod("getLayoutNode").invoke(holder) }.getOrNull()
 
     private var children: Pair<java.lang.reflect.Method, java.lang.reflect.Method>? = null
 

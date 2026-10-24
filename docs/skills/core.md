@@ -62,7 +62,8 @@ ddp watch @e3 --until 'alpha>0.9'
 ## Acting and setting up
 
 ```
-ddp tap @e3                      # a real touch at the element's center
+ddp tap @e3                      # a real touch, once the app's hit test says it reaches @e3; prints what changed
+ddp check tappable               # controls a touch does not reach (disabled, covered, outside their parent), no touching
 ddp type "ana@example.com" --into @e5   # tap the field, then type as the keyboard does
 ddp press Enter
 ddp net mock '*/api/cart*' --status 500 --then "ddp tap @e3"   # the app gets a 500 for that request

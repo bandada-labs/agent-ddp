@@ -107,6 +107,28 @@ struct ContentView: View {
                     .accessibilityElement().accessibilityIdentifier("clockBar")
             }
 
+            // Buttons that show but cannot be tapped, for `ddp check tappable` and `ddp tap`.
+            HStack(spacing: 12) {
+                Button("Off") { lastAction = "off" }
+                    .disabled(true)
+                    .accessibilityIdentifier("trapDisabled")
+                ZStack {
+                    Button("Under") { lastAction = "under" }
+                        .accessibilityIdentifier("trapCovered")
+                    // A clear view that takes the touch and draws nothing.
+                    Color.clear.contentShape(Rectangle()).onTapGesture {}
+                }
+                .frame(width: 70, height: 44)
+                HStack {
+                    Button("Ignored") { lastAction = "ignored" }
+                        .accessibilityIdentifier("trapIgnored")
+                }
+                .allowsHitTesting(false)
+                OutsideButton { lastAction = "outside" }
+                    .frame(width: 20, height: 44)
+            }
+            .padding(.trailing, 60)
+
             List {
                 Text("Row with context menu")
                     .accessibilityIdentifier("menuRow")
@@ -127,6 +149,23 @@ struct ContentView: View {
         // A deep link (ddpsample://...) shows up as the last action, for `ddp open`.
         .onOpenURL { lastAction = "link \($0.absoluteString)" }
     }
+}
+
+/// A UIKit button placed outside its parent's bounds: it draws (the parent does not clip) but no touch reaches it.
+struct OutsideButton: UIViewRepresentable {
+    let action: () -> Void
+
+    func makeUIView(context: Context) -> UIView {
+        let parent = UIView()
+        let button = UIButton(type: .system, primaryAction: UIAction { _ in action() })
+        button.setTitle("Outside", for: .normal)
+        button.accessibilityIdentifier = "trapOutside"
+        button.frame = CGRect(x: 30, y: 0, width: 70, height: 44)
+        parent.addSubview(button)
+        return parent
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {}
 }
 
 struct Triangle: Shape {

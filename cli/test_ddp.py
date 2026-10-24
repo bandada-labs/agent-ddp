@@ -341,9 +341,21 @@ class FakeApp:
         self.port = self.server.getsockname()[1]
         threading.Thread(target=self.serve, daemon=True).start()
 
+    # A tap sets both: the frame index in a stream, and the time, for `screen.frame` (what `ddp tap` polls).
+    @property
+    def tapped_at(self):
+        return self._tapped_at
+
+    @tapped_at.setter
+    def tapped_at(self, index):
+        self._tapped_at = index
+        self.tapped_clock = None if index is None else clock.monotonic()
+
     def frame(self, i):
         elements = [{"id": "button", "label": "Go", "tap": True, "frame": [0, 0, 100, 50]},
-                    {"id": "spinner", "frame": [0, 100, 20, 20]}]
+                    {"id": "spinner", "frame": [0, 100, 20, 20]},
+                    # Shows but a clear view on top takes its touches.
+                    {"id": "locked", "label": "Locked", "tap": True, "frame": [0, 60, 100, 30]}]
         nodes = [{"z": 0, "kind": "layer", "fill": "#0000FFFF", "frame": [0, 0, 100, 50]},
                  {"z": 1, "kind": "layer", "fill": "#000000FF", "frame": [0, 100, 20 + i % 3, 20]}]
         if self.tapped_at is not None:
@@ -403,6 +415,13 @@ class FakeApp:
                     result = {"protocol": 2, "platform": "ios", "app": "fake", "name": "Fake", "unit": "pt", "scale": 3}
                 elif method == "screen.frame":
                     result = self.frame(0)
+                    if self.tapped_clock is not None and clock.monotonic() - self.tapped_clock > 0.05:
+                        result["elements"].append({"id": "toast", "label": "Saved", "frame": [0, 200, 100, 30]})
+                elif method == "screen.hit":
+                    hits = [{**e, "points": 9, "point": [50, 25]} if e["id"] == "button" else
+                            {**e, "points": 0, "reason": "covered", "by": "scrim"}
+                            for e in self.frame(0)["elements"] if e.get("tap")]
+                    result = {"elements": [h for h in hits if params.get("id") in (None, h["id"], h["label"])]}
                 elif method == "input.touch":
                     if params["phase"] == "down" and params["x"] < 100 and params["y"] < 50:
                         self.tapped_at = self.stream_index
@@ -456,8 +475,16 @@ with tempfile.TemporaryDirectory() as directory:
         {"platform": "ios", "app": "fake", "device": "fake", "port": app.port}))
     live = ddp_in(directory, "tree", "-i")
     assert "@e1 button" in live.stdout and "@e2 spinner" in live.stdout, live.stdout + live.stderr
-    assert "tapped button" in ddp_in(directory, "tap", "@e1").stdout
+    tapped = ddp_in(directory, "tap", "@e1").stdout
+    assert "tapped button at (50, 25)" in tapped and "new: toast" in tapped, tapped
     app.tapped_at = None
+    # The app's hit test says a touch misses it: tap refuses, check tappable reports it, --force touches anyway.
+    refused = ddp_in(directory, "tap", "locked")
+    assert refused.returncode == 1 and "locked is covered by scrim" in refused.stderr, refused.stderr
+    assert "tapped locked at (50, 75)" in ddp_in(directory, "tap", "locked", "--force").stdout
+    tappable = ddp_in(directory, "check", "tappable")
+    assert tappable.returncode == 1 and "COVERED locked: covered by scrim" in tappable.stdout and \
+        "1 of 2 controls take a touch" in tappable.stdout, tappable.stdout + tappable.stderr
     then_tap = f"{DDP[0]} tap button"
     waited = ddp_in(directory, "wait", "text", "saved", "--timeout", "2s")
     assert waited.returncode == 1 and "next:" in waited.stderr, waited.stderr  # nothing tapped yet: times out
@@ -471,7 +498,8 @@ with tempfile.TemporaryDirectory() as directory:
     assert "toast" in recorded.stdout and recorded.returncode == 0, recorded.stdout + recorded.stderr
     app.tapped_at = None
     explored = ddp_in(directory, "explore", "--per", "1s")
-    assert "exploring 1 controls: button" in explored.stdout and "button: changed" in explored.stdout and \
+    assert "locked: not tapped, covered by scrim" in explored.stdout and \
+        "exploring 1 controls: button" in explored.stdout and "button: changed" in explored.stdout and \
         "toast" in explored.stdout, explored.stdout + explored.stderr
     # Two sessions at once, a placeholder and a JSON-looking argument in --then.
     for name in ("ios", "android"):

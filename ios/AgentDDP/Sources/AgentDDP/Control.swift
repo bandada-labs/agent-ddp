@@ -129,6 +129,7 @@ final class ControlSession {
         "app.commands": { _ in ["commands": Commands.shared.names()] },
         "screen.elements": { _ in ["elements": onMain { FrameCapture.visibleWindows().flatMap(AccessibilityReader.elements(in:)) }] },
         "screen.capture": { params in try Control.capture(params) },
+        "screen.hit": { params in ["elements": try onMain { Result { try Hit.check(name: params["id"] as? String) } }.get()] },
         "screen.frame": { _ in onMain { FrameCapture.frame(index: 0, milliseconds: 0) } },
         // The header, frame and end lines of a recording, as `screen.stream` events.
         "screen.watch": { [unowned self] params in

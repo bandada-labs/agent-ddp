@@ -3,6 +3,7 @@ mod checks;
 mod control;
 mod device;
 mod history;
+mod hit;
 mod live;
 mod model;
 mod py;
@@ -47,7 +48,7 @@ fn handler(command: &str) -> fn(&mut Args) -> Result<i32> {
         "time" => live::time_control,
         "read" => summary::read,
         "check" => run_check,
-        "tap" => device::tap,
+        "tap" => hit::tap,
         "type" => device::type_text,
         "press" => device::press,
         "prefs" => live::prefs,

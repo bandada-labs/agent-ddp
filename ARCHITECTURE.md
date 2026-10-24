@@ -41,6 +41,7 @@ Both platforms have the same pieces, with the same names where the language allo
 | One frame | `FrameCapture` in `AgentDDP.swift`; `LayerReader`, `AccessibilityReader`, `PixelSampler` in `Capture.swift` | `FrameCapture` in `AgentDdp.kt`; `Capture`, `Hidden` in `Capture.kt`; `DrawRecorder` |
 | Frames over time | `FrameRecorder` (offline), `FrameStream` (live) | same |
 | Property reads (`screen.value`) | `LiveEval` in `Eval.swift` | same in `Eval.kt` |
+| Where a touch lands (`screen.hit`) | `Hit` in `Hit.swift` | `Hit` in `Hit.kt` |
 | Network log | `NetworkLog`, `Redactor` in `Network.swift` | `AgentDdpNetwork`, `AgentDdpInterceptor`, `NetworkLog` in `Network.kt` |
 | Virtual clock | `TimeControl` in `Time.swift` | `AgentDdpTime`, `TimeControl` in `Time.kt` |
 | Control endpoint (ADR 0008) | `ControlServer`, `ControlSession` in `Control.swift` | same in `Control.kt` |
@@ -58,7 +59,8 @@ One binary, one module per area. `main.rs` maps each command to its handler.
 | `args.rs` | every command, its options and help text |
 | `state.rs` | per-command context (session paths, `--json`), errors with `code` and `next`, output limits |
 | `live.rs` | the protocol client, `connect`, live-only commands (`watch`, `eval`, `net`, `time`) |
-| `device.rs` | `simctl` and `adb` work: `record`, `tap`, `wait`, `logs`, `set`, `open`, `annotate`, `explore` |
+| `device.rs` | `simctl` and `adb` work: `record`, `wait`, `logs`, `set`, `open`, `annotate`, `explore` |
+| `hit.rs` | `tap` and `check tappable`, on the app's hit test |
 | `model.rs` | loading recordings, naming elements, which element owns each node |
 | `queries.rs` | `tree`, `get`, `find`, `diff` and `@eN` refs |
 | `summary.rs` | `read`, sparklines, `get --curve` |

@@ -15,6 +15,7 @@ ddp watch <element> [--until 'border>3'] [--for 5s] [--then "<cmd>"]
 ddp get <element> [--for 2s] [--then "<cmd>"] [--from 0.5s --to 1.5s]
 ddp find --where 'kind=draw and alpha>0' [--for 2s] [--then "<cmd>"] [--between 0.5s 1.5s]
 ddp read | check overlap|corners|timeline ... [--for 2s] [--then "<cmd>"]
+ddp check tappable                                 live: every control a touch does not reach, and why
 ddp record [--for 5s] [--then "<cmd>"] [--name N] saves .ddp/last.jsonl for offline queries
 ddp eval <element> <path>                          one property, read-only
 ddp time pause | resume | step [frames] | rate 0.1 | seek <time> | status
@@ -22,7 +23,7 @@ ddp net list | get <id> | watch [--until 'status>=400']
 ddp net send <url> [--method POST] [--body <text>]  a request through the app's own client
 ddp net mock <url pattern> [--status 503] [--body <text>] [--for 10s] [--limit N] [--then "<cmd>"]
 ddp net fail <url pattern> [--error offline|timeout|...] [--for 10s] [--limit N] [--then "<cmd>"]
-ddp tap <element>                                  a real touch at the element's center
+ddp tap <element> [--force]                        a real touch where it reaches the element; says what changed
 ddp type <text> [--into <element>]                 type as the keyboard does, into the focused field
 ddp press Enter | Tab | Backspace
 ddp prefs [list | set <key> <value> | rm <key> | clear | files] [--in <suite or file>]
@@ -134,6 +135,33 @@ Every `check` exits 1 when it finds a problem and 0 when it finds none.
 
 `check a11y` reports controls (`tap`) smaller than 44x44 pt (iOS) or 48x48 dp (Android), using the touch area when there is one; controls with no label; and text whose contrast with the fill behind it is under WCAG AA (4.5:1, or 3:1 for text of 18 pt, or 14 pt bold). It checks every frame and reports the worst moment per element with its time, so text that turns white before its background turns dark is caught too. Text over a gradient, an image or a drawing is not judged; the check lists those elements instead of guessing.
 
+### tap, check tappable
+
+`tap` asks the app's own hit test (`screen.hit`) where a touch on the element would land before it touches: UIKit's `hitTest` and SwiftUI's gesture hit test on iOS, View dispatch and Compose's `hitTest` on Android, the same calls a real finger goes through. It waits up to 2 s for the element to hold still, become enabled and have a point a touch reaches (the center first, then 8 more points), then touches there and looks for a change for 1 s:
+
+```
+$ ddp tap @e1
+tapped animatedButton at (201, 146); changed: animatedButton, flashBox
+$ ddp tap trapCovered
+ddp: trapCovered is covered by TapGesture: no point of it takes a touch
+next: ddp check tappable, or ddp tap trapCovered --force to touch it anyway
+```
+
+The error codes are `disabled`, `covered` (something on top takes the touch), `untouchable` (nothing takes it: SwiftUI `allowsHitTesting(false)`, iOS `isUserInteractionEnabled = false`) and `outside` (the element is drawn outside its parent's bounds, so the parent never passes the touch on). `nothing changed within 1000ms` after a tap means the touch reached nothing that reacts, or the action is slow (a request): look again before a second tap. A parent that swallows touches while they run (Compose `PointerEventPass.Initial`, `onInterceptTouchEvent`) passes the hit test; only that line shows it. `--force` touches the center with no checks.
+
+`check tappable` runs the same hit test on every control on screen and touches nothing:
+
+```
+$ ddp check tappable
+DISABLED trapDisabled
+COVERED trapCovered: covered by TapGesture, no point of it takes a touch
+UNTOUCHABLE trapIgnored: taking no touch, no point of it takes a touch
+OUTSIDE trapOutside: outside its parent (UIView bounds), no point of it takes a touch
+3 of 7 controls take a touch at their center
+```
+
+`PARTLY` is a control whose center is blocked while other points take a touch; `tap` uses one of those. `explore` skips the controls a touch does not reach and says why.
+
 ### check jank, settle
 
 `check jank` finds frame intervals over 3x the usual one (two or more missed refreshes) from the frame times, and prints the recorder's own capture cost next to them. `check settle` reports elements still changing in the last 500 ms (`NOT SETTLED`: a loop, or a take that ended too early) and positions that shake by 1 pt or less (`JITTER`). It needs a take of 1 s or more.
@@ -187,7 +215,7 @@ A drawn node belongs to the smallest element whose frame holds it (4 pt toleranc
 - Optional fields appear only when they apply: `visible` when clipped, `opacity` when under 1, `clips` when the node clips its children, `source` when the native view class is known.
 - `text` on a text node: `{"size", "color", "weight"}`, size in the recording's unit. Android reads it from the laid-out Compose style or the TextView; iOS from UILabel / UITextField, and for SwiftUI `Text` from its pixels every frame, sampled at 24 px a side (`"estimated": true`, size from the line height).
 - `own` (Android): the index in `elements` of the element whose subtree drew the node, `-1` for none. The CLI uses it for ownership instead of geometry, so a plain box drawn over a label counts as covering it.
-- Elements: `role`, the ARIA role a browser would give it (`button`, `link`, `textbox`, `searchbox`, `checkbox`, `radio`, `switch`, `slider`, `tab`, `combobox`, `heading`, `image`, `StaticText`, `generic`), from iOS accessibility traits or the Android Compose role, actions and View class. `tap` when the element is a control (iOS button, link or adjustable trait; Android click action), and `touch` (Android) when its touch area is bigger than what it draws, such as a Material chip padded to 48 dp.
+- Elements: `role`, the ARIA role a browser would give it (`button`, `link`, `textbox`, `searchbox`, `checkbox`, `radio`, `switch`, `slider`, `tab`, `combobox`, `heading`, `image`, `StaticText`, `generic`), from iOS accessibility traits or the Android Compose role, actions and View class. `tap` when the element is a control (iOS button, link or adjustable trait; Android click action), and `touch` (Android) when its touch area is bigger than what it draws, such as a Material chip padded to 48 dp. `disabled` when the platform says so (iOS `notEnabled` trait, Android `Disabled` semantics or a disabled View).
 - The header carries `startedAt` (ms since 1970) so `ddp logs` can line log lines up with the take.
 - Android walks every Compose layout node in draw order, so nodes without semantics and `zIndex` count, and every window of the app, so menus, dialogs and popups are read. iOS sorts sublayers by `zPosition`. Android Views follow a custom child drawing order (API 29+). A `GradientDrawable` stroke and corner radius are read on Android.
 
@@ -198,6 +226,7 @@ A drawn node belongs to the smallest element whose frame holds it (4 pt toleranc
 - The single shapes inside a SwiftUI `Canvas` or `drawingGroup`: one bitmap, read by its pixels.
 - System UI outside the app: iOS alerts like "Open in ...?", Android system dialogs.
 - Compose `drawWithCache` and `drawWithContent`, text drawn inside a Canvas.
+- A parent that swallows touches while they run (Compose `PointerEventPass.Initial`, a View's `onInterceptTouchEvent`): `screen.hit` says the touch reaches the child; `tap` shows it only as `nothing changed`. On iOS, a cover exactly the size of a control and with the same kind of gesture reads as the control's own.
 
 ## Adding it to an app (Debug only)
 

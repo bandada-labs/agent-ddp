@@ -126,22 +126,11 @@ fn element_center(session: &Value, id: &str) -> Result<(f64, f64)> {
     Ok((x + w / 2.0, y + h / 2.0))
 }
 
-fn touch(control: &mut Control, (x, y): (f64, f64)) -> Result<()> {
+pub fn touch(control: &mut Control, (x, y): (f64, f64)) -> Result<()> {
     for phase in ["down", "up"] {
         control.call("input.touch", json!({"phase": phase, "x": x, "y": y}))?;
     }
     Ok(())
-}
-
-pub fn tap(args: &mut Args) -> Result<i32> {
-    let session = require_session()?;
-    let id = args.id.clone().unwrap_or_default();
-    let (x, y) = element_center(&session, &id)?;
-    let mut control = open(&session)?;
-    touch(&mut control, (x, y))?;
-    control.close();
-    say!("tapped {id} at ({x:.0}, {y:.0})");
-    Ok(0)
 }
 
 const FOCUS_WAIT_MS: u64 = 200;
@@ -681,6 +670,18 @@ pub fn explore(args: &mut Args) -> Result<i32> {
     if tappable.is_empty() {
         fail!("nothing tappable on screen", "nothing_to_explore", "ddp tree -i (the recorder marks controls with tap)");
     }
+    // A control no touch reaches would only show "changed nothing"; say why instead of tapping it.
+    let unreachable = crate::hit::unreachable(&session)?;
+    for (key, why) in &unreachable {
+        if tappable.contains(key) {
+            say!("{key}: not tapped, {why}");
+        }
+    }
+    let tappable: Vec<String> = tappable.into_iter().filter(|key| !unreachable.iter().any(|(k, _)| k == key)).collect();
+    if tappable.is_empty() {
+        say!("no control left to explore");
+        return Ok(0);
+    }
     say!("exploring {} controls: {}", tappable.len(), tappable.join(", "));
     for key in &tappable {
         let name =
@@ -692,7 +693,8 @@ pub fn explore(args: &mut Args) -> Result<i32> {
         take_args.all_frames = true;
         take_args.shared = true;
         let mut then = state::self_command();
-        then.extend(["tap".into(), key.clone(), "--max-output".into(), "0".into()]);
+        // Checked above; --force skips tap's own checks so the take keeps its length.
+        then.extend(["tap".into(), key.clone(), "--force".into(), "--max-output".into(), "0".into()]);
         if let Some(session_name) = &ctx().session_name {
             then.extend(["--session".into(), session_name.clone()]);
         }

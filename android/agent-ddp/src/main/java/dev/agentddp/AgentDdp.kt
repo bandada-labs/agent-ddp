@@ -170,6 +170,13 @@ internal object FrameCapture {
 
     /** Main thread only. Every window of the app, bottom first: the activity, then popups, menus and dialogs. */
     fun frame(index: Int, milliseconds: Double): JSONObject {
+        val capture = capture()
+        return JSONObject().put("type", "frame").put("i", index).put("t", round2(milliseconds))
+            .put("elements", capture.elements).put("nodes", capture.nodes)
+    }
+
+    /** Main thread only. The walk behind a frame, with each element's View or layout node. */
+    fun capture(): Capture {
         val decor = FrameRecorder.resumedActivity?.window?.decorView
         val capture = Capture(decor?.resources?.displayMetrics?.density ?: 1f)
         if (decor != null) {
@@ -182,8 +189,7 @@ internal object FrameCapture {
                 capture.walkView(root, bounds, 1f)
             }
         }
-        return JSONObject().put("type", "frame").put("i", index).put("t", round2(milliseconds))
-            .put("elements", capture.elements).put("nodes", capture.nodes)
+        return capture
     }
 
     /**

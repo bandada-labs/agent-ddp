@@ -125,8 +125,8 @@ pub const RECORDING_CHECKS: [(&str, RecordingCheck); 5] = [
     ("a11y", check_a11y),
 ];
 
-pub const CHECK_NAMES: [&str; 9] =
-    ["overlap", "corners", "jank", "settle", "a11y", "parity", "timeline", "baseline", "all"];
+pub const CHECK_NAMES: [&str; 10] =
+    ["overlap", "corners", "jank", "settle", "a11y", "parity", "timeline", "baseline", "tappable", "all"];
 
 /// One check by name: how many problems it found.
 pub fn run_named(args: &Args) -> Result<usize> {
@@ -139,6 +139,7 @@ pub fn run_named(args: &Args) -> Result<usize> {
         "parity" => check_parity(args),
         "timeline" => check_timeline(args),
         "baseline" => check_baseline(args),
+        "tappable" => crate::hit::check_tappable(args),
         _ => check_all(args),
     }
 }

@@ -68,6 +68,7 @@ pub struct Args {
     pub error: Option<String>,
     pub key: Option<String>,
     pub follow: bool,
+    pub force: bool,
 }
 
 const ABOUT: &str = "ddp: see what a Debug iOS/Android app draws, frame by frame, live or from a recording.
@@ -79,7 +80,7 @@ Start here (for agents): ddp skills get core
   tree | find | get | read | watch | eval  what is drawn, now or over a take (@refs from tree and find)
   record | wait | tap | type | press       take a recording, wait, touch and type
   open | set | logs | prefs | run          deep links, device settings, app logs, preferences, app commands
-  check overlap|corners|jank|settle|a11y|timeline|parity|baseline|all
+  check overlap|corners|jank|settle|a11y|timeline|parity|baseline|tappable|all
   history                                  the last 15 minutes: what changed, taps, requests; or one moment as a take
   diff | baseline | annotate | view | explore | net | time
   skills | batch | mcp
@@ -196,8 +197,9 @@ pub fn parser() -> Command {
             .arg(opt("against", "parity: the other platform's recording; baseline: its name"))
             .arg(opt("junit", "baseline: also write a JUnit XML report here"))
             .arg(flag("all-frames", "check every frame, not only the last")))))
-        .subcommand(sub("tap", "live: tap an element with a real touch at its center")
-            .arg(positional("id", "element id, label or @ref").required(true)))
+        .subcommand(sub("tap", "live: tap an element with a real touch, once the app's hit test says a touch reaches it")
+            .arg(positional("id", "element id, label or @ref").required(true))
+            .arg(flag("force", "touch the center without the checks")))
         .subcommand(sub("type", "live: type into the focused field, as the keyboard does")
             .arg(positional("value", "the text").required(true))
             .arg(opt("into", "tap this element first (id, label or @ref)").id("id")))
@@ -380,5 +382,6 @@ pub fn parse(argv: &[String]) -> Result<Args, clap::Error> {
         error: string(m, "error"),
         key: string(m, "key"),
         follow: boolean(m, "follow"),
+        force: boolean(m, "force"),
     })
 }

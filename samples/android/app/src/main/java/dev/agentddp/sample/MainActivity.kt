@@ -26,6 +26,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.viewinterop.AndroidView
+import android.content.Context
+import android.widget.FrameLayout
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
@@ -175,6 +181,36 @@ fun SampleScreen(initialAction: String = "none") {
                     Text("Faint text", Modifier.testTag("faintText"), color = Color(0xFFCCCCCC))
                 }
             }
+            item {
+                // Buttons that show but cannot be tapped, for `ddp check tappable` and `ddp tap`.
+                val small = PaddingValues(horizontal = 10.dp)
+                Row(Modifier.padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Button({ lastAction = "off" }, Modifier.testTag("trapDisabled"), enabled = false, contentPadding = small) { Text("Off") }
+                    Box {
+                        Button({ lastAction = "under" }, Modifier.testTag("trapCovered"), contentPadding = small) { Text("Under") }
+                        // A clear box that takes the touch and draws nothing.
+                        Box(Modifier.matchParentSize().pointerInput(Unit) { detectTapGestures {} })
+                    }
+                    // A parent that eats every touch before its children see it.
+                    Box(Modifier.pointerInput(Unit) {
+                        awaitPointerEventScope { while (true) awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() } }
+                    }) {
+                        Button({ lastAction = "ignored" }, Modifier.testTag("trapIgnored"), contentPadding = small) { Text("Ignored") }
+                    }
+                    // A View button outside its parent's bounds: it draws (the parent does not clip) but no touch reaches it.
+                    AndroidView({ context ->
+                        FrameLayout(context).apply {
+                            val parent = FrameLayout(context).apply { clipChildren = false }
+                            parent.addView(android.widget.Button(context).apply {
+                                text = "Outside"
+                                id = R.id.trapOutside
+                                setOnClickListener { lastAction = "outside" }
+                            }, FrameLayout.LayoutParams(dp(context, 90), dp(context, 48)).apply { leftMargin = dp(context, 24) })
+                            addView(parent, FrameLayout.LayoutParams(dp(context, 20), dp(context, 48)))
+                        }
+                    }, Modifier.size(120.dp, 48.dp))
+                }
+            }
             item { Text("Last action: $lastAction", Modifier.padding(16.dp)) }
             item {
                 // For `Input` typing: Enter submits and shows the text as the last action.
@@ -193,6 +229,8 @@ fun SampleScreen(initialAction: String = "none") {
         }
     }
 }
+
+private fun dp(context: Context, value: Int) = (value * context.resources.displayMetrics.density).toInt()
 
 /** The sample's network call to a local test server on the host; nothing leaves the machine. */
 object SampleNetwork {
