@@ -4,7 +4,7 @@ use crate::control::Control;
 use crate::model::{self, element_alpha, element_state, load, save_recording, Frame, Recording};
 use crate::py::{self, f};
 use crate::state::{
-    self, adb_path, capture, ctx, failure, parse_ms, read_json, write_file, Result, ANDROID_DIR, IOS_DIR,
+    self, adb_path, capture, ctx, failure, parse_ms, read_json, write_file, Failure, Result, ANDROID_DIR, IOS_DIR,
 };
 use crate::{fail, say, warn};
 use serde_json::{json, Value};
@@ -181,6 +181,9 @@ pub fn connect(args: &mut Args) -> Result<i32> {
     let session = if platform == "ios" {
         let endpoint_file = Path::new(&model::app_container(&device, &app)?).join(IOS_DIR).join("control.json");
         let Some(endpoint) = read_json(&endpoint_file) else {
+            if older_library(&platform, &device, &app) {
+                return Err(library_too_old());
+            }
             fail!(
                 "the app has no control endpoint",
                 "no_endpoint",
@@ -200,7 +203,11 @@ pub fn connect(args: &mut Args) -> Result<i32> {
         let port: u64 = forwarded.stdout.trim().parse().unwrap_or(0);
         json!({"platform": "android", "app": app, "device": device, "port": port})
     };
-    let snapshot = snapshot_messages(&session)?;
+    let snapshot = match snapshot_messages(&session) {
+        Ok(snapshot) => snapshot,
+        Err(_) if older_library(&platform, &device, &app) => return Err(library_too_old()),
+        Err(failure) => return Err(failure),
+    };
     write_file(&ctx().session_file, py::dumps(&session))?;
     let frame = snapshot.iter().find(|m| m["type"] == "frame").cloned().unwrap_or(json!({"elements": [], "nodes": []}));
     let count = |field: &str| frame[field].as_array().map(Vec::len).unwrap_or(0);
@@ -635,6 +642,29 @@ pub fn time_control(args: &mut Args) -> Result<i32> {
 
 fn read_number(value: &str) -> Result<f64> {
     value.parse::<f64>().map_err(|_| failure(format!("can't read '{value}'"), "bad_value", None))
+}
+
+/// A library before 0.2.0 serves only the v1 endpoint: `live.json` on iOS, the socket `agentddp.<package>` on Android.
+pub fn older_library(platform: &str, device: &str, app: &str) -> bool {
+    if platform == "ios" {
+        let Ok(container) = model::app_container(device, app) else { return false };
+        let directory = Path::new(&container).join(IOS_DIR);
+        return directory.join("live.json").exists() && !directory.join("control.json").exists();
+    }
+    let Ok(adb) = adb_path() else { return false };
+    let sockets = capture(&adb, &["-s", device, "shell", "cat", "/proc/net/unix"]).stdout;
+    let old = format!("@agentddp.{app}");
+    let new = format!("{old}.control");
+    let names: Vec<&str> = sockets.lines().filter_map(|line| line.split_whitespace().last()).collect();
+    names.contains(&old.as_str()) && !names.contains(&new.as_str())
+}
+
+pub fn library_too_old() -> Failure {
+    failure(
+        "the app's agent-ddp library is older than 0.2.0: it serves only the v1 endpoint, which this ddp no longer speaks",
+        "library_too_old",
+        Some("update the library in the app's Debug build to the same version as ddp (ddp --version), or use ddp 0.1.x"),
+    )
 }
 
 /// The abstract socket of the control endpoint, as `adb forward` names it.

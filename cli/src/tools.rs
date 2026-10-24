@@ -1,6 +1,6 @@
 //! For people and other tools: the HTML view, the MCP server, the guides, doctor, batch.
 use crate::args::Args;
-use crate::live::{android_socket, platform_of, snapshot_messages};
+use crate::live::{android_socket, library_too_old, older_library, platform_of, snapshot_messages};
 use crate::model::{element_alpha, element_key, element_keys, element_state, load};
 use crate::py;
 use crate::state::{self, adb_path, capture, ctx, read_json, which, write_file, Result, IOS_DIR};
@@ -271,7 +271,12 @@ fn doctor_checks(platform: &str, device: &str, app: &str) -> Result<Vec<Step>> {
             "launch the app (xcrun simctl launch); it must be a Debug build that calls AgentDDP.start() at launch"
                 .into(),
         ));
-        let Some(endpoint) = endpoint else { return Ok(steps) };
+        let Some(endpoint) = endpoint else {
+            if older_library("ios", device, app) {
+                steps.push((false, "library 0.2.0 or newer".into(), library_too_old().next.unwrap_or_default()));
+            }
+            return Ok(steps);
+        };
         json!({"platform": "ios", "app": app, "device": device, "port": endpoint["port"]})
     } else {
         let adb = adb_path()?;
@@ -316,6 +321,10 @@ fn doctor_checks(platform: &str, device: &str, app: &str) -> Result<Vec<Step>> {
     }
     let messages = match answer {
         Ok(messages) => messages,
+        Err(_) if older_library(platform, device, app) => {
+            steps.push((false, "library 0.2.0 or newer".into(), library_too_old().next.unwrap_or_default()));
+            return Ok(steps);
+        }
         Err(failure) => {
             steps.push((
                 false,

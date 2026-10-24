@@ -59,6 +59,13 @@ final class ControlTests: XCTestCase {
         XCTAssertEqual(entry["t"] as? Int, 1_729_700_000_123)
     }
 
+    func testTheLibrarysOwnLogLinesAreLeftOut() {
+        XCTAssertTrue(AppLog.isOwnNoise(subsystem: "com.apple.network", message: "nw_connection_report_state"))
+        XCTAssertTrue(AppLog.isOwnNoise(subsystem: "com.apple.Accessibility", message: "Attempting to send notification"))
+        XCTAssertFalse(AppLog.isOwnNoise(subsystem: "com.apple.UIKit", message: "Unable to simultaneously satisfy constraints"))
+        XCTAssertFalse(AppLog.isOwnNoise(subsystem: "dev.agentddp.sample", message: "animatedButton tapped"))
+    }
+
     func testAPausedRequestShowsRedactedAndGoesOnWithItsRealSecret() async throws {
         let paused = expectation(description: "net.paused")
         var event: [String: Any] = [:]

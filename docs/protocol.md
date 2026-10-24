@@ -50,7 +50,7 @@ Coordinates are window coordinates in the platform's unit, the same as in frames
 | `time.seek` | `ms` from the pause point | Paused only |
 | `history.files` | | `files`: the flight recorder's files, oldest first, the open one included |
 | `history.read` | `file` | `data`: the file's bytes in base64, gzipped when the name ends in `.gz`. See History below |
-| `log.watch`, `log.unwatch` | | The last 100 lines, then each new one, as `log.entry` events: `{t, level, tag, text}`. `t` is ms since 1970, `level` debug, info, warn or error, `tag` the logcat tag or the os_log category. iOS reads os_log, Logger and NSLog once a second (not `print`); Android reads `logcat --pid` |
+| `log.watch`, `log.unwatch` | | The last 100 lines, then each new one, as `log.entry` events: `{t, level, tag, text}`. `t` is ms since 1970, `level` debug, info, warn or error, `tag` the logcat tag or the os_log category. iOS reads os_log, Logger and NSLog once a second (not `print`), without the lines the library itself causes (`com.apple.network` from its connections, `com.apple.Accessibility` from the accessibility tree it turns on); Android reads `logcat --pid` |
 | `prefs.files` | | `files`: the preferences files (Android) or suites (iOS) on disk, the app's own included |
 | `prefs.read` | `file`: none for the app's own preferences | `values`: key to text. Sets and arrays are JSON, dates ISO 8601, data base64. Secrets (keys like `token`, and registered values) read as `[redacted]` |
 | `prefs.write` | `file`, `key`, `value` (text) | Keeps the type the key holds: a Boolean stays a Boolean, a set takes a JSON array. A new key is a string. `[redacted]` leaves the real value |
