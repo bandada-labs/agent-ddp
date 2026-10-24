@@ -1,5 +1,6 @@
 package dev.agentddp
 
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
 
@@ -22,7 +23,11 @@ object AgentDdpCommands {
         val name = params.optString("name")
         val command = commands[name] ?: throw IllegalArgumentException("No command '$name'; app.commands lists them")
         val value = command(params.optJSONObject("params") ?: JSONObject())
-        val json = JSONObject.wrap(value) ?: throw IllegalArgumentException("'$name' returned a ${value!!::class.java.simpleName}, not JSON")
-        return JSONObject().put("value", json)
+        // JSONObject.wrap would turn any other object into its toString() or null, which hides the mistake.
+        if (value != null && value !is JSONObject && value !is JSONArray && value !is Map<*, *> && value !is Collection<*> &&
+            value !is String && value !is Number && value !is Boolean) {
+            throw IllegalArgumentException("'$name' returned a ${value::class.java.simpleName}, not JSON")
+        }
+        return JSONObject().put("value", JSONObject.wrap(value))
     }
 }

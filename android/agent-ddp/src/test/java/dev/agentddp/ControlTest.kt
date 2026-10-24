@@ -113,6 +113,24 @@ class ControlTest {
         assertEquals("[\"login\"]", answerTo("""{"id":3,"method":"app.commands"}""").getJSONObject("result").getJSONArray("commands").toString())
     }
 
+    @Test
+    fun aCommandThatReturnsNoJsonSaysSo() {
+        AgentDdpCommands.add("date") { java.util.Date() }
+        val answers = ArrayBlockingQueue<JSONObject>(1)
+        ControlSession(ControlApp("com.example", "Example")) { answers.put(JSONObject(it)) }
+            .receive("""{"id":1,"method":"app.run","params":{"name":"date"}}""")
+        assertEquals("'date' returned a Date, not JSON", answers.poll(2, TimeUnit.SECONDS)!!.getJSONObject("error").getString("message"))
+    }
+
+    @Test
+    fun netSendWithoutOkHttpInTheAppSaysSo() {
+        // Unit tests run without OkHttp, as an app without it would.
+        val answers = ArrayBlockingQueue<JSONObject>(1)
+        ControlSession(ControlApp("com.example", "Example")) { answers.put(JSONObject(it)) }
+            .receive("""{"id":1,"method":"net.send","params":{"url":"http://127.0.0.1/"}}""")
+        assertEquals("net.send needs OkHttp in the app", answers.poll(2, TimeUnit.SECONDS)!!.getJSONObject("error").getString("message"))
+    }
+
     private fun answerTo(message: String): JSONObject {
         var answer = ""
         ControlSession(ControlApp("com.example", "Example")) { answer = it }.receive(message)

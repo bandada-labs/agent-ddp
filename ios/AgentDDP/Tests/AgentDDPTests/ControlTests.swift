@@ -109,6 +109,16 @@ final class ControlTests: XCTestCase {
         XCTAssertEqual(commands?["commands"] as? [String], ["login"])
     }
 
+    func testACommandThatReturnsNoJSONSaysSo() async throws {
+        AgentDDP.command("date") { _ in Date() }
+        do {
+            _ = try await Commands.shared.run(["name": "date"])
+            XCTFail("a Date is not JSON")
+        } catch {
+            XCTAssertEqual("\(error)", "'date' returned a value that is not JSON")
+        }
+    }
+
     func testPreferencesKeepATypeHideASecretAndClear() throws {
         let suite = "agentddp-prefs-test"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
