@@ -1,4 +1,4 @@
-//! The live endpoint inside the app: connect, stream frames, and the commands that only make sense live.
+//! The app's control endpoint, live: connect, stream frames, and the commands that only make sense live.
 use crate::args::Args;
 use crate::control::Control;
 use crate::model::{self, element_alpha, element_state, load, save_recording, Frame, Recording};
@@ -12,8 +12,6 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
-/// The control endpoint's version this ddp speaks (`app.info` `protocol`).
-const CONTROL_PROTOCOL: u64 = 2;
 const STILL_SCREEN_SLACK_MS: u64 = 500;
 
 /// Offline recording on an iOS simulator: a request file and a Darwin notification.
@@ -150,14 +148,7 @@ pub fn open(session: &Value) -> Result<Control> {
 /// The header of a recording, from `app.info`, for answers that are not a stream.
 fn header(control: &mut Control, frames: u64) -> Result<Value> {
     let info = control.call("app.info", json!({}))?;
-    let spoken = info["protocol"].as_u64().unwrap_or(0);
-    if spoken > CONTROL_PROTOCOL {
-        fail!(
-            format!("the app's library speaks control protocol {spoken}; this ddp speaks up to {CONTROL_PROTOCOL}"),
-            "protocol_too_new",
-            "npm i -g agent-ddp@latest"
-        );
-    }
+    model::check_protocol(&info)?;
     Ok(json!({"type": "header", "protocol": model::PROTOCOL, "platform": info["platform"], "unit": info["unit"],
               "scale": info["scale"], "frames": frames, "startedAt": py::fnum(state::now_ms().round())}))
 }

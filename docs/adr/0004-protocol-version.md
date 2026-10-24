@@ -4,7 +4,7 @@ Status: accepted, 2026-10-23
 
 ## Decision
 
-Every `header` (live streams, recordings, history files) carries `"protocol": N`, now 1. A header without the field reads as 0. A client reads every version up to its own and stops on a higher one: the CLI fails with code `protocol_too_new` and the command to update. Adding an optional field keeps the version; changing a field's meaning or removing a field or command raises it.
+Every `header` (live streams, recordings, history files) carries `"protocol": N`, now 2 (1 until phase 7 of ADR 0008). A header without the field reads as 0. A client reads every version up to its own and stops on a higher one: the CLI fails with code `protocol_too_new` and the command to update. Adding an optional field keeps the version; changing a field's meaning or removing a field or command raises it.
 
 ## Why
 

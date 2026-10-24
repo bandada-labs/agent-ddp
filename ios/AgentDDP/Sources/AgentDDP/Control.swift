@@ -147,7 +147,7 @@ final class ControlSession {
         "screen.unwatch": { [unowned self] _ in onMain { screenStream?.stop() }; return [:] },
         "screen.value": { params in
             let path = params["path"] as? String ?? ""
-            // v1 answers the key path without its `layer.` or `element.` scope; this one names what was asked.
+            // LiveEval answers the key path without its `layer.` or `element.` scope; this names what was asked.
             return try Control.answer(onMain { LiveEval.evaluate(name: params["id"] as? String ?? "", path: path) })
                 .merging(["path": path]) { _, asked in asked }
         },
@@ -283,20 +283,18 @@ final class ControlSession {
 func onMain<T>(_ work: () -> T) -> T { Thread.isMainThread ? work() : DispatchQueue.main.sync(execute: work) }
 
 enum Control {
-    static let protocolVersion = 2
-
     struct Failure: Error, CustomStringConvertible {
         let description: String
     }
 
-    /// A v1 answer line as a result: its `type` goes, and an error line throws.
+    /// An answer line (`type` value or error) as a result: its `type` goes, and an error line throws.
     static func answer(_ line: [String: Any]) throws -> [String: Any] {
         if line["type"] as? String == "error" { throw Failure(description: line["error"] as? String ?? "Failed") }
         return line.filter { $0.key != "type" }
     }
 
     static func info(_ app: ControlApp) -> [String: Any] {
-        ["protocol": protocolVersion, "platform": "ios", "app": app.bundleIdentifier, "name": app.name,
+        ["protocol": FrameCapture.protocolVersion, "platform": "ios", "app": app.bundleIdentifier, "name": app.name,
          "unit": "pt", "scale": onMain { UIScreen.main.scale }]
     }
 

@@ -31,7 +31,6 @@ class AgentDdpStarter : ContentProvider() {
         val application = context!!.applicationContext as Application
         FrameRecorder.start(application)
         History.start(application)
-        LiveServer.start(application.packageName)
         ControlServer.start(application)
         return true
     }
@@ -160,7 +159,7 @@ internal class FrameStream(
 internal object FrameCapture {
     /** Null when no activity is in the foreground. */
     /** The DDP protocol version (docs/protocol.md). Raise it only when a field changes meaning or goes away. */
-    const val PROTOCOL = 1
+    const val PROTOCOL = 2
 
     fun header(frames: Int): JSONObject? {
         val activity = FrameRecorder.resumedActivity ?: return null

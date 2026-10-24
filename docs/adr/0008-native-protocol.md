@@ -24,6 +24,6 @@ Dispatch table (method name to handler) on each platform, as in v1 and ADR 0007.
 
 ## Consequences
 
-- The v1 JSON lines endpoint stays until the CLI reads everything through this one, then it is removed and the protocol version goes to 2 (ADR 0004). This endpoint answers `app.info` with `"protocol": 2` already.
+- The v1 JSON lines endpoint stays until the CLI reads everything through this one, then it is removed and the protocol version goes to 2 (ADR 0004). Done in phase 7 (2026-10-23): one version, 2, in `app.info` and in every header.
 - The phases of ADR 0007 keep their order, numbered in STATUS.md: 1 transport, 2 reading, 3 acting, 4 scripts, 5 frames and history, 6 the CLI, 7 v1 goes. Phase 4 decided against JavaScript: a script is an app command, a named Swift or Kotlin closure the app adds in Debug (`app.run`). Android has no JavaScript engine without a new dependency, and JavaScript could not call the app's own code without a bridge per object.
 - Chrome DevTools and other CDP clients cannot attach. That was never a goal.

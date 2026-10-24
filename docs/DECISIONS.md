@@ -32,6 +32,7 @@ A line leaves this file when the maintainer replaces it or when its work has lan
 - Scripts are app commands: named Swift or Kotlin closures the app adds in Debug, run with `app.run`. No JavaScript. `net.send` sends a request with the app's own client. (2026-10-23, "buenísimo hagamos eso entonces")
 - The CLI speaks the control endpoint with its own small WebSocket client (`cli/src/control.rs`), no new crate. Existing commands keep their output; `tap` is a real touch on both platforms. Then new commands, then v1 goes. (2026-10-23, "continue with phase 6")
 - The control endpoint carries over v1's snapshot, stream, eval and time as `screen.*` and `time.*`, and serves the history files. v1's iOS `tap` (the accessibility action) is not carried over, since `input.touch` is a real finger. History stays on disk too, so the CLI can still read it after a crash. (2026-10-23)
+- v1 is removed and there is one protocol number, 2, for `app.info` and every header (ADR 0004 and 0008). The CLI checks both in `model::check_protocol`. (2026-10-23, "continue with phase 7")
 
 ## Distribution
 

@@ -4,7 +4,8 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 
 ## Unreleased
 
-- New control endpoint in the library (ADR 0008), next to the v1 one: JSON-RPC over a WebSocket, with names taken from the app. Android: the abstract socket `agentddp.<package>.control`. iOS simulator: the port in `Library/Caches/agent-ddp/control.json`. Web pages may not connect. `app.info` answers `"protocol": 2`. The v1 endpoint is unchanged.
+- Protocol version 2 (breaking): the v1 JSON lines endpoint is gone from both libraries. iOS no longer writes `live.json`, Android no longer opens the socket `agentddp.<package>`. `app.info` and every header say `"protocol": 2`. A CLI before this version cannot reach the app; recordings and history files from older libraries still read.
+- New control endpoint in the library (ADR 0008): JSON-RPC over a WebSocket, with names taken from the app. Android: the abstract socket `agentddp.<package>.control`. iOS simulator: the port in `Library/Caches/agent-ddp/control.json`. Web pages may not connect.
 - `screen.elements` and `screen.capture`: the elements of the screen, in the same shape as in frames, and an image of every window.
 - `input.touch`, `input.type`, `input.key`: real touches and typing inside the app, in points on iOS and pixels on Android. Taps, long presses and drags reach gesture recognizers, SwiftUI and Compose.
 - `net.list`, `net.get`, `net.watch`: the requests `ddp net` sees, redacted the same way.

@@ -24,6 +24,11 @@ import kotlin.concurrent.thread
  * method names taken from the app, not from a browser. Only adb (shell) and root may connect.
  */
 internal object ControlServer {
+    // Abstract sockets are open to every app on the device: only adb (the shell user) and root may talk.
+    private const val SHELL_UID = 2000
+    private const val ROOT_UID = 0
+    private val ALLOWED_UIDS = setOf(SHELL_UID, ROOT_UID)
+
     fun start(application: Application) {
         Preferences.application = application
         val app = ControlApp(
@@ -34,7 +39,7 @@ internal object ControlServer {
             val server = runCatching { LocalServerSocket("agentddp.${app.packageName}.control") }.getOrNull() ?: return@thread
             while (true) {
                 val socket = runCatching { server.accept() }.getOrNull() ?: continue
-                if (socket.peerCredentials.uid !in LiveServer.ALLOWED_UIDS) {
+                if (socket.peerCredentials.uid !in ALLOWED_UIDS) {
                     socket.close()
                     continue
                 }
@@ -227,9 +232,7 @@ internal class ControlSession(private val app: ControlApp, private val send: (St
 }
 
 internal object Control {
-    const val PROTOCOL = 2
-
-    /** A v1 answer line as a result: its `type` goes, and an error line throws. */
+    /** An answer line (`type` value or error) as a result: its `type` goes, and an error line throws. */
     fun answer(line: JSONObject): JSONObject {
         if (line.optString("type") == "error") throw IllegalArgumentException(line.optString("error"))
         return line.apply { remove("type") }
@@ -237,7 +240,7 @@ internal object Control {
 
     fun info(app: ControlApp): JSONObject {
         val density = onMain { FrameRecorder.resumedActivity?.resources?.displayMetrics?.density } ?: 1f
-        return JSONObject().put("protocol", PROTOCOL).put("platform", "android").put("app", app.packageName).put("name", app.name)
+        return JSONObject().put("protocol", FrameCapture.PROTOCOL).put("platform", "android").put("app", app.packageName).put("name", app.name)
             .put("unit", "px").put("scale", density.toDouble())
     }
 

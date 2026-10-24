@@ -10,7 +10,6 @@ public enum AgentDDP {
     public static func start() {
         #if DEBUG && canImport(UIKit)
         FrameRecorder.shared.listenForRequests()
-        LiveServer.shared.start(directory: FrameRecorder.shared.outputDirectory)
         ControlServer.shared.start(directory: FrameRecorder.shared.outputDirectory)
         History.shared.start(directory: FrameRecorder.shared.outputDirectory.appendingPathComponent("history"))
         #endif
@@ -195,7 +194,7 @@ final class FrameStream {
 
 enum FrameCapture {
     /// The DDP protocol version (docs/protocol.md). Raise it only when a field changes meaning or goes away.
-    static let protocolVersion = 1
+    static let protocolVersion = 2
 
     static func header(frames: Int) -> [String: Any] {
         ["type": "header", "protocol": protocolVersion, "platform": "ios", "unit": "pt", "scale": UIScreen.main.scale,

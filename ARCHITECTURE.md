@@ -5,10 +5,10 @@ agent-ddp follows the Chrome DevTools model. The app carries a small server, a d
 ```
  Debug build of the app                          host
 ┌──────────────────────────────┐   protocol   ┌───────────────────────────┐
-│ library (iOS or Android)     │  JSON lines  │ ddp CLI (Rust)            │
+│ library (iOS or Android)     │  WebSocket   │ ddp CLI (Rust)            │
 │  capture: views, layers,     │◄────────────►│  live client, recordings, │◄── agent (shell or MCP)
 │  Compose, draw ops, pixels   │  local only  │  queries, checks, history │
-│  live endpoint, flight rec.  │              │  device ops: simctl, adb  │
+│  control endpoint, history   │              │  device ops: simctl, adb  │
 └──────────────────────────────┘              └───────────────────────────┘
                  │ writes                                  │ reads
                  └──── recordings and history (.jsonl) ────┘
@@ -26,8 +26,8 @@ There are three parts. Each one can change on its own as long as the protocol ho
 - The library reads unless a method exists to act: `input.*`, `net.intercept` and its answers, `prefs.write|remove|clear`, plus `tap`, `time` and the opt-in network log (ADR 0008). Anything else that changes app state needs its own reason in the PR.
 - The core is Android and iOS. Names, types and units come from the platforms; a name is shared only when both platforms mean the same thing. No browser concepts (HTML document, CSS, localStorage) (ADR 0008).
 - The main thread pays for every capture, so it stays cheap. The `end` message reports `averageCaptureMs` and `slowestCaptureMs`. A change to capture code shows these numbers before and after on a sample screen. The flight recorder costs nothing on a still screen and must keep it that way.
-- The endpoint is local only: 127.0.0.1 on iOS (a token on the v1 endpoint; Host and Origin checks on the control one), an abstract socket that accepts only the shell user and root on Android.
-- One wire format for both platforms: the control protocol (ADR 0008), with the v1 JSON lines endpoint kept until the CLI has moved. The CLI never branches on the platform to read a frame. It branches only for device work (`simctl` vs `adb`).
+- The endpoint is local only: 127.0.0.1 on iOS (a `Host` other than localhost and any `Origin` get a 403), an abstract socket that accepts only the shell user and root on Android.
+- One wire format for both platforms: the control protocol (ADR 0008). The CLI never branches on the platform to read a frame. It branches only for device work (`simctl` vs `adb`).
 - No daemon. The library is the server, every `ddp` command is a short process, and a recording is a plain file. Every read and check works the same live or offline on a saved take.
 - Output is for agents: short, stable and deterministic. Errors carry a stable `code` and a `next` command. Checks exit 1 when they find something. A change in output is a change in the contract and goes in the changelog.
 
@@ -40,7 +40,7 @@ Both platforms have the same pieces, with the same names where the language allo
 | Entry point | `AgentDDP.start()` in `AgentDDP.swift` | `AgentDdpStarter`, a ContentProvider, in `AgentDdp.kt` |
 | One frame | `FrameCapture` in `AgentDDP.swift`; `LayerReader`, `AccessibilityReader`, `PixelSampler` in `Capture.swift` | `FrameCapture` in `AgentDdp.kt`; `Capture`, `Hidden` in `Capture.kt`; `DrawRecorder` |
 | Frames over time | `FrameRecorder` (offline), `FrameStream` (live) | same |
-| Live endpoint | `LiveServer`, `LiveSession`, `LiveEval` in `Live.swift` | same in `Live.kt` |
+| Property reads (`screen.value`) | `LiveEval` in `Eval.swift` | same in `Eval.kt` |
 | Network log | `NetworkLog`, `Redactor` in `Network.swift` | `AgentDdpNetwork`, `AgentDdpInterceptor`, `NetworkLog` in `Network.kt` |
 | Virtual clock | `TimeControl` in `Time.swift` | `AgentDdpTime`, `TimeControl` in `Time.kt` |
 | Control endpoint (ADR 0008) | `ControlServer`, `ControlSession` in `Control.swift` | same in `Control.kt` |
@@ -94,7 +94,7 @@ Use a pattern when it removes branching or duplication, not to add a layer. Thes
 | Chain of responsibility | `AgentDdpInterceptor` in OkHttp | Network logging as one more link in the app's own chain |
 | Observer | draw listener, run loop observer, `NetworkLog.watch`, lifecycle callbacks | The library reacts to the app instead of polling |
 | Adapter | `ControllableFrameClock` (Compose clock), `py.rs` | Fits a foreign interface: Compose's clock, Python's printing |
-| Producer-consumer | the outbox queue in Android `LiveSession`; the history writer queues | The main thread never waits on a socket or a file |
+| Producer-consumer | the outbox queue in Android `ControlConnection`; the history writer queues | The main thread never waits on a socket or a file |
 | Errors as values | `Failure` with `code` and `next` | Every error tells the agent what to run next |
 
 ## Adding things

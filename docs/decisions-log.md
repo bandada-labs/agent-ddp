@@ -95,3 +95,6 @@ Asked why I had said JavaScript before. JavaScript came from the CDP plan (`Runt
 Proposed the order: a small WebSocket client in the CLI with the standard library (the server is ours and local, so no crate), the existing commands first with the same output, then new commands with agent-browser as a guide, then phase 7. Answer: "continue with phase 6".
 
 `ddp tap` on iOS was the accessibility action of the v1 endpoint. It is now `input.touch`, a real finger, as on Android.
+
+### Phase 7: v1 goes
+Answer: "continue with phase 7". The v1 JSON lines endpoint is removed from both libraries. The control endpoint had its own version (2) and the headers had theirs (1); now there is one, 2, as ADR 0008 planned. An old CLI reading a new history file stops with `protocol_too_new`, which is right, since it cannot talk to the new library either.

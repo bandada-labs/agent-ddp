@@ -2,7 +2,7 @@
 
 This is the contract between the library inside the app and any client. The `ddp` CLI is one client. Another tool can speak the same protocol without it.
 
-Version: 1. The `header` of every stream, recording and history file carries it as `"protocol": 1`. A header without the field comes from a library older than the field and reads as 0.
+Version: 2. `app.info` and the `header` of every stream, recording and history file carry it as `"protocol": 2`. Version 2 removed the v1 JSON lines endpoint (`live.json` on iOS, the socket `agentddp.<package>` on Android). A header without the field comes from a library older than the field and reads as 0.
 
 - Adding an optional field does not change the version. A client must ignore fields it does not know.
 - Changing what a field means, or removing a field or a command, raises the version and is listed in [CHANGELOG.md](../CHANGELOG.md).
@@ -10,7 +10,7 @@ Version: 1. The `header` of every stream, recording and history file carries it 
 
 ## Control endpoint
 
-The library also serves a control endpoint (ADR 0008), built from what Android and iOS have, not from a browser. The `ddp` CLI uses only the control endpoint. The v1 JSON lines endpoint below this section stays until phase 7 removes it.
+The library serves one endpoint, the control endpoint (ADR 0008), built from what Android and iOS have, not from a browser.
 
 - Android: the abstract socket `agentddp.<package>.control`. From a host: `adb forward tcp:9333 localabstract:agentddp.<package>.control`. Only the shell user and root may connect.
 - iOS simulator: TCP on 127.0.0.1, the port in `Library/Caches/agent-ddp/control.json`. A `Host` other than localhost, 127.0.0.1 or ::1 gets a 403.
@@ -59,46 +59,12 @@ Only requests through `AgentDDP.send` (iOS) or `AgentDdpInterceptor` (Android) a
 
 The rest comes in the order in [STATUS.md](STATUS.md).
 
-## Transport
-
-Every message is one JSON object on one line, ending with `\n`. A client opens one connection per command.
-
-| | iOS simulator | Android |
-| --- | --- | --- |
-| Endpoint | TCP on 127.0.0.1, random port | abstract unix socket `agentddp.<application id>` |
-| Discovery | the app writes `{"port", "token"}` to `Library/Caches/agent-ddp/live.json` in its data container | `adb forward tcp:0 localabstract:agentddp.<application id>` |
-| Auth | the token from `live.json` | the socket accepts only uid 2000 (shell, so adb) and 0 (root). The token line is still sent and ignored |
-
-A session is:
-
-1. The client sends `{"token": "<token>"}`.
-2. The client sends one command: `{"cmd": "<name>", ...}`.
-3. The app answers with message lines. A finished answer ends with `{"type": "end"}`. A stream runs until the client closes the connection.
-4. An empty line is a keep-alive and is skipped.
-
-When something fails the app sends `{"type": "error", "error": "<message for a person>"}` and the answer is over.
-
-## Commands
-
-| `cmd` | Fields | Answer |
-| --- | --- | --- |
-| `snapshot` | | `header`, one `frame`, `end` |
-| `stream` | `frames`: number, 0 for no limit | `header`, then one `frame` per drawn frame, `end` with stats when `frames` is reached |
-| `eval` | `id`: element name, `path`: property path | `{"type": "value", "path", "value"}` |
-| `tap` (iOS) | `id`: element name | `{"type": "value", "path": "tap", "value": <bool>}`. Runs the accessibility action. Android taps through `adb shell input` instead |
-| `time` | `action`: `pause`, `resume`, `step`, `rate`, `seek`, `status`; `value`: number for `step`, `rate` and `seek` (ms) | `{"type": "time", "rate", "paused", ...}` |
-| `net` | | one `request` summary per logged request, `end` |
-| `net-get` | `id`: request id | the full `request` entry with headers and bodies |
-| `net-watch` | | one `request` summary per request as it finishes, until the client closes |
-
-`eval` paths. iOS: `element.<key path>` on the accessibility element, `layer.<key path>` on the topmost layer with the element's frame. Android: `<modifier>.<property>` from the Compose inspector (`border.width`) or `semantics.<Key>`. An unknown name answers with an error that lists what is there.
-
 ## Messages
 
 ### header
 
 ```json
-{"type": "header", "protocol": 1, "platform": "ios", "unit": "pt", "scale": 3, "frames": 240, "startedAt": 1761210000000}
+{"type": "header", "protocol": 2, "platform": "ios", "unit": "pt", "scale": 3, "frames": 240, "startedAt": 1761210000000}
 ```
 
 `unit` is `pt` on iOS and `px` on Android. `scale` converts between them. `startedAt` is ms since 1970.
@@ -133,7 +99,7 @@ The capture stats are the main thread time the library spent per frame.
 {"type": "request", "id": "n12", "method": "GET", "url": "https://...", "status": 200, "ms": 84, "responseBytes": 512, "startedAt": 1761210000000}
 ```
 
-`net-get` adds headers and bodies. Redaction happens inside the app before the entry is kept: `Authorization`, `Cookie`, any header, query item or JSON key that matches `secret|token|key|password|attest`, and values the app registers. Bodies are cut at 16 KB.
+`net.get` adds headers and bodies. Redaction happens inside the app before the entry is kept: `Authorization`, `Cookie`, any header, query item or JSON key that matches `secret|token|key|password|attest`, and values the app registers. Bodies are cut at 16 KB.
 
 ## Recordings
 

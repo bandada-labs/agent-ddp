@@ -54,10 +54,10 @@ impl Frame {
     }
 }
 
-/// The DDP protocol this CLI reads (docs/protocol.md). A header without `protocol` comes from a library
-/// older than the field, which reads as 0 and is still understood. Raise it when a field changes meaning
+/// The DDP protocol this CLI reads (docs/protocol.md): `app.info` and every header carry it. A header without
+/// `protocol` comes from a library older than the field, which reads as 0 and is still understood. Raise it when a field changes meaning
 /// or goes away; an added optional field needs no new version.
-pub const PROTOCOL: u64 = 1;
+pub const PROTOCOL: u64 = 2;
 
 /// A library newer than this CLI may send frames it would misread, so it stops instead of guessing.
 pub fn check_protocol(header: &Value) -> Result<()> {
