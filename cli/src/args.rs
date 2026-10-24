@@ -33,7 +33,6 @@ pub struct Args {
     pub expect: Option<PathBuf>,
     pub against: Option<PathBuf>,
     pub junit: Option<PathBuf>,
-    pub all_frames: bool,
     pub settled: Option<String>,
     pub timeout: String,
     pub ignore: Vec<String>,
@@ -195,8 +194,7 @@ pub fn parser() -> Command {
             .arg(choices("what", &crate::checks::CHECK_NAMES).required(true))
             .arg(opt("expect", "timeline: expected cases JSON (ddp skills get core --filter timeline)"))
             .arg(opt("against", "parity: the other platform's recording; baseline: its name"))
-            .arg(opt("junit", "baseline: also write a JUnit XML report here"))
-            .arg(flag("all-frames", "check every frame, not only the last")))))
+            .arg(opt("junit", "baseline: also write a JUnit XML report here")))))
         .subcommand(sub("tap", "live: tap an element with a real touch, once the app's hit test says a touch reaches it")
             .arg(positional("id", "element id, label or @ref").required(true))
             .arg(flag("force", "touch the center without the checks")))
@@ -347,7 +345,6 @@ pub fn parse(argv: &[String]) -> Result<Args, clap::Error> {
         expect: string(m, "expect").map(PathBuf::from),
         against: string(m, "against").map(PathBuf::from),
         junit: string(m, "junit").map(PathBuf::from),
-        all_frames: boolean(m, "all-frames"),
         settled: string(m, "settled"),
         timeout: string(m, "timeout").unwrap_or_else(|| "10s".into()),
         ignore: strings(m, "ignore"),

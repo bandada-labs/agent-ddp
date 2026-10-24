@@ -4,6 +4,7 @@ mod control;
 mod device;
 mod history;
 mod hit;
+mod inspect;
 mod live;
 mod model;
 mod py;

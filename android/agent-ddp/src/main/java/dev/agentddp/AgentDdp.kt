@@ -119,6 +119,9 @@ internal class FrameStream(
     private var running = false
     private var frameIndex = 0
     private var firstFrameNanos = 0L
+    /** The last frame's vsync time and the library's own capture time in it; 0 before the first frame. */
+    private var lastFrameNanos = 0L
+    private var lastCaptureMs = 0.0
     private var slowestCaptureMs = 0.0
     private var totalCaptureMs = 0.0
 
@@ -145,7 +148,10 @@ internal class FrameStream(
         if (frameIndex == 0) firstFrameNanos = frameTimeNanos
         val captureStart = SystemClock.elapsedRealtimeNanos()
         val line = FrameCapture.frame(frameIndex, (frameTimeNanos - firstFrameNanos) / 1e6)
+        missedRefreshes(frameTimeNanos)?.let { line.put("missed", it) }
         val captureMs = (SystemClock.elapsedRealtimeNanos() - captureStart) / 1e6
+        lastFrameNanos = frameTimeNanos
+        lastCaptureMs = captureMs
         slowestCaptureMs = maxOf(slowestCaptureMs, captureMs)
         totalCaptureMs += captureMs
         frameIndex++
@@ -153,6 +159,23 @@ internal class FrameStream(
         History.offer(line)
         if (!sent || (frameLimit > 0 && frameIndex >= frameLimit)) stop()
         else Choreographer.getInstance().postFrameCallback(this)
+    }
+
+    /**
+     * Refreshes the main thread missed before this frame, by Choreographer's vsync times and the display's refresh
+     * rate, leaving out the library's capture: the app's work alone took more than a refresh. Null when none.
+     */
+    private fun missedRefreshes(frameTimeNanos: Long): Int? {
+        if (lastFrameNanos == 0L) return null
+        val refreshRate = FrameRecorder.resumedActivity?.let { activity ->
+            if (Build.VERSION.SDK_INT >= 30) activity.display?.refreshRate
+            else @Suppress("DEPRECATION") activity.windowManager.defaultDisplay.refreshRate
+        } ?: return null
+        val periodMs = 1000.0 / refreshRate
+        // Between two frames the thread waited less than one period, so it was busy for at least the gap minus a
+        // period; without the library's capture, that much of the app's own work.
+        val appBusyMs = (frameTimeNanos - lastFrameNanos) / 1e6 - lastCaptureMs - periodMs
+        return (appBusyMs / periodMs).toInt().takeIf { it > 0 }
     }
 }
 
@@ -163,7 +186,9 @@ internal object FrameCapture {
 
     fun header(frames: Int): JSONObject? {
         val activity = FrameRecorder.resumedActivity ?: return null
+        // missed: frames say how many refreshes the app missed before them (Choreographer times).
         return JSONObject().put("type", "header").put("protocol", PROTOCOL).put("platform", "android").put("unit", "px")
+            .put("missed", true)
             .put("scale", activity.resources.displayMetrics.density.toDouble()).put("frames", frames)
             .put("startedAt", System.currentTimeMillis())
     }

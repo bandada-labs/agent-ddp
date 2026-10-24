@@ -1,17 +1,33 @@
 //! `check corners`: what reaches past an element's rounded corners.
-use super::{pick, Point};
+use super::Point;
 use crate::args::Args;
+use crate::inspect::{parse, SAME};
 use crate::model::{area, contains, element_key, rect, Frame, Recording};
 use crate::py::{self, f, truthy};
 use crate::say;
-use crate::state::{Result, OWNER_TOLERANCE_PT};
+use crate::state::Result;
 use serde_json::{json, Value};
 use std::f64::consts::PI;
 
-/// Whether a point is inside a rounded rectangle, give or take the tolerance.
-fn inside_rounded(point: Point, r: [f64; 4], radius: f64, tolerance: f64) -> bool {
+/// The radius of each corner of a node, top-left first, clockwise: `corners` when they differ, else `corner`.
+pub fn radii(node: &Value) -> [f64; 4] {
+    match node.get("corners").and_then(Value::as_array) {
+        Some(each) if each.len() == 4 => [f(&each[0]), f(&each[1]), f(&each[2]), f(&each[3])],
+        _ => [node.get("corner").map(f).unwrap_or(0.0); 4],
+    }
+}
+
+/// Whether a point is inside a rounded rectangle, give or take the tolerance. The corner nearest the point counts.
+pub fn inside_rounded(point: Point, r: [f64; 4], radii: [f64; 4], tolerance: f64) -> bool {
     let [x, y, w, h] = r;
-    let radius = radius.min(w / 2.0).min(h / 2.0);
+    let (left, top) = (point.0 < x + w / 2.0, point.1 < y + h / 2.0);
+    let corner = match (left, top) {
+        (true, true) => 0,
+        (false, true) => 1,
+        (false, false) => 2,
+        (true, false) => 3,
+    };
+    let radius = radii[corner].min(w / 2.0).min(h / 2.0);
     // Distance from the point to the inner rectangle the corner arcs are centered on.
     let dx = (x + radius - point.0).max(0.0).max(point.0 - (x + w - radius));
     let dy = (y + radius - point.1).max(0.0).max(point.1 - (y + h - radius));
@@ -42,8 +58,9 @@ fn clamp(point: Point, r: [f64; 4]) -> Point {
     (point.0.max(x).min(x + w), point.1.max(y).min(y + h))
 }
 
-/// Nodes drawn inside an element's rounded shape that reach past its corners and are not clipped to them.
-fn corner_breaks<'a>(frame: &'a Frame, element: &Value, tolerance: f64) -> Vec<(&'a Value, Point)> {
+/// Nodes drawn inside an element's rounded shape that reach past its corners and are not clipped to them, by the
+/// recorded geometry: the places to look at. Whether the screen shows them there is the pixels' answer (inspect).
+pub fn corner_breaks<'a>(frame: &'a Frame, element: &Value, tolerance: f64) -> Vec<(&'a Value, &'a Value, Point)> {
     let key = element_key(element);
     let shapes = frame.nodes().iter().filter(|n| {
         n["owner"].as_str() == Some(&key)
@@ -51,6 +68,7 @@ fn corner_breaks<'a>(frame: &'a Frame, element: &Value, tolerance: f64) -> Vec<(
             && (truthy(n.get("fill")) || truthy(n.get("border")))
     });
     let Some(shape) = py::max_first(shapes, |n| area(rect(&n["frame"]))) else { return Vec::new() };
+    let shape_radii = radii(shape);
     let shape_rect = rect(&shape["frame"]);
     let [sx, sy, sw, sh] = shape_rect;
     let mut breaks = Vec::new();
@@ -72,62 +90,54 @@ fn corner_breaks<'a>(frame: &'a Frame, element: &Value, tolerance: f64) -> Vec<(
             .into_iter()
             .map(|p| clamp(p, r))
             .filter(|&p| {
-                !inside_rounded(p, shape_rect, f(&shape["corner"]), tolerance)
+                !inside_rounded(p, shape_rect, shape_radii, tolerance)
                     && !clip.is_some_and(|c| {
-                        !inside_rounded(p, [f(&c[0]), f(&c[1]), f(&c[2]), f(&c[3])], f(&c[4]), tolerance)
+                        !inside_rounded(p, [f(&c[0]), f(&c[1]), f(&c[2]), f(&c[3])], [f(&c[4]); 4], tolerance)
                     })
             })
             .collect();
         if let Some(&first) = outside.first() {
-            breaks.push((node, first));
+            breaks.push((shape, node, first));
         }
     }
     breaks
 }
 
+/// A node's color shows on screen past a rounded corner, and differs from what the screen shows right outside that
+/// corner: the screenshot confirms what the geometry pointed at.
 pub fn check_corners(args: &Args, recording: &Recording) -> Result<usize> {
-    let frames = if args.all_frames {
-        &recording.frames[..]
-    } else {
-        &recording.frames[recording.frames.len().saturating_sub(1)..]
-    };
-    let mut reported: Vec<String> = Vec::new();
-    for frame in frames {
-        for element in frame.elements() {
-            let key = element_key(element);
-            if reported.contains(&key) {
-                continue;
-            }
-            let breaks = corner_breaks(frame, element, recording.tolerance / OWNER_TOLERANCE_PT);
-            if breaks.is_empty() {
-                continue;
-            }
-            reported.push(key.clone());
-            let shape = py::max_first(
-                frame.nodes().iter().filter(|n| n["owner"].as_str() == Some(&key) && truthy(n.get("corner"))),
-                |n| area(rect(&n["frame"])),
-            )
-            .unwrap();
-            say!(
-                "OUTSIDE CORNERS {key} at t={}ms: {} nodes reach past corner radius {} of {}",
-                py::str(frame.t_value()),
-                breaks.len(),
-                py::str(&shape["corner"]),
-                py::str(&shape["frame"])
-            );
-            for (node, point) in breaks.iter().take(5) {
-                say!(
-                    "  z={} at ({:.1}, {:.1}) {}",
-                    py::str(&node["z"]),
-                    point.0,
-                    point.1,
-                    py::dumps(&pick(node, &["kind", "op", "fill", "border", "frame", "points"]))
-                );
-            }
+    if let Some(why) = super::overlap::not_inspected(recording) {
+        if !args.shared {
+            say!("corners not judged: {why}");
         }
+        return Ok(0);
     }
-    if reported.is_empty() && !args.shared {
+    let mut problems = 0;
+    for place in recording.inspect["corners"].as_array().into_iter().flatten() {
+        let (color, screen, behind) = (py::str(&place["color"]), py::str(&place["screen"]), py::str(&place["behind"]));
+        let differs = |a: &str, b: &str| match (parse(a), parse(b)) {
+            (Some(a), Some(b)) => (0..3).map(|i| (a[i] - b[i]).abs()).max().unwrap() > SAME,
+            _ => false,
+        };
+        if place["near"].as_i64().unwrap_or(255) > SAME as i64
+            || !differs(&screen, &behind)
+            || !differs(&color, &behind)
+        {
+            continue;
+        }
+        problems += 1;
+        say!(
+            "OUTSIDE CORNERS {}: {screen} shows at ({}, {}), past its corner radius {} of {}; right outside the corner the screen is {behind}",
+            py::str(&place["key"]),
+            py::str(&place["point"][0]),
+            py::str(&place["point"][1]),
+            py::str(&place["radius"]),
+            py::str(&place["shape"])
+        );
+        say!("  drawn by z={} in {color}", py::str(&place["z"]));
+    }
+    if problems == 0 && !args.shared {
         say!("nothing outside rounded corners");
     }
-    Ok(reported.len())
+    Ok(problems)
 }

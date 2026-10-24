@@ -1,21 +1,24 @@
-//! `check a11y`: touch targets, labels and text contrast.
+//! `check a11y`: touch targets, labels and text contrast. Labels come from the accessibility tree; how far a touch
+//! reaches a control is the app's hit test, and a text's background is what the screen shows (inspect).
+use super::overlap::{not_inspected, COVERED_INK};
 use crate::args::Args;
-use crate::model::{element_key, paints_at, rect, Frame, Recording};
+use crate::inspect::{parse, VISIBLE};
+use crate::model::{element_key, Recording};
 use crate::py::{self, f, truthy};
 use crate::say;
 use crate::state::Result;
-use serde_json::{json, Value};
-use std::collections::{BTreeMap, HashSet};
+use serde_json::Value;
 
-fn channel(color: &str, at: usize) -> f64 {
-    u8::from_str_radix(color.get(at..at + 2).unwrap_or("00"), 16).unwrap_or(0) as f64
-}
+/// A background is one plain color when this much of what is not the text is that color or an edge between the two.
+const PLAIN: f64 = 0.97;
+/// A text draws in one color when this much of its ink shows that color.
+const ONE_COLOR: f64 = 0.8;
 
-fn luminance(color: &str) -> f64 {
-    let linear: Vec<f64> = [1, 3, 5]
+fn luminance(color: [i32; 4]) -> f64 {
+    let linear: Vec<f64> = color[..3]
         .iter()
-        .map(|&i| {
-            let c = channel(color, i) / 255.0;
+        .map(|&c| {
+            let c = c as f64 / 255.0;
             if c <= 0.03928 {
                 c / 12.92
             } else {
@@ -27,128 +30,105 @@ fn luminance(color: &str) -> f64 {
 }
 
 /// A translucent color composited over an opaque background.
-fn over(color: &str, background: &str) -> String {
-    let alpha = channel(color, 7) / 255.0;
-    let mixed: String = [1, 3, 5]
-        .iter()
-        .map(|&i| {
-            format!(
-                "{:02X}",
-                (channel(color, i) * alpha + channel(background, i) * (1.0 - alpha)).round_ties_even() as u8
-            )
-        })
-        .collect();
-    format!("#{mixed}FF")
+fn over(color: [i32; 4], background: [i32; 4]) -> [i32; 4] {
+    let alpha = color[3] as f64 / 255.0;
+    let mix = |i: usize| (color[i] as f64 * alpha + background[i] as f64 * (1.0 - alpha)).round_ties_even() as i32;
+    [mix(0), mix(1), mix(2), 255]
 }
 
-fn contrast(text_color: &str, background: &str) -> f64 {
-    let (a, b) = (luminance(text_color), luminance(background));
+fn contrast(text: [i32; 4], background: [i32; 4]) -> f64 {
+    let (a, b) = (luminance(text), luminance(background));
     (a.max(b) + 0.05) / (a.min(b) + 0.05)
 }
 
-/// The opaque color behind a node: the fills below it that hold its center, blended upwards.
-/// None when what is right behind it is not a plain fill.
-fn background_under(frame: &Frame, node: &Value) -> Option<String> {
-    let [x, y, w, h] = rect(&node["frame"]);
-    let center = (x + w / 2.0, y + h / 2.0);
-    let z = f(&node["z"]);
-    let under: Vec<&Value> = frame.nodes().iter().filter(|n| f(&n["z"]) < z && paints_at(n, center)).collect();
-    if let Some(top) = py::max_first(under.iter().copied(), |n| f(&n["z"])) {
-        if !truthy(top.get("fill")) {
-            return None; // text over a gradient, an image or a drawing: no single color to compare with
-        }
+fn hex(color: [i32; 4]) -> String {
+    format!("#{:02X}{:02X}{:02X}FF", color[0], color[1], color[2])
+}
+
+/// A text's color, its background and how to name the text's color, when the pixels give one of each. Covered text
+/// is overlap's; two colors, or a busy background, have no single ratio.
+fn text_colors(text: &Value) -> Option<([i32; 4], [i32; 4], String)> {
+    if text.get("ink").is_some() {
+        // iOS: what the screen shows at the text's ink and clear points.
+        let plain = text["inkShare"].as_f64()? >= ONE_COLOR && text["clearShare"].as_f64()? >= PLAIN;
+        let seen = text["inkLikeClear"].as_f64()? < COVERED_INK;
+        let (fg, background) = (parse(text["ink"].as_str()?)?, parse(text["clear"].as_str()?)?);
+        return (plain && seen).then(|| (fg, background, hex(fg)));
     }
-    let mut below: Vec<&Value> = under.into_iter().filter(|n| truthy(n.get("fill"))).collect();
-    below.sort_by(|a, b| f(&a["z"]).partial_cmp(&f(&b["z"])).unwrap());
-    let mut color: Option<String> = None;
-    for fill in below {
-        let fill = py::str(&fill["fill"]);
-        color = match color {
-            None => fill.ends_with("FF").then_some(fill),
-            Some(base) => Some(over(&fill, &base)),
-        };
-    }
-    color
+    let colors = text["colors"].as_array()?;
+    let visible = text["seen"].get(0)?.as_i64()? <= VISIBLE as i64;
+    let plain = text.get("uniform").map(f).unwrap_or(0.0) >= PLAIN;
+    let fg = parse(colors.first()?.as_str()?)?;
+    let background = parse(text["background"].as_str()?)?;
+    (colors.len() == 1 && visible && plain).then(|| (fg, background, py::str(&colors[0])))
 }
 
 /// Small touch targets, controls nobody can name, and text without enough contrast (WCAG AA).
 pub fn check_a11y(args: &Args, recording: &Recording) -> Result<usize> {
     let to_pt = recording.to_pt();
     let minimum = if recording.header["platform"] == "android" { 48.0 } else { 44.0 }; // pt / dp: Apple HIG and Material
-    let mut problems: Vec<(String, String)> = Vec::new();
-    let set = |problems: &mut Vec<(String, String)>, key: String, line: String| match problems
-        .iter_mut()
-        .find(|(k, _)| *k == key)
-    {
-        Some(slot) => slot.1 = line,
-        None => problems.push((key, line)),
-    };
-    let last = recording.frames.last().unwrap();
-    for element in last.elements() {
-        if !truthy(element.get("tap")) {
+    let mut problems: Vec<String> = Vec::new();
+    let unlabeled =
+        recording.frames.last().unwrap().elements().iter().filter(|e| truthy(e.get("tap")) && !truthy(e.get("label")));
+    problems.extend(unlabeled.map(|e| format!("NO LABEL {}: a control a screen reader can't name", element_key(e))));
+    let inspected = not_inspected(recording).is_none();
+    // A control no touch reaches, or a disabled one, is check tappable's to report.
+    for hit in recording.inspect["hit"].as_array().into_iter().flatten().filter(|h| !truthy(h.get("reason"))) {
+        let Some(reach) = hit.get("reach").and_then(Value::as_array) else { continue };
+        let (w, h) = (f(&reach[0]) * to_pt, f(&reach[1]) * to_pt);
+        // A pixel either way is where the hit test's edge falls between pixels, not a smaller target.
+        if w >= minimum - 1.0 && h >= minimum - 1.0 {
             continue;
         }
-        let key = element_key(element);
-        let size = rect(element.get("touch").unwrap_or(&element["frame"]));
-        let (w, h) = (size[2] * to_pt, size[3] * to_pt);
-        if w < minimum - 0.5 || h < minimum - 0.5 {
-            set(&mut problems, key.clone(), format!("SMALL TARGET {key}: {w:.0}x{h:.0}, under {minimum}x{minimum}"));
-        } else if !truthy(element.get("label")) {
-            set(&mut problems, key.clone(), format!("NO LABEL {key}: a control a screen reader can't name"));
+        problems.push(format!(
+            "SMALL TARGET {}: a touch reaches it over {w:.0}x{h:.0}, under {minimum}x{minimum}",
+            element_key(hit)
+        ));
+    }
+    let mut unjudged: Vec<String> = Vec::new();
+    let last = recording.frames.last().unwrap();
+    for text in recording.inspect["texts"].as_array().into_iter().flatten().filter(|_| inspected) {
+        let key = py::str(&text["key"]);
+        // WCAG asks nothing of the text of a disabled control.
+        if last.element(&key).is_some_and(|e| truthy(e.get("disabled"))) {
+            continue;
+        }
+        let Some((fg, background, shown)) = text_colors(text) else {
+            unjudged.push(key);
+            continue;
+        };
+        let ratio = contrast(over(fg, background), background);
+        // A text size estimated from its bitmap could be large or not: only the large-text limit holds for sure.
+        let estimated = truthy(text.get("estimated"));
+        let size_pt = text.get("size").map(f).unwrap_or(0.0) * to_pt;
+        let large =
+            estimated || size_pt >= 18.0 || (size_pt >= 14.0 && text.get("weight").map(f).unwrap_or(400.0) >= 700.0);
+        let needed = if large { 3.0 } else { 4.5 };
+        if ratio < needed {
+            problems.push(format!(
+                "LOW CONTRAST {key}: {ratio:.1}:1, {shown} on {}, needs {}:1{}",
+                hex(background),
+                if large { "3" } else { "4.5" },
+                if estimated { " at least (its size is estimated)" } else { "" }
+            ));
         }
     }
-    let mut worst: BTreeMap<String, f64> = BTreeMap::new(); // per element, the frame where its text is hardest to read
-    let mut unjudged: HashSet<String> = HashSet::new();
-    for frame in &recording.frames {
-        for node in frame.nodes() {
-            let text = node.get("text").filter(|t| t.is_object()).cloned().unwrap_or(json!({}));
-            let key = node["owner"]
-                .as_str()
-                .filter(|o| !o.is_empty())
-                .map(String::from)
-                .unwrap_or_else(|| format!("text at {}", py::str(&node["frame"])));
-            let has_problem = problems.iter().any(|(k, _)| *k == key);
-            if !truthy(text.get("color")) || (has_problem && !worst.contains_key(&key)) {
-                continue;
-            }
-            let Some(background) = background_under(frame, node) else {
-                unjudged.insert(key);
-                continue;
-            };
-            let color = py::str(&text["color"]);
-            let ratio = contrast(&over(&color, &background), &background);
-            let size_pt = text.get("size").map(f).unwrap_or(0.0) * to_pt;
-            let large = size_pt >= 18.0 || (size_pt >= 14.0 && text.get("weight").map(f).unwrap_or(400.0) >= 700.0);
-            let needed = if large { 3.0 } else { 4.5 };
-            if ratio < needed && ratio < *worst.get(&key).unwrap_or(&needed) {
-                worst.insert(key.clone(), ratio);
-                let estimated = if truthy(text.get("estimated")) { " (color read from pixels)" } else { "" };
-                set(
-                    &mut problems,
-                    key.clone(),
-                    format!(
-                        "LOW CONTRAST {key}: {ratio:.1}:1 at t={:.0}ms, {color} on {background}, needs {}:1{estimated}",
-                        frame.t,
-                        if large { "3" } else { "4.5" }
-                    ),
-                );
-            }
-        }
-    }
-    for (_, line) in &problems {
+    for line in &problems {
         say!("{line}");
-    }
-    for (key, _) in &problems {
-        unjudged.remove(key);
     }
     if !args.shared {
         if problems.is_empty() {
             say!("no accessibility problems found");
         }
-        if !unjudged.is_empty() {
-            let mut sorted: Vec<String> = unjudged.into_iter().collect();
-            sorted.sort();
-            say!("contrast not judged (text over a gradient, image or drawing): {}", sorted.join(", "));
+        if let Some(why) = not_inspected(recording) {
+            say!("touch targets and contrast not judged: {why}");
+        } else if !unjudged.is_empty() {
+            unjudged.sort();
+            unjudged.dedup();
+            say!(
+                "contrast not judged (covered, more than one color, or over an image or a gradient): {}",
+                unjudged.join(", ")
+            );
         }
     }
     Ok(problems.len())

@@ -26,6 +26,7 @@ internal object Hooks {
         Hook("compose.hitTest", "internal", "tap, check tappable, touch size on Compose (LayoutNode.hitTest)"),
         Hook("compose.zSortedChildren", "internal", "Compose draw order (LayoutNode.getZSortedChildren)"),
         Hook("compose.interopLayout", "internal", "AndroidView inside Compose (AndroidViewHolder.getLayoutNode)"),
+        Hook("compose.textColor", "internal", "whether BasicText paints another color (its color producer)"),
     )
 
     private class Count(var ok: Int = 0, var failed: Int = 0, var fallback: Int = 0, var why: String? = null)

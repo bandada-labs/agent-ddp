@@ -297,6 +297,15 @@ pub fn stream_frames(
 
 /// Records the live window the command asks for into the recording file and loads it.
 pub fn record_live(args: &Args) -> Result<Recording> {
+    record(args, false)
+}
+
+/// For the checks: the take, then the platform's answers at its end (`inspect`: hit test, screenshot), kept in it.
+pub fn record_live_inspected(args: &Args) -> Result<Recording> {
+    record(args, true)
+}
+
+fn record(args: &Args, inspected: bool) -> Result<Recording> {
     let session = live_session(args).ok_or_else(|| failure("not connected", "not_connected", None))?;
     let duration = match &args.duration {
         Some(text) => parse_ms(text)?,
@@ -307,6 +316,9 @@ pub fn record_live(args: &Args) -> Result<Recording> {
         lines.push(py::dumps(message));
         Ok(true)
     })?;
+    if inspected {
+        lines.push(py::dumps(&crate::inspect::inspect(&session)?));
+    }
     save_recording(&(lines.join("\n") + "\n"), args.name.as_deref())?;
     load(&ctx().last)
 }
@@ -323,6 +335,14 @@ pub fn snapshot_live(session: &Value) -> Result<Recording> {
 pub fn recording_for(args: &Args) -> Result<Recording> {
     if live_session(args).is_some() {
         return record_live(args);
+    }
+    load(args.file.as_deref().unwrap_or(&ctx().last))
+}
+
+/// For the checks: like [recording_for], with the platform's answers at the end of a live take.
+pub fn recording_for_checks(args: &Args) -> Result<Recording> {
+    if live_session(args).is_some() {
+        return record_live_inspected(args);
     }
     load(args.file.as_deref().unwrap_or(&ctx().last))
 }

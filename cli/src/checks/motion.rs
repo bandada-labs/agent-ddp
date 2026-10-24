@@ -7,48 +7,40 @@ use crate::state::Result;
 use crate::summary::numeric_tracks;
 use serde_json::Value;
 
-const JANK_FACTOR: f64 = 3.0; // a frame interval 3x the usual one means at least two missed refreshes
 const SETTLE_WINDOW_MS: f64 = 500.0;
 const JITTER_PT: f64 = 1.0;
 
-/// Missed refreshes from the frame timestamps the recorder already writes.
+/// Refreshes the app missed, as the libraries count them from the platform's own frame times (`missed` on a frame),
+/// with their own capture time left out.
 pub fn check_jank(args: &Args, recording: &Recording) -> Result<usize> {
-    if truthy(recording.header.get("history")) {
+    if truthy(recording.header.get("history")) || !truthy(recording.header.get("missed")) {
         if !args.shared {
-            say!("jank not judged: a history take keeps only the frames that changed; record live for jank");
+            say!("jank not judged: the take has no frame times from the platform (history, or a take from before 0.2.0); record it live");
         }
         return Ok(0);
     }
-    let times: Vec<f64> = recording.frames.iter().map(|f| f.t).collect();
-    let mut intervals: Vec<f64> = times.windows(2).map(|w| w[1] - w[0]).collect();
-    if intervals.is_empty() {
-        return Ok(0);
-    }
-    intervals.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    let usual = intervals[intervals.len() / 2];
-    let hitches: Vec<(f64, f64)> =
-        times.windows(2).filter(|w| w[1] - w[0] > usual * JANK_FACTOR).map(|w| (w[0], w[1] - w[0])).collect();
-    if let Some(worst) = py::max_first(hitches.iter(), |h| h.1) {
-        let listed: Vec<String> = hitches.iter().take(8).map(|(t, gap)| format!("{t:.0}ms+{gap:.0}")).collect();
+    let hitches: Vec<(f64, u64)> = recording
+        .frames
+        .iter()
+        .filter_map(|frame| frame.v["missed"].as_u64().map(|missed| (frame.t, missed)))
+        .collect();
+    if let Some(worst) = py::max_first(hitches.iter(), |h| h.1 as f64) {
+        let listed: Vec<String> =
+            hitches.iter().take(8).map(|(t, missed)| format!("{missed} before {t:.0}ms")).collect();
         say!(
-            "JANK {} hitches over {:.0}ms (usual frame {usual:.1}ms), worst {:.0}ms at t={:.0}ms: {}{}",
-            hitches.len(),
-            times[times.len() - 1] - times[0],
+            "JANK the app missed {} in {}, worst {} before t={:.0}ms: {}{}",
+            match hitches.iter().map(|h| h.1).sum::<u64>() {
+                1 => "1 refresh".to_string(),
+                total => format!("{total} refreshes"),
+            },
+            if hitches.len() == 1 { "one place".to_string() } else { format!("{} places", hitches.len()) },
             worst.1,
             worst.0,
             listed.join(", "),
             if hitches.len() > 8 { " ..." } else { "" }
         );
-        if let Some(average) = recording.end.get("averageCaptureMs").filter(|v| !v.is_null()) {
-            // Live takes end without the recorder's numbers.
-            say!(
-                "  capture cost per frame: average {} ms, slowest {} ms (the recorder's own share)",
-                py::str(average),
-                py::str(recording.end.get("slowestCaptureMs").unwrap_or(&Value::Null))
-            );
-        }
     } else if !args.shared {
-        say!("no jank: {} frames, usual frame {usual:.1}ms", times.len());
+        say!("no jank: {} frames, no refresh missed", recording.frames.len());
     }
     Ok(hitches.len())
 }

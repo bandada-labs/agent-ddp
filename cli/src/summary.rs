@@ -229,7 +229,8 @@ fn segments(points: &[Point]) -> Vec<Vec<Point>> {
     split
 }
 
-/// `0 -> 4 over 400ms from 550ms, easeOut` or a spring with its overshoot.
+/// `0 -> 4 over 400ms from 550ms, matches easeOut (off by 1%)`, or its overshoot. A comparison of the recorded values
+/// with named curves, not the curve the app asked for: SwiftUI and Compose do not say which one they run.
 fn describe_move(run: &[Point]) -> String {
     let ((t0, v0), (t1, v1)) = (&run[0], &run[run.len() - 1]);
     let duration = f(t1) - f(t0);
@@ -242,7 +243,10 @@ fn describe_move(run: &[Point]) -> String {
         run.iter().map(|(t, v)| ((f(t) - f(t0)) / duration, (f(v) - f(v0)) / distance)).collect();
     let overshoot = progress.iter().map(|p| p.1).fold(f64::NEG_INFINITY, f64::max) - 1.0;
     if overshoot > 0.02 {
-        return format!("{text}, spring (overshoot {})", py::percent(overshoot));
+        return format!(
+            "{text}, overshoots by {} (a spring, or a curve that goes past its end)",
+            py::percent(overshoot)
+        );
     }
     let fits: Vec<(&str, f64)> = EASINGS
         .iter()
@@ -254,9 +258,9 @@ fn describe_move(run: &[Point]) -> String {
         .collect();
     let (best, fit) = py::min_first(fits, |p| p.1).unwrap();
     if fit < 0.05 {
-        format!("{text}, {best}")
+        format!("{text}, matches {best} (off by {})", py::percent(fit))
     } else {
-        format!("{text}, {best} (loose fit {fit:.2})")
+        format!("{text}, matches no named curve (nearest {best}, off by {})", py::percent(fit))
     }
 }
 

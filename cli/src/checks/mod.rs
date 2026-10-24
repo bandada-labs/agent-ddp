@@ -9,16 +9,16 @@ mod timeline;
 
 pub use a11y::check_a11y;
 pub use baseline::{baseline, check_baseline};
-pub use corners::check_corners;
+pub use corners::{check_corners, corner_breaks, inside_rounded, radii};
 pub use motion::{check_jank, check_settle};
 pub use overlap::check_overlap;
 pub use parity::check_parity;
 pub use timeline::check_timeline;
 
 use crate::args::Args;
-use crate::live::recording_for;
+use crate::live::recording_for_checks;
 use crate::model::{element_alpha, element_state, Frame, Recording};
-use crate::py::{self, f, obj, truthy};
+use crate::py::{self, f, obj};
 use crate::say;
 use crate::state::Result;
 use serde_json::{json, Map, Value};
@@ -28,19 +28,9 @@ type Point = (f64, f64);
 const PARITY_ALPHA: f64 = 0.1;
 const PARITY_PT: f64 = 1.0;
 
-fn pick(node: &Value, fields: &[&str]) -> Value {
-    let mut details = Map::new();
-    for field in fields {
-        if truthy(node.get(*field)) {
-            details.insert(field.to_string(), node[*field].clone());
-        }
-    }
-    Value::Object(details)
-}
-
 /// Every check that needs only this recording, in one call: only problems are printed, exit 1 on any.
 pub fn check_all(args: &Args) -> Result<usize> {
-    let recording = recording_for(args)?;
+    let recording = recording_for_checks(args)?;
     let mut shared = args.clone();
     shared.shared = true;
     let mut found: Vec<(&str, usize)> = Vec::new();
@@ -132,7 +122,7 @@ pub const CHECK_NAMES: [&str; 10] =
 pub fn run_named(args: &Args) -> Result<usize> {
     let what = args.what.clone().unwrap_or_default();
     if let Some((_, check)) = RECORDING_CHECKS.iter().find(|(name, _)| *name == what) {
-        let recording = recording_for(args)?;
+        let recording = recording_for_checks(args)?;
         return check(args, &recording);
     }
     match what.as_str() {

@@ -75,6 +75,8 @@ pub fn check_protocol(header: &Value) -> Result<()> {
 pub struct Recording {
     pub header: Value,
     pub end: Value,
+    /// The platform's answers at the end of a live take (`inspect`), Null when the take has none.
+    pub inspect: Value,
     pub frames: Vec<Frame>,
     pub tolerance: f64,
     pub origin: f64,
@@ -247,9 +249,10 @@ pub fn from_lines(lines: Vec<Value>, path: PathBuf) -> Result<Recording> {
     };
     check_protocol(&header)?;
     let end = lines.iter().find(|l| l["type"] == "end").cloned().unwrap_or_else(|| json!({}));
+    let inspect = lines.iter().find(|l| l["type"] == "inspect").cloned().unwrap_or(Value::Null);
     let tolerance = tolerance_for(&header);
     let frames = lines.into_iter().filter(|l| l["type"] == "frame").map(|l| Frame::from(l, tolerance)).collect();
-    Ok(Recording { header, end, frames, tolerance, origin: 0.0 })
+    Ok(Recording { header, end, inspect, frames, tolerance, origin: 0.0 })
 }
 
 /// Normalized labels, and an index for elements that share a name in one frame: `Open`, `Open [2]`.
@@ -401,12 +404,6 @@ pub fn element_keys(frames: &[Frame]) -> Vec<String> {
 }
 
 const PAINTS_INTERIOR: [&str; 3] = ["bitmap", "gradient", "opaque-drawing"]; // "draw" ops count only when filled
-
-pub fn paints_at(node: &Value, point: (f64, f64)) -> bool {
-    let paints = PAINTS_INTERIOR.contains(&node["kind"].as_str().unwrap_or("")) || truthy(node.get("fill"));
-    let [x, y, w, h] = rect(node.get("visible").unwrap_or(&node["frame"]));
-    paints && x <= point.0 && point.0 <= x + w && y <= point.1 && point.1 <= y + h
-}
 
 pub fn color_alpha(color: &Value) -> Value {
     match color.as_str() {

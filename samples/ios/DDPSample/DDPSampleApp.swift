@@ -87,13 +87,26 @@ struct ContentView: View {
                 Text("Covered label")
                     .accessibilityIdentifier("coveredLabel")
                     .overlay(Rectangle().fill(Color.gray).frame(width: 140, height: 30))
+
+                // Planted bug for `ddp check jank`: work on the main thread that misses about 15 refreshes.
+                Button("Busy") {
+                    Thread.sleep(forTimeInterval: 0.25)
+                    lastAction = "busy"
+                }
+                .accessibilityIdentifier("busyButton")
             }
 
             HStack(spacing: 24) {
-                // Too small to tap comfortably (24 pt, Apple asks for 44).
-                Button { lastAction = "small" } label: { Color.gray.opacity(0.3).frame(width: 24, height: 24) }
-                    .accessibilityIdentifier("smallTarget")
-                    .accessibilityLabel("Small")
+                // Too small to tap comfortably (24 pt, Apple asks for 44), and too close to its neighbor: SwiftUI's
+                // touch radius cannot make up for it on that side.
+                HStack(spacing: 2) {
+                    Button { lastAction = "small" } label: { Color.gray.opacity(0.3).frame(width: 24, height: 24) }
+                        .accessibilityIdentifier("smallTarget")
+                        .accessibilityLabel("Small")
+                    Button { lastAction = "next" } label: { Color.gray.opacity(0.3).frame(width: 24, height: 24) }
+                        .accessibilityIdentifier("smallNext")
+                        .accessibilityLabel("Next")
+                }
                 Text("Faint text")
                     .foregroundStyle(Color(white: 0.8))
                     .accessibilityIdentifier("faintText")

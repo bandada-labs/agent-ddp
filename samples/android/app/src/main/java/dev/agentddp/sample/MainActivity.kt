@@ -175,8 +175,11 @@ fun SampleScreen(initialAction: String = "none") {
                         Text("Low z", Modifier.testTag("zCovered").size(48.dp))
                     }
                     Spacer(Modifier.width(8.dp))
-                    // Too small to tap comfortably (24 dp, Material asks for 48).
+                    // Too small to tap comfortably (24 dp, Material asks for 48). Compose widens a touch to 48 dp around
+                    // it, so alone it would be fine; its neighbor 2 dp away stops that on one side.
                     Box(Modifier.testTag("smallTarget").size(24.dp).background(Color.LightGray).clickable { lastAction = "small" })
+                    Spacer(Modifier.width(2.dp))
+                    Box(Modifier.testTag("smallNext").size(24.dp).background(Color.LightGray).clickable { lastAction = "next" })
                     Spacer(Modifier.width(8.dp))
                     Text("Faint text", Modifier.testTag("faintText"), color = Color(0xFFCCCCCC))
                 }
@@ -234,9 +237,16 @@ fun SampleScreen(initialAction: String = "none") {
                 )
             }
             item {
-                Text("Load", Modifier.testTag("netButton").clickable {
-                    thread { lastAction = SampleNetwork.load() }
-                }.padding(16.dp))
+                Row {
+                    Text("Load", Modifier.testTag("netButton").clickable {
+                        thread { lastAction = SampleNetwork.load() }
+                    }.padding(16.dp))
+                    // Planted bug for `ddp check jank`: work on the main thread that misses about 15 refreshes.
+                    Text("Busy", Modifier.testTag("busyButton").clickable {
+                        Thread.sleep(250)
+                        lastAction = "busy"
+                    }.padding(16.dp))
+                }
             }
         }
     }

@@ -65,6 +65,11 @@ internal class Capture(private val density: Float) {
     var windowOffset = PointF(0f, 0f)
     /** Index in [elements] of the element whose subtree is being walked, -1 for none: each node's `own`. */
     private var owner = -1
+    /**
+     * Whether the subtree being walked is under something that changes its pixels on screen (a layer with its own
+     * paint, a render effect, a blend mode, a blur): what a node draws is then not what shows.
+     */
+    private var effects = false
     private val composeDensity = Density(density)
 
     fun walkView(view: View, clip: RectF, parentAlpha: Float) {
@@ -78,6 +83,8 @@ internal class Capture(private val density: Float) {
         val visible = RectF(frame).takeIf { it.intersect(clip) } ?: return
 
         val outerOwner = owner
+        val outerEffects = effects
+        effects = effects || view.layerType != View.LAYER_TYPE_NONE
         viewElement(view, frame)?.let { owner = it }
         val source = view.javaClass.simpleName
         view.background?.let { addNode(drawableNode(it).put("source", source), frame, visible, alpha) }
@@ -98,6 +105,7 @@ internal class Capture(private val density: Float) {
             drawingOrder(view).forEach { walkView(it, childClip, alpha) }
         }
         owner = outerOwner
+        effects = outerEffects
     }
 
 
@@ -109,7 +117,11 @@ internal class Capture(private val density: Float) {
             else -> null
         }
         if (drawable is GradientDrawable) {
-            if (Build.VERSION.SDK_INT >= 24 && drawable.cornerRadius > 0) node.put("corner", round2(drawable.cornerRadius.toDouble()))
+            if (Build.VERSION.SDK_INT >= 24) {
+                // cornerRadii (x, y per corner, from top-left clockwise) wins over cornerRadius when set.
+                val radii = runCatching { drawable.cornerRadii }.getOrNull()?.let { all -> (0 until 4).map { all[it * 2].toDouble() } }
+                putCorners(node, radii ?: List(4) { drawable.cornerRadius.toDouble() })
+            }
             strokeOf(drawable)?.let { node.put("border", it) }
         }
         return if (color != null || node.has("border")) node.put("kind", "layer").also { color?.let(::hex)?.let { node.put("fill", it) } }
@@ -129,8 +141,17 @@ internal class Capture(private val density: Float) {
     private fun textStyle(view: TextView): JSONObject {
         val weight = if (Build.VERSION.SDK_INT >= 28) view.typeface?.weight ?: 400
         else if (view.typeface?.isBold == true) 700 else 400
-        return JSONObject().put("size", round2(view.textSize.toDouble())).put("color", hex(view.currentTextColor) ?: "transparent")
+        val style = JSONObject().put("size", round2(view.textSize.toDouble())).put("color", hex(view.currentTextColor) ?: "transparent")
             .put("weight", weight)
+        // Spans can draw parts of the text in other colors, links in the link color.
+        val spanned = view.text as? android.text.Spanned
+        val spanColors = spanned?.let { text ->
+            val links = text.getSpans(0, text.length, android.text.style.URLSpan::class.java).isNotEmpty()
+            text.getSpans(0, text.length, android.text.style.ForegroundColorSpan::class.java).map { it.foregroundColor } +
+                listOfNotNull(view.linkTextColors?.defaultColor?.takeIf { links })
+        }.orEmpty()
+        if (spanColors.isNotEmpty()) style.put("colors", JSONArray((listOf(view.currentTextColor) + spanColors).distinct().mapNotNull(::hex)))
+        return style
     }
 
     /** The new element's index, or null when the view is not one. */
@@ -232,6 +253,11 @@ internal class Capture(private val density: Float) {
         val label = text ?: node?.config?.getOrNull(SemanticsProperties.ContentDescription)?.joinToString()
             ?: if (merges) childrenText(node!!) else null
         val outerOwner = owner
+        val outerEffects = effects
+        effects = effects || modifiers.any { modifier ->
+            modifier.name == "blur" || modifier.name == "graphicsLayer" &&
+                (modifier.props["renderEffect"] != null || modifier.props["blendMode"].let { it != null && it.toString() != "SrcOver" })
+        }
         if (node != null && (tag != null || (label != null && !insideMerged))) {
             owner = elements.length()
             elements.put(JSONObject().put("frame", rectArray(frame)).apply {
@@ -251,7 +277,8 @@ internal class Capture(private val density: Float) {
 
         val clipLayer = modifiers.firstOrNull { it.name == "graphicsLayer" && it.props["clip"] == true }
         val childClip = if (clipLayer != null && visible != null) RectF(clipLayer.frame).apply { intersect(visible) } else clip
-        val childClipRound = clipLayer?.let { cornerOf(it.props["shape"], it.size) }
+        // A clip with different corners keeps its smallest one: a point it lets through is then let through for sure.
+        val childClipRound = clipLayer?.let { cornersOf(it.props["shape"], it.size)?.minOrNull() }?.takeIf { it > 0 }
             ?.let { radius -> rectArray(clipLayer.frame).put(radius) } ?: clipRound
 
         if (visible != null && alpha > 0.001f) {
@@ -259,7 +286,7 @@ internal class Capture(private val density: Float) {
                 val paintVisible = RectF(modifier.frame).takeIf { it.intersect(clip) } ?: return@forEach
                 val paint = JSONObject().put("kind", "layer")
                 colorOf(modifier.props["color"] ?: modifier.props["brush"])?.let { paint.put("fill", it) }
-                cornerOf(modifier.props["shape"], modifier.size)?.let { paint.put("corner", it) }
+                cornersOf(modifier.props["shape"], modifier.size)?.let { putCorners(paint, it) }
                 addNode(paint, modifier.frame, paintVisible, alpha, clipRound)
             }
             // ponytail: drawBehind only (what Canvas uses). drawWithCache and drawWithContent need
@@ -298,11 +325,12 @@ internal class Capture(private val density: Float) {
                 val paintVisible = RectF(modifier.frame).takeIf { it.intersect(clip) } ?: return@forEach
                 val paint = JSONObject().put("kind", "layer")
                     .put("border", JSONObject().put("width", round2(width.toDouble())).put("color", color))
-                cornerOf(modifier.props["shape"], modifier.size)?.let { paint.put("corner", it) }
+                cornersOf(modifier.props["shape"], modifier.size)?.let { putCorners(paint, it) }
                 addNode(paint, modifier.frame, paintVisible, alpha, clipRound)
             }
         }
         owner = outerOwner
+        effects = outerEffects
     }
 
     /** One inspectable modifier and the rectangle it applies to, in activity-window pixels. */
@@ -327,7 +355,22 @@ internal class Capture(private val density: Float) {
             if (style.fontSize.isSpecified) put("size", round2(with(input.density) { style.fontSize.toPx() }.toDouble()))
             if (style.color.isSpecified) hex(style.color.toArgb())?.let { put("color", it) }
             put("weight", style.fontWeight?.weight ?: 400)
+            val spanColors = input.text.spanStyles.map { it.item.color }.filter { it.isSpecified }.map { it.toArgb() }
+            if (spanColors.isNotEmpty() && style.color.isSpecified) {
+                put("colors", JSONArray((listOf(style.color.toArgb()) + spanColors).distinct().mapNotNull(::hex)))
+            }
+            // BasicText's `color` producer paints over the style's color, and its value is not in the layout.
+            if (hasColorProducer(node)) put("unknownColor", true)
         }
+    }
+
+    /** True also when the producer cannot be read: then the text's color is not known for sure. */
+    private fun hasColorProducer(node: SemanticsNode): Boolean = node.layoutInfo.getModifierInfo().any { info ->
+        val type = info.modifier.javaClass
+        if (!type.name.contains("TextStringSimpleElement") && !type.name.contains("TextAnnotatedStringElement")) return@any false
+        runCatching { type.getDeclaredField("color").apply { isAccessible = true }.get(info.modifier) != null }
+            .onSuccess { Hooks.ok("compose.textColor") }
+            .getOrElse { Hooks.failed("compose.textColor", it.toString()); true }
     }
 
     private fun textOf(node: SemanticsNode) =
@@ -338,14 +381,25 @@ internal class Capture(private val density: Float) {
             .flatMap { listOfNotNull(textOf(it), childrenText(it)) }
             .joinToString(" ").ifEmpty { null }
 
-    private fun cornerOf(shape: Any?, size: Size): Double? {
+    /** A rounded shape's corner radii, top-left first, clockwise; null when it is not rounded. */
+    private fun cornersOf(shape: Any?, size: Size): List<Double>? {
         val outline = (shape as? Shape)?.createOutline(size, LayoutDirection.Ltr, composeDensity)
-        val radius = (outline as? Outline.Rounded)?.roundRect?.topLeftCornerRadius?.x ?: return null
-        return round2(radius.toDouble()).takeIf { it > 0 }
+        val box = (outline as? Outline.Rounded)?.roundRect ?: return null
+        return listOf(box.topLeftCornerRadius, box.topRightCornerRadius, box.bottomRightCornerRadius, box.bottomLeftCornerRadius)
+            .map { round2(it.x.toDouble()) }.takeIf { radii -> radii.any { it > 0 } }
+    }
+
+    /** `corner` when every corner is the same, `corners` (top-left first, clockwise) too when they differ. */
+    private fun putCorners(node: JSONObject, radii: List<Double>) {
+        val rounded = radii.map(::round2)
+        if (rounded.all { it == 0.0 }) return
+        node.put("corner", rounded.max())
+        if (rounded.distinct().size > 1) node.put("corners", JSONArray(rounded))
     }
 
     private fun addNode(node: JSONObject, frame: RectF, visible: RectF, alpha: Float, clipRound: JSONArray? = null) {
         node.put("z", nodes.length()).put("frame", rectArray(frame)).put("own", owner)
+        if (effects) node.put("effects", true)
         clipRound?.let { node.put("clipRound", it) }
         if (visible != frame) node.put("visible", rectArray(visible))
         if (alpha < 0.999f) node.put("opacity", round2(alpha.toDouble()))
@@ -378,6 +432,18 @@ internal object Hidden {
         runCatching {
             Class.forName("android.view.View\$ListenerInfo").getDeclaredField("mOnTouchListener").apply { isAccessible = true }
         }.getOrNull()
+    }
+
+    private val decorWindow by lazy {
+        runCatching { Class.forName("com.android.internal.policy.DecorView").getDeclaredField("mWindow").apply { isAccessible = true } }.getOrNull()
+    }
+
+    /** The Window of a DecorView root (an Activity's or a Dialog's); null for other roots, or when it cannot be read. */
+    fun windowOf(root: View): android.view.Window? {
+        if (root.javaClass.name != "com.android.internal.policy.DecorView") return null
+        val window = runCatching { decorWindow?.get(root) as android.view.Window? }.getOrNull()
+        if (window == null) Hooks.failed("decorView.window", "DecorView.mWindow is blocked") else Hooks.ok("decorView.window")
+        return window
     }
 
     val touchListenerReadable get() = listenerInfo != null && onTouchListener != null

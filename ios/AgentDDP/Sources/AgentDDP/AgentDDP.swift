@@ -152,6 +152,9 @@ final class FrameStream {
     private var displayLink: CADisplayLink?
     private var frameIndex = 0
     private var firstTimestamp: CFTimeInterval = 0
+    /// The last callback's timestamp, the time the display link said the next one was due, and the library's own
+    /// capture time in it.
+    private var last: (timestamp: CFTimeInterval, target: CFTimeInterval, captureMs: Double)?
     private var slowestCaptureMs = 0.0
     private var totalCaptureMs = 0.0
 
@@ -183,13 +186,28 @@ final class FrameStream {
     @objc private func captureFrame(_ link: CADisplayLink) {
         if frameIndex == 0 { firstTimestamp = link.timestamp }
         let captureStart = CACurrentMediaTime()
-        let line = FrameCapture.frame(index: frameIndex, milliseconds: (link.timestamp - firstTimestamp) * 1000)
+        var line = FrameCapture.frame(index: frameIndex, milliseconds: (link.timestamp - firstTimestamp) * 1000)
+        if let missed = missedRefreshes(link) { line["missed"] = missed }
         let captureMs = (CACurrentMediaTime() - captureStart) * 1000
+        last = (link.timestamp, link.targetTimestamp, captureMs)
         slowestCaptureMs = max(slowestCaptureMs, captureMs)
         totalCaptureMs += captureMs
         frameIndex += 1
         History.shared.offer(line)
         if !send(line) || (frameLimit > 0 && frameIndex >= frameLimit) { stop() }
+    }
+
+    /// Refreshes the main thread missed before this callback, by the display link's own times, leaving out the
+    /// library's capture: the app's work alone took more than a refresh. Nil when none.
+    private func missedRefreshes(_ link: CADisplayLink) -> Int? {
+        guard let last else { return nil }
+        let period = last.target - last.timestamp
+        guard period > 0 else { return nil }
+        // Between two callbacks the thread waited less than one period, so it was busy for at least the gap minus a
+        // period; without the library's capture, that much of the app's own work.
+        let appBusy = (link.timestamp - last.timestamp) - last.captureMs / 1000 - period
+        let missed = Int((appBusy / period).rounded(.down))
+        return missed > 0 ? missed : nil
     }
 }
 
@@ -198,8 +216,9 @@ enum FrameCapture {
     static let protocolVersion = 2
 
     static func header(frames: Int) -> [String: Any] {
+        // missed: frames say how many refreshes the app missed before them (CADisplayLink times).
         ["type": "header", "protocol": protocolVersion, "platform": "ios", "unit": "pt", "scale": UIScreen.main.scale,
-         "frames": frames,
+         "frames": frames, "missed": true,
          "startedAt": (Date().timeIntervalSince1970 * 1000).rounded()]
     }
 

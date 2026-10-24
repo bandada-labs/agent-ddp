@@ -3,8 +3,8 @@ use crate::args::Args;
 use crate::checks::{check_parity, RECORDING_CHECKS};
 use crate::control::Control;
 use crate::live::{
-    follow_logs, live_session, open, platform_of, record_live, require_session, run_then, snapshot_live, stream_frames,
-    AndroidDevice, IosDevice, OfflineDevice,
+    follow_logs, live_session, open, platform_of, record_live, record_live_inspected, require_session, run_then,
+    snapshot_live, stream_frames, AndroidDevice, IosDevice, OfflineDevice,
 };
 use crate::model::{
     self, element_alpha, element_key, load, normalize_label, rect, save_recording, warn_if_empty, Frame,
@@ -598,26 +598,32 @@ fn paint(rows: &mut [Vec<u8>], x0: f64, y0: f64, x1: f64, y1: f64, color: [u8; 3
     }
 }
 
+/// What the device's display shows now, as a PNG: `simctl io screenshot` or `screencap`. Pixels of the whole screen.
+pub fn screenshot_png(session: &Value) -> Result<Vec<u8>> {
+    let device = py::str(&session["device"]);
+    if session["platform"] == "ios" {
+        let path = ctx().dir.join("screen.png");
+        state::run(&["xcrun", "simctl", "io", &device, "screenshot", "--type=png", &path.display().to_string()])?;
+        return std::fs::read(&path).map_err(|e| failure(e.to_string(), "file_not_found", None));
+    }
+    let output = Command::new(adb_path()?)
+        .args(["-s", &device, "exec-out", "screencap", "-p"])
+        .output()
+        .map_err(|e| failure(e.to_string(), "command_failed", None))?;
+    if !output.status.success() {
+        return Err(failure("screencap failed", "command_failed", None));
+    }
+    Ok(output.stdout)
+}
+
 pub fn annotate(args: &mut Args) -> Result<i32> {
     let session = require_session()?;
     let recording = snapshot_live(&session)?;
     let refs = save_refs(&recording.frames)?;
     let frame = recording.frames.last().unwrap();
     let out = PathBuf::from(&args.out);
-    let device = py::str(&session["device"]);
-    let scale = if session["platform"] == "ios" {
-        state::run(&["xcrun", "simctl", "io", &device, "screenshot", "--type=png", &out.display().to_string()])?;
-        recording.header.get("scale").map(f).unwrap_or(1.0)
-    } else {
-        let output = Command::new(adb_path()?)
-            .args(["-s", &device, "exec-out", "screencap", "-p"])
-            .output()
-            .map_err(|e| failure(e.to_string(), "command_failed", None))?;
-        write_file(&out, output.stdout)?;
-        1.0
-    };
-    let data = std::fs::read(&out).map_err(|e| failure(e.to_string(), "file_not_found", None))?;
-    let (width, height, mut rows) = png_read(&data)?;
+    let scale = if session["platform"] == "ios" { recording.header.get("scale").map(f).unwrap_or(1.0) } else { 1.0 };
+    let (width, height, mut rows) = png_read(&screenshot_png(&session)?)?;
     let density = recording.header.get("scale").map(f).unwrap_or(1.0); // labels the same size in pt on both platforms
     let thick = 2f64.max(density.round_ties_even());
     let dot = 3f64.max((density * 1.5).round_ties_even());
@@ -690,7 +696,6 @@ pub fn explore(args: &mut Args) -> Result<i32> {
         take_args.duration = Some(args.per.clone());
         take_args.frames = None;
         take_args.name = Some(name.clone());
-        take_args.all_frames = true;
         take_args.shared = true;
         let mut then = state::self_command();
         // Checked above; --force skips tap's own checks so the take keeps its length.
@@ -699,7 +704,7 @@ pub fn explore(args: &mut Args) -> Result<i32> {
             then.extend(["--session".into(), session_name.clone()]);
         }
         take_args.then = Some(state::shell_join(&then));
-        let recording = record_live(&take_args)?;
+        let recording = record_live_inspected(&take_args)?;
         // The details stay in the saved take; one line per control here.
         state::push_capture(false);
         let mut problems: Vec<(&str, usize)> = Vec::new();

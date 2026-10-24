@@ -433,9 +433,7 @@ private object Dispatch {
     /** A window root whose window callback (the Activity or Dialog) changes `dispatchTouchEvent`. */
     fun windowCallbackDecides(root: View): Boolean {
         if (root.javaClass.name != DECOR_VIEW) return root is ViewGroup && decidesOwnDispatch(root)
-        val windowCallback = runCatching { (decorWindow?.get(root) as android.view.Window?)?.callback }.getOrNull()
-            ?: return true.also { Hooks.failed("decorView.window", "DecorView.mWindow is blocked") }
-        Hooks.ok("decorView.window")
+        val windowCallback = Hidden.windowOf(root)?.callback ?: return true
         // The library's own tap recorder only watches, then hands the touch on.
         val callback = (windowCallback as? TouchWatcher)?.inner ?: windowCallback
         val base = if (callback is android.app.Dialog) android.app.Dialog::class.java else android.app.Activity::class.java

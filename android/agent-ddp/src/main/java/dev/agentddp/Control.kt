@@ -4,6 +4,7 @@ import android.app.Application
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.PointF
+import android.graphics.RectF
 import android.net.LocalServerSocket
 import org.json.JSONArray
 import org.json.JSONObject
@@ -105,9 +106,22 @@ internal class ControlSession(private val app: ControlApp, private val send: (St
         "screen.elements" to { _ -> JSONObject().put("elements", onMain { FrameCapture.frame(0, 0.0).getJSONArray("elements") }) },
         "screen.capture" to { params -> Control.capture(params) },
         "app.hooks" to { _ -> JSONObject().put("hooks", onMain { Hooks.report() }) },
+        "screen.pixels" to { params ->
+            val rects = params.optJSONArray("rects") ?: JSONArray()
+            Pixels.regions((0 until rects.length()).mapNotNull { i ->
+                rects.optJSONArray(i)?.takeIf { it.length() == 4 }?.let { r ->
+                    RectF(r.getDouble(0).toFloat(), r.getDouble(1).toFloat(), (r.getDouble(0) + r.getDouble(2)).toFloat(), (r.getDouble(1) + r.getDouble(3)).toFloat())
+                }
+            })
+        },
         "screen.hit" to { params ->
             val touch = params.optDouble("touch", 0.0).toFloat()
-            JSONObject().put("elements", onMain { Hit.check(params.optString("id").ifEmpty { null }, touch) })
+            onMain {
+                // Frames are in the activity window's pixels; a screenshot is the whole display's.
+                val origin = IntArray(2).also { FrameRecorder.resumedActivity?.window?.decorView?.getLocationOnScreen(it) }
+                JSONObject().put("elements", Hit.check(params.optString("id").ifEmpty { null }, touch))
+                    .put("origin", JSONArray(origin.toList()))
+            }
         },
         "screen.frame" to { _ -> onMain { FrameCapture.frame(0, 0.0) } },
         "screen.watch" to { params -> watchScreen(params.optInt("frames", 0)); JSONObject() },

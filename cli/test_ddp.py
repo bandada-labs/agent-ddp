@@ -65,12 +65,23 @@ with tempfile.TemporaryDirectory() as directory:
     assert "borderColor: None -> None, 3 values" in summary, summary
     assert "draws: 0 -> 0" in summary and "max 1" in summary, summary
 
-    overlap = run("check", "overlap", recording=recording)
-    assert "COVERED button" in overlap and "9/9" in overlap, overlap
+    # Pixel checks judge only what the platform answered at the end of a live take (an inspect line).
+    assert "overlap not judged: the take has no screen check" in run("check", "overlap", recording=recording)
 
-    lines[-2] = frame(4, 0, banner=False)
-    recording.write_text("\n".join(json.dumps(line) for line in lines))
-    assert "no covered elements" in run("check", "overlap", recording=recording)
+    def inspected(texts=(), corners=(), hit=()):
+        return {"type": "inspect", "minimum": 44, "hit": list(hit), "texts": list(texts), "corners": list(corners)}
+
+    # Android: a text whose color shows nowhere in its frame; iOS: the same color at its ink and clear points.
+    hidden = {"key": "Tap", "rect": [20, 20, 80, 20], "colors": ["#000000FF"], "seen": [120], "screen": "#888888FF"}
+    shape = {"key": "Tap", "rect": [20, 20, 80, 20], "ink": "#888888FF", "inkShare": 1, "clear": "#888888FF",
+             "clearShare": 1, "inkLikeClear": 1}
+    recording.write_text("\n".join(json.dumps(line) for line in lines + [inspected([hidden, shape])]))
+    overlap = run("check", "overlap", recording=recording)
+    assert "COVERED Tap: its text (#000000FF) shows nowhere in its frame" in overlap and \
+        "COVERED Tap: the screen shows #888888FF where its text has ink" in overlap, overlap
+    shown = [{**hidden, "seen": [3]}, {**shape, "ink": "#000000FF", "inkLikeClear": 0}]
+    recording.write_text("\n".join(json.dumps(line) for line in lines + [inspected(shown)]))
+    assert "no covered text" in run("check", "overlap", recording=recording)
 
 # Parity: same button on both platforms; Android in px at scale 2, starts later, and is fainter.
 def parity_recording(platform, unit, scale, start, fill, corner):
@@ -105,12 +116,22 @@ def corner_recording(clip_round):
     return "\n".join(json.dumps(line) for line in lines)
 
 
+def corner_place(near, behind):
+    return {"type": "inspect", "hit": [], "texts": [], "corners": [
+        {"key": "card", "z": 1, "point": [10, 10], "shape": [10, 10, 100, 40], "radius": 12, "color": "#888888FF",
+         "near": near, "screen": "#888888FF", "behind": behind}]}
+
+
 with tempfile.TemporaryDirectory() as directory:
     recording = Path(directory, "corners.jsonl")
-    recording.write_text(corner_recording(clip_round=False))
-    assert "OUTSIDE CORNERS card" in run("check", "corners", recording=recording)
-    recording.write_text(corner_recording(clip_round=True))
-    assert "nothing outside rounded corners" in run("check", "corners", recording=recording)
+    # The geometry points at the place; the pixels decide.
+    recording.write_text(corner_recording(clip_round=False) + "\n" + json.dumps(corner_place(0, "#FFFFFFFF")))
+    corners = run("check", "corners", recording=recording)
+    assert "OUTSIDE CORNERS card: #888888FF shows at (10, 10)" in corners and "the screen is #FFFFFFFF" in corners, corners
+    # Clipped after all (the screen shows the background there), or the same color behind: nothing to report.
+    for near, behind in ((90, "#FFFFFFFF"), (0, "#8A8A8AFF")):
+        recording.write_text(corner_recording(clip_round=False) + "\n" + json.dumps(corner_place(near, behind)))
+        assert "nothing outside rounded corners" in run("check", "corners", recording=recording)
 
 # Timeline: a glow shows at 200..300ms after the tap (the first change, at t=100), at half alpha.
 def timeline_recording():
@@ -177,6 +198,8 @@ with tempfile.TemporaryDirectory() as directory:
         # Two rows with the same label, and a zero-width space in one of them.
         line["elements"] += [{"label": "Open", "frame": [0, 100, 50, 20]}, {"label": "Op\u200ben", "frame": [0, 130, 50, 20]}]
     lines.append({"type": "end", "frames": 5})
+    lines.append({"type": "inspect", "hit": [], "corners": [], "texts": [
+        {"key": "Tap", "rect": [20, 20, 80, 20], "colors": ["#000000FF"], "seen": [120], "screen": "#888888FF"}]})
     recording.write_text("\n".join(json.dumps(line) for line in lines))
 
     interactive = run("tree", "-i", recording=recording)
@@ -205,7 +228,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert "[truncated: showing 40 of" in cut and "DDP_APP_CONTENT_START nonce=" in cut and "CONTENT_END" in cut, cut
 
     batch = ddp_in(directory, "batch", stdin="tree -i --file r.jsonl\nget nope --file r.jsonl\ncheck all --file r.jsonl\n")
-    assert batch.returncode == 1 and batch.stdout.count("$ ddp ") == 3 and "overlap 2" in batch.stdout, batch.stdout
+    assert batch.returncode == 1 and batch.stdout.count("$ ddp ") == 3 and "overlap 1" in batch.stdout, batch.stdout
     bail = ddp_in(directory, "batch", "--bail", "get nope --file r.jsonl", "tree --file r.jsonl")
     assert bail.stdout.count("$ ddp ") == 1, bail.stdout
 
@@ -234,7 +257,7 @@ with tempfile.TemporaryDirectory() as directory:
 
 # Curves, jank, settle, baselines.
 def motion_recording(times, xs, label="box"):
-    lines = [{"type": "header", "platform": "ios", "unit": "pt", "scale": 3, "frames": len(times)}]
+    lines = [{"type": "header", "platform": "ios", "unit": "pt", "scale": 3, "frames": len(times), "missed": True}]
     for i, (t, x) in enumerate(zip(times, xs)):
         lines.append({"type": "frame", "i": i, "t": t, "elements": [{"id": label, "frame": [x, 0, 40, 40]}],
                       "nodes": [{"z": 0, "kind": "layer", "fill": "#FF0000FF", "frame": [x, 0, 40, 40]}]})
@@ -257,14 +280,20 @@ with tempfile.TemporaryDirectory() as directory:
     xs = [0] * 10 + [round(100 * ease_out(u / 25), 2) for u in range(1, 26)] + [100] * 45
     take.write_text(motion_recording(times, xs))
     curve = run("get", "box", "--curve", recording=take)
-    assert "x: 0 -> 100.0 over 400ms from 144ms, easeOut" in curve and "loose" not in curve, curve
+    assert "x: 0 -> 100.0 over 400ms from 144ms, matches easeOut (off by" in curve and "no named" not in curve, curve
     assert "no jank" in run("check", "jank", recording=take)
     assert "everything settled" in run("check", "settle", recording=take)
 
+    # The library counts the refreshes the app missed (its own capture left out); the CLI only reads them.
     gaps = Path(directory, "gaps.jsonl")
-    gaps.write_text(motion_recording([0, 16, 32, 48, 130, 146, 162, 178], [0] * 8))
+    late = [json.loads(line) for line in motion_recording([0, 16, 32, 48, 130, 146], [0] * 6).splitlines()]
+    late[5]["missed"] = 4
+    gaps.write_text("\n".join(json.dumps(line) for line in late))
     jank = ddp_in(directory, "check", "jank", "--file", "gaps.jsonl").stdout
-    assert "JANK 1 hitches" in jank and "worst 82ms at t=48ms" in jank, jank
+    assert "JANK the app missed 4 refreshes in one place, worst 4 before t=130ms" in jank, jank
+    old = Path(directory, "old.jsonl")
+    old.write_text(motion_recording([0, 16, 32, 48, 130, 146], [0] * 6).replace(', "missed": true', ""))
+    assert "jank not judged" in ddp_in(directory, "check", "jank", "--file", "old.jsonl").stdout
 
     loop = Path(directory, "loop.jsonl")
     loop.write_text(motion_recording(times, [20 * math.sin(i / 3) for i in range(80)]))
@@ -298,14 +327,34 @@ with tempfile.TemporaryDirectory() as directory:
              {"z": 5, "kind": "bitmap", "frame": [200, 0, 100, 20], "text": {"size": 14, "color": "#777777FF"}, "own": 5},
              # Owned by nobody although it sits inside "dark": the recorder said so.
              {"z": 3, "kind": "layer", "fill": "#888888FF", "frame": [0, 140, 100, 20], "own": -1}]
-    take.write_text("\n".join(json.dumps(line) for line in [
-        {"type": "header", "platform": "ios", "unit": "pt", "scale": 3, "frames": 1},
-        {"type": "frame", "i": 0, "t": 0, "elements": elements, "nodes": nodes}]))
+    frame_line = {"type": "frame", "i": 0, "t": 0, "elements": elements, "nodes": nodes}
+    header = {"type": "header", "platform": "ios", "unit": "pt", "scale": 3, "frames": 1}
+    take.write_text("\n".join(json.dumps(line) for line in [header, frame_line]))
     a11y = ddp_in(directory, "check", "a11y", "--file", "a11y.jsonl").stdout
-    assert "SMALL TARGET tiny: 20x20" in a11y and "chip" not in a11y, a11y
-    assert "contrast not judged (text over a gradient, image or drawing): onGradient" in a11y, a11y
-    assert "NO LABEL icon" in a11y and "LOW CONTRAST faint: 1.6:1 at t=0ms" in a11y and "dark:" not in a11y, a11y
-    assert "COVERED dark" in ddp_in(directory, "check", "overlap", "--file", "a11y.jsonl").stdout
+    # Labels come from the accessibility tree; touch size and contrast only from what the platform answered.
+    assert "NO LABEL icon" in a11y and "touch targets and contrast not judged" in a11y and "SMALL" not in a11y, a11y
+    inspect = {"type": "inspect", "minimum": 44, "corners": [],
+               # How far a touch reaches, from the app's hit test; tappable reports a control no touch reaches.
+               "hit": [{**elements[0], "points": 9, "reach": [20, 20]}, {**elements[1], "points": 9},
+                       {"id": "hidden", "label": "Hidden", "tap": True, "points": 0, "reason": "covered", "reach": [0, 0]},
+                       {"id": "edge", "label": "Edge", "tap": True, "points": 9, "reach": [43.5, 44]}],
+               "texts": [
+                   {"key": "faint", "rect": [0, 100, 100, 20], "size": 14, "colors": ["#CCCCCCFF"], "seen": [0],
+                    "screen": "#FFFFFFFF", "background": "#FFFFFFFF", "uniform": 1},
+                   {"key": "dark", "rect": [0, 140, 100, 20], "size": 14, "colors": ["#222222FF"], "seen": [0],
+                    "screen": "#FFFFFFFF", "background": "#FFFFFFFF", "uniform": 1},
+                   {"key": "onGradient", "rect": [200, 0, 100, 20], "size": 14, "colors": ["#777777FF"], "seen": [0],
+                    "screen": "#FFFFFFFF", "background": "#000000FF", "uniform": 0.6},
+                   # iOS: the screen's colors at the text's own ink and clear points; its size is an estimate.
+                   {"key": "Tiny", "rect": [0, 0, 20, 20], "size": 17, "estimated": True, "ink": "#AAAAAAFF",
+                    "inkShare": 1, "clear": "#FFFFFFFF", "clearShare": 1, "inkLikeClear": 0}]}
+    take.write_text("\n".join(json.dumps(line) for line in [header, frame_line, inspect]))
+    a11y = ddp_in(directory, "check", "a11y", "--file", "a11y.jsonl").stdout
+    assert "SMALL TARGET tiny: a touch reaches it over 20x20" in a11y and "chip" not in a11y, a11y
+    assert "hidden" not in a11y and "Edge" not in a11y, a11y
+    assert "contrast not judged (covered, more than one color, or over an image or a gradient): onGradient" in a11y, a11y
+    assert "LOW CONTRAST faint: 1.6:1, #CCCCCCFF on #FFFFFFFF, needs 4.5:1" in a11y and "dark:" not in a11y, a11y
+    assert "LOW CONTRAST Tiny: 2.3:1, #AAAAAAFF on #FFFFFFFF, needs 3:1 at least (its size is estimated)" in a11y, a11y
 
     page = ddp_in(directory, "view", "page.html", "--file", "a11y.jsonl")
     assert page.returncode == 0 and '"tiny"' in Path(directory, "page.html").read_text(), page.stderr

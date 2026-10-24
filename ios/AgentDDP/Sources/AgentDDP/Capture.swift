@@ -103,21 +103,38 @@ enum LayerReader {
 
     /// Layers in paint order (later covers earlier). Only layers that draw something are kept.
     static func paintedNodes(in windows: [UIWindow]) -> [[String: Any]] {
+        var texts: [(layer: CALayer, frame: CGRect)] = []
+        return walkWindows(windows, texts: &texts)
+    }
+
+    /// The layers that draw a text, with their frames on screen, as the nodes carry them.
+    static func textLayers(in windows: [UIWindow]) -> [(layer: CALayer, frame: CGRect)] {
+        var texts: [(layer: CALayer, frame: CGRect)] = []
+        _ = walkWindows(windows, texts: &texts)
+        return texts
+    }
+
+    private static func walkWindows(_ windows: [UIWindow], texts: inout [(layer: CALayer, frame: CGRect)]) -> [[String: Any]] {
         var nodes: [[String: Any]] = []
         for window in windows {
             let root = window.layer.presentation() ?? window.layer
             let windowClip = CGRect(origin: .zero, size: window.bounds.size)
             walk(window.layer, root: root, clip: windowClip, opacity: 1, offset: window.frame.origin,
-                 into: &nodes)
+                 into: &nodes, texts: &texts)
         }
         return nodes
     }
 
     // ponytail: paint order is sublayer order, re-sorted by zPosition; 3D transforms are ignored.
     private static func walk(_ layer: CALayer, root: CALayer, clip: CGRect, opacity: Float,
-                             offset: CGPoint, into nodes: inout [[String: Any]]) {
+                             offset: CGPoint, effects: Bool = false, into nodes: inout [[String: Any]],
+                             texts: inout [(layer: CALayer, frame: CGRect)]) {
         let shown = layer.presentation() ?? layer
         let effectiveOpacity = opacity * shown.opacity
+        // A filter, a compositing filter (vibrancy, blend modes) or a mask changes what the layer's pixels look like on
+        // screen: what it draws is then not what shows.
+        let effects = effects || shown.compositingFilter != nil || !(shown.filters ?? []).isEmpty
+            || !(shown.backgroundFilters ?? []).isEmpty || shown.mask != nil
         guard !shown.isHidden, effectiveOpacity > 0.001 else { return }
         let frame = shown.convert(shown.bounds, to: root).offsetBy(dx: offset.x, dy: offset.y)
         let visible = frame.intersection(clip)
@@ -128,11 +145,15 @@ enum LayerReader {
             if visible != frame { node["visible"] = rectArray(visible) }
             if effectiveOpacity < 0.999 { node["opacity"] = round2(Double(effectiveOpacity)) }
             if shown.masksToBounds { node["clips"] = true }
+            if effects { node["effects"] = true }
             // UIKit view classes help name a coverer; SwiftUI's mangled internal classes do not.
             if let view = layer.delegate as? UIView, !NSStringFromClass(type(of: view)).hasPrefix("_Tt") {
                 node["source"] = NSStringFromClass(type(of: view))
             }
-            if let text = textStyle(of: layer) { node["text"] = text }
+            if let text = textStyle(of: layer) {
+                node["text"] = text
+                texts.append((layer, frame))
+            }
             nodes.append(node)
         }
 
@@ -142,7 +163,8 @@ enum LayerReader {
         let ordered = (layer.sublayers ?? []).enumerated()
             .sorted { ($0.element.zPosition, $0.offset) < ($1.element.zPosition, $1.offset) }.map(\.element)
         ordered.forEach {
-            walk($0, root: root, clip: childClip, opacity: effectiveOpacity, offset: offset, into: &nodes)
+            walk($0, root: root, clip: childClip, opacity: effectiveOpacity, offset: offset, effects: effects, into: &nodes,
+                 texts: &texts)
         }
     }
 
@@ -151,8 +173,17 @@ enum LayerReader {
     /// so there is no cheap sign that its color changed.
     private static func textStyle(of layer: CALayer) -> [String: Any]? {
         if let label = layer.delegate as? UILabel, let font = label.font {
-            return ["size": round2(font.pointSize), "color": hex(label.textColor.cgColor) ?? "transparent",
-                    "weight": weight(of: font)]
+            var style: [String: Any] = ["size": round2(font.pointSize), "color": hex(label.textColor.cgColor) ?? "transparent",
+                                        "weight": weight(of: font)]
+            // An attributed text can draw parts in other colors.
+            var colors: [String] = []
+            if let text = label.attributedText {
+                text.enumerateAttribute(.foregroundColor, in: NSRange(location: 0, length: text.length)) { value, _, _ in
+                    if let color = (value as? UIColor).flatMap({ hex($0.cgColor) }), !colors.contains(color) { colors.append(color) }
+                }
+            }
+            if colors.count > 1 || (colors.first.map { $0 != style["color"] as? String } ?? false) { style["colors"] = colors }
+            return style
         }
         if let field = layer.delegate as? UITextField, let font = field.font {
             return ["size": round2(font.pointSize), "color": hex(field.textColor?.cgColor) ?? "transparent",
@@ -161,8 +192,13 @@ enum LayerReader {
         guard NSStringFromClass(type(of: layer)).contains("CGDrawingLayer"), layer.contents != nil,
               let pixels = PixelSampler.sample(layer, maxSide: PixelSampler.textSide),
               let main = (pixels["colors"] as? [[String: Any]])?.first?["color"] as? String else { return nil }
-        // The bitmap's line height is about 1.2 times the font size.
-        return ["color": main, "size": round2(layer.bounds.height / 1.2), "estimated": true]
+        var style: [String: Any] = ["color": main, "size": round2(layer.bounds.height / 1.2), "estimated": true]
+        // A text that draws in more than one color (a concatenated Text) shows each as a share of its pixels.
+        let colors = (pixels["colors"] as? [[String: Any]] ?? [])
+            .filter { ($0["share"] as? Double ?? 0) >= 0.15 }.compactMap { $0["color"] as? String }
+        if colors.count > 1 { style["colors"] = colors }
+        // The bitmap's line height is about 1.2 times the font size: an estimate, so checks treat the size as unknown.
+        return style
     }
 
     private static func weight(of font: UIFont) -> Double {
@@ -176,7 +212,14 @@ enum LayerReader {
 
     private static func paintDescription(of layer: CALayer, shown: CALayer) -> [String: Any]? {
         var node: [String: Any] = [:]
-        if shown.cornerRadius > 0 { node["corner"] = round2(shown.cornerRadius) }
+        if shown.cornerRadius > 0 {
+            node["corner"] = round2(shown.cornerRadius)
+            // maskedCorners leaves some corners square: top-left, top-right, bottom-right, bottom-left.
+            let masks: [CACornerMask] = [.layerMinXMinYCorner, .layerMaxXMinYCorner, .layerMaxXMaxYCorner, .layerMinXMaxYCorner]
+            if shown.maskedCorners != CACornerMask(masks) {
+                node["corners"] = masks.map { shown.maskedCorners.contains($0) ? round2(shown.cornerRadius) : 0 }
+            }
+        }
 
         if let shape = shown as? CAShapeLayer {
             node["kind"] = "shape"

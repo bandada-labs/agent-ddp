@@ -118,7 +118,8 @@ pub fn pop_limit() {
     let sink = SINKS.with(|s| s.borrow_mut().pop());
     if let Some(Sink::Limit { limit, written, dropped, nonce, started }) = sink {
         let mut tail = String::new();
-        if dropped > 0 && limit.is_some() {
+        // --max-output 0 asks for silence (explore runs tap that way): no note either.
+        if dropped > 0 && limit.is_some_and(|limit| limit > 0) {
             tail.push_str(&format!(
                 "\n[truncated: showing {written} of {} chars. Use --max-output to adjust]\n",
                 written + dropped

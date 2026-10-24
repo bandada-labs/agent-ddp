@@ -130,6 +130,11 @@ final class ControlSession {
         "screen.elements": { _ in ["elements": onMain { FrameCapture.visibleWindows().flatMap(AccessibilityReader.elements(in:)) }] },
         "screen.capture": { params in try Control.capture(params) },
         "app.hooks": { _ in ["hooks": Hooks.report()] },
+        "screen.pixels": { params in
+            let rects = (params["rects"] as? [[Double]] ?? []).filter { $0.count == 4 }
+                .map { CGRect(x: $0[0], y: $0[1], width: $0[2], height: $0[3]) }
+            return onMain { Pixels.answer(rects) }
+        },
         "screen.hit": { params in
             let touch = CGFloat(params["touch"] as? Double ?? 0)
             return ["elements": try onMain { Result { try Hit.check(name: params["id"] as? String, minimumTouch: touch) } }.get()]
