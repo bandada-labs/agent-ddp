@@ -98,7 +98,7 @@ The capture stats are the main thread time the library spent per frame.
 
 ### inspect
 
-Written by the CLI, not the library: after the frames of a take a check recorded live, what the platform answered at its end (`screen.hit` with `touch`, `screen.pixels`, two `screen.frame`). `hit`, `frame`, `minimum`, and per text and per corner place what the app's pixels show: `texts` (iOS: `ink`, `clear` and their shares; Android: `colors`, `seen`, `background`, `uniform`) and `corners` (`color`, `near`, `screen`, `behind`). What changed between the two frames is left out. The checks read only this line for overlap, corners, touch size and contrast.
+Written by the CLI, not the library: after the frames of a take a check recorded live, what the platform answered at its end (`screen.hit` with `touch`, `screen.pixels`, two `screen.frame`). `hit`, `frame`, `minimum`, and per text and per corner place what the app's pixels show: `texts` (iOS: `ink`, `clear` and their shares; Android: `colors`, `seen`, `background`, `uniform`) and `corners` (`color`, `near`, `screen`, `behind`). What changed between the two frames is left out. `hooks`, when one failed in this app run: the `app.hooks` entries with status `failing` or `mixed`. The checks read only this line for overlap, corners, touch size and contrast.
 
 ### request
 

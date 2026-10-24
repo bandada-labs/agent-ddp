@@ -127,3 +127,8 @@ Done: the third hard rule in ARCHITECTURE.md and AGENTS.md; `Hooks` in both libr
 5. touch size: the app's hit test from the center out; SwiftUI's radius and Compose's 48 dp widening count, so a lone small control is fine and a crowded one is not.
 6. jank: the libraries count missed refreshes from the platform's frame times, their own capture left out.
 7. `get --curve`: says which named curve the values match, not which one the app ran.
+
+### Hook failures reported; a crash-safe responders read
+Asked about the hooks' instability. Answered that the counts catch a hook that breaks but not one that answers wrong, that every hook was checked on one version only, and that `swiftui.responders` read word 2 of a Swift metadata record without a check, so a layout change could crash the app. Proposed a known-answer probe at start, a guard on that read and a version matrix. Answer: "yes, do it but the first one would take time and resources i'm not sure about it also i need them to report it and let the agent know it and available for the user".
+
+Done: the guard (the attribute must still be a one-argument `WeakAttribute` struct and word 2 must name that argument, else the hook fails with why); every check, `check tappable` and `explore` print the failed hooks, and the take keeps them in `inspect.hooks`. The probe is not built, waiting on the maintainer.

@@ -118,7 +118,7 @@ internal class ControlSession(private val app: ControlApp, private val send: (St
             val touch = params.optDouble("touch", 0.0).toFloat()
             onMain {
                 // Frames are in the activity window's pixels; a screenshot is the whole display's.
-                val origin = IntArray(2).also { FrameRecorder.resumedActivity?.window?.decorView?.getLocationOnScreen(it) }
+                val origin = FrameRecorder.resumedActivity?.window?.decorView?.let(FrameCapture::windowOrigin) ?: IntArray(2)
                 JSONObject().put("elements", Hit.check(params.optString("id").ifEmpty { null }, touch))
                     .put("origin", JSONArray(origin.toList()))
             }
@@ -281,7 +281,8 @@ internal object Control {
                 ?: listOf(0f, 0f, decor.width.toFloat(), decor.height.toFloat())
             val bitmap = Bitmap.createBitmap(width.toInt().coerceAtLeast(1), height.toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bitmap).apply { translate(-left, -top) }
-            val origin = IntArray(2).also(decor::getLocationOnScreen)
+            // A root draws its views where they are laid out; on screen they sit where getLocationOnScreen says, pan included.
+            val origin = FrameCapture.windowOrigin(decor)
             FrameCapture.windowRoots(decor).forEach { root ->
                 val onScreen = IntArray(2).also(root::getLocationOnScreen)
                 canvas.save()

@@ -245,21 +245,48 @@ enum SwiftUIResponders {
             Hooks.failed("swiftui.responders", "no AGGraphGetWeakValue or attachmentsStorage")
             return []
         }
+        var layoutChanged: String?
         let found = Mirror(reflecting: storage).children.flatMap { entry -> [AnyObject] in
             guard let geometry = unwrap(child(entry.value, "geometry")), let weak = unwrap(child(geometry, "responders")),
                   let details = child(weak, "base").flatMap({ child($0, "_details") }),
                   let seed = child(details, "seed") as? UInt32,
-                  let identifier = child(details, "identifier").flatMap({ Mirror(reflecting: $0).children.first?.value as? UInt32 })
+                  let identifier = child(details, "identifier").flatMap({ Mirror(reflecting: $0).children.first?.value as? UInt32 }),
+                  let valueType = valueType(of: weak, else: &layoutChanged)
             else { return [] }
-            // WeakAttribute<Value> is a generic struct: its metadata holds Value's metadata after the kind and the descriptor.
-            let valueType = unsafeBitCast(type(of: weak) as Any.Type, to: UnsafePointer<UnsafeRawPointer>.self)[2]
             guard let pointer = getWeakValue(UInt64(identifier) | UInt64(seed) << 32, 0, valueType) else { return [] }
             func load<Value>(_: Value.Type) -> Any { pointer.load(as: Value.self) }
             let value = _openExistential(unsafeBitCast(valueType, to: Any.Type.self), do: load)
             return Mirror(reflecting: value).children.compactMap { $0.value as? [AnyObject] }.flatMap { $0 }
         }
-        if found.isEmpty { Hooks.failed("swiftui.responders", "a control's node held no responders") } else { Hooks.ok("swiftui.responders") }
+        if let layoutChanged {
+            Hooks.failed("swiftui.responders", layoutChanged)
+        } else if found.isEmpty {
+            Hooks.failed("swiftui.responders", "a control's node held no responders")
+        } else {
+            Hooks.ok("swiftui.responders")
+        }
         return found
+    }
+
+    /// `Value` of a `WeakAttribute<Value>`: word 2 of a generic struct's metadata is its first generic argument (Swift's
+    /// stable ABI). Taken only while the attribute is still a struct with one generic argument and word 2 names that
+    /// argument; on any other layout reading it could crash the app, so the hook fails with `why` instead.
+    private static func valueType(of weak: Any, else why: inout String?) -> UnsafeRawPointer? {
+        let attribute = type(of: weak) as Any.Type
+        let name = String(reflecting: attribute)
+        let words = unsafeBitCast(attribute, to: UnsafePointer<UnsafeRawPointer>.self)
+        let structKind: UInt = 0x200
+        guard UInt(bitPattern: words[0]) == structKind, name.hasSuffix(">"), let open = name.firstIndex(of: "<"),
+              name[..<open].hasSuffix(".WeakAttribute") else {
+            why = "the responders are no longer a WeakAttribute<Value> struct: \(name)"
+            return nil
+        }
+        let argument = name[name.index(after: open)..<name.index(before: name.endIndex)]
+        guard !argument.contains(","), String(reflecting: unsafeBitCast(words[2], to: Any.Type.self)) == argument else {
+            why = "WeakAttribute's metadata does not hold its Value where expected: \(name)"
+            return nil
+        }
+        return words[2]
     }
 
     private static func child(_ value: Any, _ label: String) -> Any? {

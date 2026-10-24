@@ -39,6 +39,7 @@ The library now serves a control endpoint with names taken from Android and iOS 
   - `time.*`, `history.files`, `history.read`: the virtual clock and the flight recorder's files.
 - Elements carry `disabled` when the platform says so. Frames carry `missed` (refreshes the app missed); nodes carry `corners` (per-corner radii), `effects` (under a filter, blend mode or mask) and, on text, `colors` and `unknownColor`.
 - `ddp doctor` prints every engine hook with its state, and fails on a failing one. docs/hooks.md lists them and the versions they were checked on.
+- Every check, `check tappable` and `explore` print a line for each hook that failed in the app run, and takes keep them in their `inspect` line. The exit code does not change.
 - Takes recorded by a check end with an `inspect` line: what the platform answered at the end (hit test, pixels).
 - iOS: `AgentDDP.send(request) { ... }` for the app's Debug network decorator, so its requests can be paused and answered.
 - New commands:
@@ -62,6 +63,7 @@ The library now serves a control endpoint with names taken from Android and iOS 
 - Android: a streamed frame could carry the flight recorder's frame number and time when the recorder stamped it before it was sent, so a 1 s `ddp read` could end after a few frames.
 - `check a11y` called a Compose control small although Compose widens its touch to 48 dp, and judged contrast against fills the recorder guessed were behind the text.
 - `check corners` called a corner bleed where `maskedCorners` or per-corner radii keep that corner square.
+- Android, with the keyboard up in a panned window (`adjustPan`): popups' frames, the screenshot, and the points `tap` and `check tappable` asked about were off by the pan, so controls read as covered by what was drawn one keyboard height above them. Frames and touches now go through the window's own place on screen.
 - `--max-output 0` printed a `[truncated ...]` note; it now prints nothing, as `explore` expects.
 - iOS: `ddp logs --follow` showed hundreds of lines a minute that the library itself causes (its own connections in `com.apple.network`, the accessibility tree it turns on in `com.apple.Accessibility`). They are left out.
 

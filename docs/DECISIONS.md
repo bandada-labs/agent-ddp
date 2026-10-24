@@ -12,6 +12,7 @@ A line leaves this file when the maintainer replaces it or when its work has lan
 
 - Every engine hook is measured: how stable its path is and whether it works, in every run, shown by `ddp doctor`. (2026-10-24, "make a hard rule too to measure each hook's instability and whether it works")
 - No reduced engine, even where hooks are fragile: a hook that breaks fails closed (unknown, silent) and shows in doctor; a reduced engine is wrong without anyone seeing it. (2026-10-24, asked "should we use a reduced engine?"; the hooks rule was the answer)
+- A failed hook is reported to the agent with every check and kept for the user in the take, not only in doctor. (2026-10-24, "i need them to report it and let the agent know it and available for the user")
 - All seven places that modeled the engine are fixed before 0.2.0 ships. (2026-10-24, "fix them first and everything should be working fine")
 
 ## What needs the maintainer's yes

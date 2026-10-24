@@ -355,6 +355,14 @@ with tempfile.TemporaryDirectory() as directory:
     assert "contrast not judged (covered, more than one color, or over an image or a gradient): onGradient" in a11y, a11y
     assert "LOW CONTRAST faint: 1.6:1, #CCCCCCFF on #FFFFFFFF, needs 4.5:1" in a11y and "dark:" not in a11y, a11y
     assert "LOW CONTRAST Tiny: 2.3:1, #AAAAAAFF on #FFFFFFFF, needs 3:1 at least (its size is estimated)" in a11y, a11y
+    # A hook that failed in the app run is said with every check, and is not a problem: the exit code stays.
+    inspect["hooks"] = [{"name": "swiftui.responders", "kind": "internal", "status": "failing", "error": "no responders",
+                         "feeds": "whose gesture takes a touch"}]
+    take.write_text("\n".join(json.dumps(line) for line in [header, frame_line, inspect]))
+    corners = ddp_in(directory, "check", "corners", "--file", "a11y.jsonl")
+    assert corners.returncode == 0, corners.stdout
+    assert ("hook swiftui.responders (internal) failing: no responders; not judged: whose gesture takes a touch "
+            "(ddp doctor)") in corners.stdout, corners.stdout
 
     page = ddp_in(directory, "view", "page.html", "--file", "a11y.jsonl")
     assert page.returncode == 0 and '"tiny"' in Path(directory, "page.html").read_text(), page.stderr

@@ -341,10 +341,13 @@ pub fn recording_for(args: &Args) -> Result<Recording> {
 
 /// For the checks: like [recording_for], with the platform's answers at the end of a live take.
 pub fn recording_for_checks(args: &Args) -> Result<Recording> {
-    if live_session(args).is_some() {
-        return record_live_inspected(args);
-    }
-    load(args.file.as_deref().unwrap_or(&ctx().last))
+    let recording = if live_session(args).is_some() {
+        record_live_inspected(args)?
+    } else {
+        load(args.file.as_deref().unwrap_or(&ctx().last))?
+    };
+    crate::inspect::say_hooks(recording.inspect["hooks"].as_array().map(Vec::as_slice).unwrap_or_default());
+    Ok(recording)
 }
 
 const WATCH_FIELDS: [&str; 11] =

@@ -678,6 +678,9 @@ pub fn explore(args: &mut Args) -> Result<i32> {
     }
     // A control no touch reaches would only show "changed nothing"; say why instead of tapping it.
     let unreachable = crate::hit::unreachable(&session)?;
+    let mut control = open(&session)?;
+    crate::inspect::say_hooks(&crate::inspect::troubled_hooks(&mut control));
+    control.close();
     for (key, why) in &unreachable {
         if tappable.contains(key) {
             say!("{key}: not tapped, {why}");

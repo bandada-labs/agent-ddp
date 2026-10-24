@@ -3,9 +3,11 @@
 //! render server (`screen.pixels`) between two frames. Only what is the same in both frames is judged from the
 //! pixels. The answer is kept in the take as an `inspect` line, so the checks read it offline too.
 use crate::checks::{corner_breaks, inside_rounded, radii};
+use crate::control::Control;
 use crate::live::open;
 use crate::model::{element_key, rect, tolerance_for, Frame};
 use crate::py::{self, f};
+use crate::say;
 use crate::state::{Result, OWNER_TOLERANCE_PT};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -46,8 +48,12 @@ pub fn inspect(session: &Value) -> Result<Value> {
     }
     let pixels = control.call("screen.pixels", json!({"rects": rects}));
     let after = control.call("screen.frame", json!({}))?;
+    let hooks = troubled_hooks(&mut control);
     control.close();
     let mut line = json!({"type": "inspect", "minimum": minimum, "hit": hit["elements"], "frame": before});
+    if !hooks.is_empty() {
+        line["hooks"] = json!(hooks);
+    }
     let Ok(pixels) = pixels else {
         line["pixels"] = json!("the app does not answer screen.pixels");
         return Ok(line);
@@ -60,6 +66,34 @@ pub fn inspect(session: &Value) -> Result<Value> {
     line["texts"] = json!(judge_texts(&frame, &texts, &screen, inks.as_deref(), &moving));
     line["corners"] = json!(judge_corners(&places, &screen, &moving));
     Ok(line)
+}
+
+/// The hooks that failed at least once in this app run (`app.hooks`): what the take's answers could not know.
+/// Empty from a library before `app.hooks`.
+pub fn troubled_hooks(control: &mut Control) -> Vec<Value> {
+    let Ok(answer) = control.call("app.hooks", json!({})) else { return Vec::new() };
+    answer["hooks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|hook| hook["status"] == "failing" || hook["status"] == "mixed")
+        .cloned()
+        .collect()
+}
+
+/// One line per failed hook, for the agent to pass on: not a problem in the app, an answer ddp could not get.
+pub fn say_hooks(hooks: &[Value]) {
+    for hook in hooks {
+        say!(
+            "hook {} ({}) {}: {}; not judged{}: {} (ddp doctor)",
+            py::str(&hook["name"]),
+            py::str(&hook["kind"]),
+            py::str(&hook["status"]),
+            hook.get("error").map(py::str).unwrap_or_default(),
+            if hook["status"] == "mixed" { " where it failed" } else { "" },
+            py::str(&hook["feeds"])
+        );
+    }
 }
 
 type Rgb = [i32; 3];

@@ -205,16 +205,27 @@ internal object FrameCapture {
         val decor = FrameRecorder.resumedActivity?.window?.decorView
         val capture = Capture(decor?.resources?.displayMetrics?.density ?: 1f)
         if (decor != null) {
-            val origin = IntArray(2).also(decor::getLocationOnScreen)
+            val origin = windowOrigin(decor)
             for (root in windowRoots(decor)) {
-                val onScreen = IntArray(2).also(root::getLocationOnScreen)
-                capture.windowOffset = PointF((onScreen[0] - origin[0]).toFloat(), (onScreen[1] - origin[1]).toFloat())
+                val window = windowOrigin(root)
+                capture.windowOffset = PointF((window[0] - origin[0]).toFloat(), (window[1] - origin[1]).toFloat())
                 val bounds = RectF(0f, 0f, root.width.toFloat(), root.height.toFloat())
                     .apply { offset(capture.windowOffset.x, capture.windowOffset.y) }
                 capture.walkView(root, bounds, 1f)
             }
         }
         return capture
+    }
+
+    /**
+     * Where [view]'s window sits on screen. A panned window (`adjustPan`, the keyboard up) moves its views inside the
+     * window, not the window: `getLocationOnScreen` of every view, the root's too, includes the pan, so the root's own
+     * place in its window is taken back out. Frames are in the activity window's pixels, pan included, as drawn.
+     */
+    fun windowOrigin(view: View): IntArray {
+        val onScreen = IntArray(2).also(view.rootView::getLocationOnScreen)
+        val inWindow = IntArray(2).also(view.rootView::getLocationInWindow)
+        return intArrayOf(onScreen[0] - inWindow[0], onScreen[1] - inWindow[1])
     }
 
     /**

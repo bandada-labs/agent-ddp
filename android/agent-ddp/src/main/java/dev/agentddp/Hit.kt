@@ -123,7 +123,7 @@ internal object Hit {
     /** Who takes a touch at [point] (frame pixels): the topmost touchable window under it, then down its views. */
     private fun taker(point: PointF): Taker {
         val decor = FrameRecorder.resumedActivity?.window?.decorView ?: return Taker.Nothing
-        val origin = IntArray(2).also(decor::getLocationOnScreen)
+        val origin = FrameCapture.windowOrigin(decor)
         val screen = PointF(point.x + origin[0], point.y + origin[1])
         val root = FrameCapture.windowRoots(decor).lastOrNull { root ->
             val flags = (root.layoutParams as? WindowManager.LayoutParams)?.flags ?: 0
@@ -221,7 +221,7 @@ internal object Hit {
     /** A parent that takes a touch at [point] (frame pixels) before the element sees it, described; null when none does. */
     private fun parentTaking(target: Target, point: PointF): String? {
         val decor = FrameRecorder.resumedActivity?.window?.decorView ?: return null
-        val origin = IntArray(2).also(decor::getLocationOnScreen)
+        val origin = FrameCapture.windowOrigin(decor)
         val screen = PointF(point.x + origin[0], point.y + origin[1])
         interceptingParent(target.view, screen)?.let { return "${described(it)} (onInterceptTouchEvent)" }
         val taker = taker(point) as? Taker.OfCompose ?: return null
@@ -286,7 +286,7 @@ internal object Hit {
     private fun blocker(target: Target, point: PointF): Pair<String, String?> {
         if (target.layout == null) {
             val decor = FrameRecorder.resumedActivity?.window?.decorView
-            val origin = IntArray(2).also { decor?.getLocationOnScreen(it) }
+            val origin = decor?.let(FrameCapture::windowOrigin) ?: IntArray(2)
             val screen = PointF(point.x + origin[0], point.y + origin[1])
             generateSequence(target.view) { it.parent as? View }.forEach { ancestor ->
                 if (ancestor.visibility != View.VISIBLE) return "untouchable" to "${ancestor.javaClass.simpleName} not visible"

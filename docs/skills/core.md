@@ -92,7 +92,7 @@ ddp check all --file .ddp/last.jsonl
 
 ## Checks
 
-Every check exits 1 when it finds a problem, so any of them works as a gate in a script or CI. Checks report only what the platform itself answers; a take without its answers (history, an old file) says `not judged`. `ddp doctor` shows every engine hook the answers need and whether it works on this OS.
+Every check exits 1 when it finds a problem, so any of them works as a gate in a script or CI. Checks report only what the platform itself answers; a take without its answers (history, an old file) says `not judged`. `ddp doctor` shows every engine hook the answers need and whether it works on this OS. A line `hook <name> ... failing` (or `mixed`) is not a problem in the app: those answers are unknown on this OS. Tell the user, with the OS version, and do not guess them.
 
 ```
 ddp check overlap      # text something is drawn over, from the app's own pixels

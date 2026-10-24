@@ -85,7 +85,9 @@ pub fn check_tappable(args: &Args) -> Result<usize> {
     let session = require_session()?;
     let mut control = open(&session)?;
     let hits = control.call("screen.hit", json!({}))?;
+    let hooks = crate::inspect::troubled_hooks(&mut control);
     control.close();
+    crate::inspect::say_hooks(&hooks);
     let hits = hits["elements"].as_array().cloned().unwrap_or_default();
     let mut problems = 0;
     for hit in &hits {

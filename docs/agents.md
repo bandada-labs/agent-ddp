@@ -183,6 +183,12 @@ ok   hook swiftui.responders (internal): answered 7 times
 ok   hook viewGroup.touchOrder (hidden): the platform's rule answers instead, 508 times (blocked; drawing order, then Z)
 ```
 
+Every check, `check tappable` and `explore` also print one line per hook that failed in this app run, and a take keeps them in its `inspect` line. It is not a problem in the app and does not change the exit code: it says which answers ddp could not get. Tell the user, with the OS version, and run `ddp doctor`.
+
+```
+hook swiftui.responders (internal) failing: no AGGraphGetWeakValue or attachmentsStorage; not judged: whose gesture takes a touch (AGGraphGetWeakValue) (ddp doctor)
+```
+
 ### check jank, settle
 
 `check jank` reports refreshes the app missed, as the libraries count them from the platform's own frame times (`CADisplayLink` on iOS, Choreographer and the display's refresh rate on Android), with their own capture time left out: a refresh counts only when the app's own work took longer than it. History takes are not judged. `check settle` reports elements still changing in the last 500 ms (`NOT SETTLED`: a loop, or a take that ended too early) and positions that shake by 1 pt or less (`JITTER`). It needs a take of 1 s or more.
@@ -249,7 +255,7 @@ A drawn node belongs to the element whose subtree drew it when the recorder know
 - Physical iOS devices: the CLI uses `simctl`.
 - `history`, Android: it is woken by the activity window only, so a dialog that animates while the screen under it is still shows up at the next draw of the screen. iOS: animations Core Animation runs by itself (`UIView.animate`) do not wake the app, so only their start and end are kept; SwiftUI and display-link animations are kept frame by frame.
 - The single shapes inside a SwiftUI `Canvas` or `drawingGroup`: one bitmap, read by its pixels.
-- System UI outside the app: iOS alerts like "Open in ...?", Android system dialogs. Pixel checks read only the app's own windows.
+- System UI outside the app: iOS alerts like "Open in ...?", Android system dialogs, the keyboard. Pixel checks read only the app's own windows, and the hit test counts a control under the keyboard as reaching.
 - Text that is only partly covered; a corner bleed in the middle of an animation (pixel checks look at the end of the take); Android popups' pixels before API 34.
 - Compose `drawWithCache` and `drawWithContent`, text drawn inside a Canvas.
 - A parent that takes a touch only at its release or after a move, and on iOS any gesture that wins over the control once the touch is under way (a parent's `UITapGestureRecognizer`, a SwiftUI `highPriorityGesture`): UIKit decides that only during a real touch, so `screen.hit` says the touch reaches the control and `tap` shows it as `nothing changed`. Android: a View on top whose own code decides whether it takes a touch (a touch listener, a TouchDelegate, its own `onTouchEvent`, such as most Material widgets) is unknown and not reported.

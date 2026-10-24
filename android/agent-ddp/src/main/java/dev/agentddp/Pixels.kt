@@ -30,9 +30,10 @@ internal object Pixels {
     fun regions(rects: List<RectF>): JSONObject {
         val (roots, width, height) = onMain {
             val decor = FrameRecorder.resumedActivity?.window?.decorView ?: return@onMain Triple(emptyList<Root>(), 0, 0)
-            val origin = IntArray(2).also(decor::getLocationOnScreen)
+            val origin = FrameCapture.windowOrigin(decor)
             val roots = FrameCapture.windowRoots(decor).map { root ->
-                val at = IntArray(2).also(root::getLocationOnScreen)
+                // A window's surface is copied as drawn, pan included: it goes where the window is.
+                val at = FrameCapture.windowOrigin(root)
                 Root(root, at[0] - origin[0], at[1] - origin[1], Hidden.windowOf(root))
             }
             Triple(roots, decor.width, decor.height)
