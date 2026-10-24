@@ -2,9 +2,9 @@
 
 Changes that users or agents will notice. Before 1.0, a minor version may change the protocol or the output; those changes are marked.
 
-## 0.2.0 (not released yet)
+## 0.2.0 (2026-10-24)
 
-The library now serves a control endpoint with names taken from Android and iOS (ADR 0008), and the CLI uses only that. Agents can act on the app, not only read it: touch and type, answer or fail its requests, edit its preferences and run commands the app adds in Debug. `ddp tap` checks first that a touch reaches the element. Every check now reports only what the platform itself answers (its hit test, the pixels of the app's own windows, its frame times), and says `not judged` where it cannot.
+The library now serves a control endpoint with names taken from Android and iOS (ADR 0008), and the CLI uses only that. Agents can act on the app, not only read it: touch and type, answer or fail its requests, edit its preferences and run commands the app adds in Debug. `ddp tap` checks first that a touch reaches the element. Every check now reports only what the platform itself answers (its hit test, the pixels of the app's own windows, its frame times), and says `not judged` where it cannot. The engine pieces it reaches outside public API were checked on the iOS 26.5 and 27.0 simulators and on Android API 29, 33 and 35 emulators (docs/hooks.md).
 
 ### Upgrading
 
