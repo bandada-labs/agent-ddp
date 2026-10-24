@@ -31,7 +31,9 @@ Coordinates are window coordinates in the platform's unit, the same as in frames
 | `screen.watch` | `frames`: number, 0 for no limit | `screen.stream` events: the `header`, `frame` and `end` lines of a recording, one frame per drawn frame. On Android a client that falls 64 frames behind ends the stream |
 | `screen.unwatch` | | The stream ends with its `end` line |
 | `screen.value` | `id`: element name, `path` | `path`, `value`: one property, read-only. iOS: `element.<key path>` or `layer.<key path>` (presentation values, so mid-animation). Android: `<modifier>.<property>` (`border.width`) or `semantics.<Key>` on the Compose node with that test tag or text |
-| `screen.hit` | `id`: element name; none for every element with `tap` | `elements`: each element, as in a `frame`, plus `points` (how many of 9 sample points a touch reaches, center first), `point` (the first such point), and when the center misses: `reason` (`disabled`, `covered`, `untouchable`, `outside`, `intercepted`) and `by` (what takes the touch, such as `TapGesture`, `pointerInput`, a view's id or class). `intercepted` (Android): the touch reaches the element but a parent takes it on its way down; `points` is 0. Nothing is touched. iOS asks UIKit's `hitTest` and, in SwiftUI content, the hosting view's gesture hit test (private API); which gesture wins during a touch is UIKit's call at touch time and is not reported; Android follows View dispatch and calls Compose's `LayoutNode.hitTest` (internal, by reflection), then asks each parent's `onInterceptTouchEvent` and Compose Initial pass with a press and a cancel. A parent that takes only the release is not seen |
+| `screen.hit` | `id`: element name; none for every element with `tap`. `touch`: the smallest touch size in the frame's unit (0: not measured) | `elements`: each element, as in a `frame`, plus `points` (how many of 9 sample points a touch reaches, center first), `point` (the first such point), `reach` (`[width, height]` a touch reaches through its center, when under `touch` either way), and when the center misses: `reason` (`disabled`, `covered`, `untouchable`, `outside`, `intercepted`) and `by` (what takes the touch, such as `TapGesture`, `pointerInput`, a view's id or class). `intercepted` (Android): the touch reaches the element but a parent takes it on its way down; `points` is 0. Nothing is touched. iOS asks UIKit's `hitTest` and, in SwiftUI content, the hosting view's gesture hit test with UIKit's touch radius (private API); the winning gesture is the control's when SwiftUI's responders say so; which gesture wins during a touch is UIKit's call at touch time and is not reported. Android walks View dispatch with ViewGroup's own methods (hidden API) and calls Compose's `LayoutNode.hitTest` (internal, by reflection), then asks each parent's `onInterceptTouchEvent` and Compose Initial pass with a press and a cancel. A point the platform cannot decide counts as reaching. A parent that takes only the release is not seen. Android also answers `origin`, the activity window's place on the screen |
+| `screen.pixels` | `rects`: `[[x, y, width, height], ...]` in the frame's unit | `scale` (pixels per unit) and `regions`: per rectangle `x`, `y`, `width`, `height` in pixels and `rgba` (base64, sRGB), or `missing` with why. Only the app's own windows, as composited: `drawHierarchy` on iOS, `PixelCopy` on Android (any window from API 34, before it the windows with a `Window` object). iOS also answers `texts`: per text layer its `frame` and the screen's colors at its ink (`ink`) and clear (`clear`) points, from the layer's own alpha |
+| `app.hooks` | | `hooks`: every engine piece the library reaches outside public API, with `kind` (`private`, `hidden`, `internal`), `feeds` (what depends on it), `status` (`ok`, `fallback`, `mixed`, `failing`, `unused`), the counts `ok`, `failed`, `fallback`, and the last `error` |
 | `input.touch` | `phase` down, move or up; `x`, `y` | One finger, delivered as the system delivers it: an IOHIDEvent handed to UIKit (private API) on iOS, a `MotionEvent` to the window under the point on Android. Gesture recognizers, SwiftUI and Compose see a real finger. Scroll with down, moves, up |
 | `input.type` | `text` | Types into the focused field as the keyboard does. Nothing happens with no field focused |
 | `input.key` | `key`: `Enter`, `Tab`, `Backspace` | Enter in a single-line field runs its action (Done, Search) |
@@ -68,7 +70,7 @@ The rest comes in the order in [STATUS.md](STATUS.md).
 {"type": "header", "protocol": 2, "platform": "ios", "unit": "pt", "scale": 3, "frames": 240, "startedAt": 1761210000000}
 ```
 
-`unit` is `pt` on iOS and `px` on Android. `scale` converts between them. `startedAt` is ms since 1970.
+`unit` is `pt` on iOS and `px` on Android. `scale` converts between them. `startedAt` is ms since 1970. `missed: true` says the frames count the refreshes the app missed (`missed` on a frame).
 
 ### frame
 
@@ -79,7 +81,7 @@ The rest comes in the order in [STATUS.md](STATUS.md).
             "border": {"width": 2, "color": "#RRGGBBAA"}, "corner": 12}]}
 ```
 
-- `i` is the frame index, `t` the ms since the first frame.
+- `i` is the frame index, `t` the ms since the first frame. `missed`: refreshes the main thread missed before this frame by the platform's own frame times (`CADisplayLink`, Choreographer), counting only what the app's work alone took, without the library's capture.
 - `elements` are what a person would tap or read: accessibility elements on iOS, semantics nodes and Views with a test tag, text or content description on Android.
 - `nodes` are what was drawn, in paint order. A higher `z` paints over a lower one. Only nodes that draw something are listed.
 - Coordinates are window coordinates in `unit`.
@@ -93,6 +95,10 @@ The full list of element and node fields, and which platform fills each one, is 
 ```
 
 The capture stats are the main thread time the library spent per frame.
+
+### inspect
+
+Written by the CLI, not the library: after the frames of a take a check recorded live, what the platform answered at its end (`screen.hit` with `touch`, `screen.pixels`, two `screen.frame`). `hit`, `frame`, `minimum`, and per text and per corner place what the app's pixels show: `texts` (iOS: `ink`, `clear` and their shares; Android: `colors`, `seen`, `background`, `uniform`) and `corners` (`color`, `near`, `screen`, `behind`). What changed between the two frames is left out. The checks read only this line for overlap, corners, touch size and contrast.
 
 ### request
 

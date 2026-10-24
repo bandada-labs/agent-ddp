@@ -8,13 +8,13 @@ Works only in Debug builds. Release builds contain none of it.
 
 ```
 ddp connect <sim UDID | adb serial> --app <bundle or application id>
-ddp doctor [<device> --app <id>]                  what is wrong between the device and a frame, with the fix
+ddp doctor [<device> --app <id>]                  what is wrong between the device and a frame, with the fix, and every engine hook's state
 ddp tree [-i] [-c] [--within <el>] [-d N]         what is on screen now, per element, with @refs
 ddp find text <part of a label> | id <id>          elements by name, with @refs
 ddp watch <element> [--until 'border>3'] [--for 5s] [--then "<cmd>"]
 ddp get <element> [--for 2s] [--then "<cmd>"] [--from 0.5s --to 1.5s]
 ddp find --where 'kind=draw and alpha>0' [--for 2s] [--then "<cmd>"] [--between 0.5s 1.5s]
-ddp read | check overlap|corners|timeline ... [--for 2s] [--then "<cmd>"]
+ddp read | check overlap|corners|a11y|jank|all|timeline ... [--for 2s] [--then "<cmd>"]
 ddp check tappable                                 live: every control a touch does not reach, and why
 ddp record [--for 5s] [--then "<cmd>"] [--name N] saves .ddp/last.jsonl for offline queries
 ddp eval <element> <path>                          one property, read-only
@@ -87,7 +87,7 @@ The library keeps a flight recorder in the Debug build: every frame that changed
 ddp record --platform ios|android --app <id> --device <sim UDID | adb serial> [--frames 120] [--then "<cmd>"]
 ddp read [--id <element>] [--json] [--file rec.jsonl]
 ddp tree --at 1.2s | get <element> --from 1s --to 2s | find --where ... --between 1s 2s   [--file rec.jsonl]
-ddp check overlap|corners [--all-frames] | check timeline --expect cases.json   [--file rec.jsonl]
+ddp check overlap|corners|a11y|jank|settle|all | check timeline --expect cases.json   [--file rec.jsonl]
 ddp check parity --file ios.jsonl --against android.jsonl
 ddp diff ios.jsonl android.jsonl --id <element> [--ignore frame]
 ```
@@ -97,6 +97,8 @@ Without a session, `record` asks the app by Darwin notification (iOS) or broadca
 ## What the commands report
 
 Every `check` exits 1 when it finds a problem and 0 when it finds none.
+
+Two rules decide what a check may say (ARCHITECTURE.md). It reports a problem only when it is sure. And the answer comes from the platform itself, never from ddp's own model of it. Live, `check` and `explore` end each take by asking the app for those answers, between two frames (`inspect`, about half a second): its hit test for every control, with how far a touch reaches it, and the pixels its own windows show (`screen.pixels`: the render server on iOS, `PixelCopy` on Android). Only what is the same in both frames is judged from the pixels, and a system alert or notification over the app is not in them. The answers go into the take as an `inspect` line, so `--file` reads them too. A take without them (history, or a file from before 0.2.0) says `not judged` for overlap, corners, touch size, contrast and jank.
 
 ### read
 
@@ -108,11 +110,17 @@ Every `check` exits 1 when it finds a problem and 0 when it finds none.
 
 ### check overlap
 
-`check overlap` reports elements painted over by something they do not own, with 9 sample points per element and what covers them. Default is the last frame; `--all-frames` checks every frame.
+`check overlap` reports text something is drawn over, so it cannot be seen, from the app's pixels at the end of the take. iOS: the screen shows the same color where the text's own bitmap has ink as around it. Android: none of the text's colors shows anywhere in its frame. Text that is only partly covered, see-through, under a filter or blend mode, or in a text field is not judged.
+
+```
+COVERED coveredLabel: the screen shows #8E8E93FF where its text has ink and around it, so the text cannot be seen in [199, 352.33, 104.33, 20.33]
+```
+
+A control covered for touch is `check tappable`'s.
 
 ### check corners
 
-`check corners` reports draws (a hatch, a fill, a line) inside an element's rounded shape that reach past its corners and are not cut by a rounded clip. It tests line ends, 8 points round ovals, and rect corners, so a path is judged by its bounding box. Android only knows about rounded clips today (`clipRound`).
+`check corners` reports a fill, hatch or line drawn past an element's rounded corners. The recorded geometry says where to look (line ends, 8 points round ovals, rect corners, each corner with its own radius), and the app's pixels decide: the node's color must show there, and differ from what the screen shows right outside the corner. So a clip the renderer applied, or a square corner the app asked for, is never reported.
 
 ### check timeline
 
@@ -129,15 +137,19 @@ Every `check` exits 1 when it finds a problem and 0 when it finds none.
 
 ### get --curve
 
-`get <element> --curve` splits each numeric track (x, y, w, h, alpha, border, opacity) into moves and prints `from -> to over <ms> from <ms>`, plus the named timing curve that fits best (`linear`, `easeIn`, `easeOut`, `easeInOut`, `fastOutSlowIn`) or `spring (overshoot N%)`. A flash that comes back is two moves, out and back. A fit worse than 0.05 RMS says `loose fit`.
+`get <element> --curve` splits each numeric track (x, y, w, h, alpha, border, opacity) into moves and prints `from -> to over <ms> from <ms>`, plus which named curve the recorded values match (`linear`, `easeIn`, `easeOut`, `easeInOut`, `fastOutSlowIn`) and by how much, or how far it overshoots. It is a comparison with named curves, not the curve the app asked for: SwiftUI and Compose do not say which one they run. A match off by more than 5% says `matches no named curve` with the nearest one. A flash that comes back is two moves, out and back.
 
 ### check a11y
 
-`check a11y` reports controls (`tap`) smaller than 44x44 pt (iOS) or 48x48 dp (Android), using the touch area when there is one; controls with no label; and text whose contrast with the fill behind it is under WCAG AA (4.5:1, or 3:1 for text of 18 pt, or 14 pt bold). It checks every frame and reports the worst moment per element with its time, so text that turns white before its background turns dark is caught too. Text over a gradient, an image or a drawing is not judged; the check lists those elements instead of guessing.
+`check a11y` reports:
+
+- `SMALL TARGET`: a control a touch reaches over less than 44x44 pt (iOS) or 48x48 dp (Android), measured with the app's hit test from its center outward. SwiftUI hit-tests a touch with a radius (20 pt) and Compose widens small controls to 48 dp, so a small control alone is usually fine; one crowded by a neighbor is not. Controls no touch reaches, and disabled ones, are `check tappable`'s.
+- `NO LABEL`: a control the accessibility tree gives no label.
+- `LOW CONTRAST`: text under WCAG AA (4.5:1, or 3:1 for text of 18 pt, or 14 pt bold), from the app's pixels at the end of the take. iOS takes both colors from the screen, at the text's ink and around it; Android takes the text's color and the screen's background. A SwiftUI text's size is estimated, so only the 3:1 limit is used for it. Text of a disabled control is not judged, as WCAG asks. Text over an image or a gradient, in more than one color, or covered, is listed as not judged.
 
 ### tap, check tappable
 
-`tap` asks the app's own hit test (`screen.hit`) where a touch on the element would land before it touches: UIKit's `hitTest` and SwiftUI's gesture hit test on iOS, View dispatch and Compose's `hitTest` on Android, the same calls a real finger goes through. It waits up to 2 s for the element to hold still, become enabled and have a point a touch reaches (the center first, then 8 more points), then touches there and looks for a change for 1 s:
+`tap` asks the app's own hit test (`screen.hit`) where a touch on the element would land before it touches, the same calls a real finger goes through. iOS: UIKit's `hitTest`, and in SwiftUI content the gesture hit test with the radius UIKit gives a touch; whether the gesture that wins is the control's own is SwiftUI's answer too (the responders its accessibility node keeps). Android: the walk ViewGroup dispatch makes, with its own methods for order, transforms and scroll, and Compose's `hitTest`. When the platform cannot say (app code decides, or a hook does not work on that version), the point counts as reaching: nothing is reported that the platform did not decide. It waits up to 2 s for the element to hold still, become enabled and have a point a touch reaches (the center first, then 8 more points), then touches there and looks for a change for 1 s:
 
 ```
 $ ddp tap @e1
@@ -162,13 +174,22 @@ OUTSIDE trapOutside: outside its parent (UIView bounds), no point of it takes a 
 
 `PARTLY` is a control whose center is blocked while other points take a touch; `tap` uses one of those. `explore` skips the controls a touch does not reach and says why.
 
+### doctor and engine hooks
+
+Some answers need platform pieces that are not public API: SwiftUI's hit test and responders, UIKit's touch radius and touch events on iOS; hidden View members and Compose internals on Android. Each one is a hook the library counts in every run (`app.hooks`). `ddp doctor` runs the hit test once, then prints every hook: what it is (`private` or `hidden`: an OS member; `internal`: a framework's internals), how often it answered, failed, or let the platform's documented rule answer instead (`fallback`), and what depends on it. A failing hook fails doctor: the checks it feeds say nothing until it works again. [hooks.md](hooks.md) lists them with the versions they were checked on.
+
+```
+ok   hook swiftui.responders (internal): answered 7 times
+ok   hook viewGroup.touchOrder (hidden): the platform's rule answers instead, 508 times (blocked; drawing order, then Z)
+```
+
 ### check jank, settle
 
-`check jank` finds frame intervals over 3x the usual one (two or more missed refreshes) from the frame times, and prints the recorder's own capture cost next to them. `check settle` reports elements still changing in the last 500 ms (`NOT SETTLED`: a loop, or a take that ended too early) and positions that shake by 1 pt or less (`JITTER`). It needs a take of 1 s or more.
+`check jank` reports refreshes the app missed, as the libraries count them from the platform's own frame times (`CADisplayLink` on iOS, Choreographer and the display's refresh rate on Android), with their own capture time left out: a refresh counts only when the app's own work took longer than it. History takes are not judged. `check settle` reports elements still changing in the last 500 ms (`NOT SETTLED`: a loop, or a take that ended too early) and positions that shake by 1 pt or less (`JITTER`). It needs a take of 1 s or more.
 
 ### check all, baseline
 
-`check all` runs overlap, corners, jank, settle and a11y on one take, prints only problems and a summary, and exits 1 on any. `baseline save <name>` stores the last take (or `--file`) in `ddp-baselines/<name>.jsonl.gz`, next to the code so it can be committed. `check baseline --against <name>` lines the take up with it on the first change and prints `CHANGED <element> from t=...` with the first differences; `--junit <file>` also writes a JUnit report for CI.
+`check all` runs overlap, corners, jank, settle and a11y on one take, prints only problems and a summary, and exits 1 on any. Live, it records first, then asks the app for its answers (see above). `baseline save <name>` stores the last take (or `--file`) in `ddp-baselines/<name>.jsonl.gz`, next to the code so it can be committed. `check baseline --against <name>` lines the take up with it on the first change and prints `CHANGED <element> from t=...` with the first differences; `--junit <file>` also writes a JUnit report for CI.
 
 ### check parity
 
@@ -185,8 +206,7 @@ t=700ms ... border 0 -> 0.04; borderColor None -> #FF383CFF
 ...
 until met at t=950ms
 $ ddp check overlap
-COVERED coveredLabel at t=2000ms: 9/9 sample points, frame [199, 352.33, 104.33, 20.33]
-  by z=12 {"kind": "layer", "fill": "#8E8E93FF", "frame": [181.33, 347.67, 140, 30]}
+COVERED coveredLabel: the screen shows #8E8E93FF where its text has ink and around it, so the text cannot be seen in [199, 352.33, 104.33, 20.33]
 ```
 
 ## Elements and names
@@ -195,7 +215,7 @@ An element is what you would tap: an accessibility element on iOS, a semantics n
 
 On Android a clickable that merges its children (Button, FilterChip, `Modifier.clickable`) is one element with its children's text; untagged children inside it are not elements.
 
-A drawn node belongs to the smallest element whose frame holds it (4 pt tolerance). Nodes owned by no element still count as coverers. In `check overlap`, nodes of an element inside another one (a button's label) count as the outer element's own.
+A drawn node belongs to the element whose subtree drew it when the recorder knows (Android), otherwise to the smallest element whose frame holds it (4 pt tolerance). Ownership only names things in the output; no check decides a problem from it.
 
 ## Recording format (JSON lines)
 
@@ -205,15 +225,20 @@ A drawn node belongs to the smallest element whose frame holds it (4 pt toleranc
  "nodes":[{"z":5,"kind":"layer","frame":[x,y,w,h],"visible":[x,y,w,h],"fill":"#RRGGBBAA",
            "border":{"width":2,"color":"#RRGGBBAA"},"corner":12,"opacity":0.5,"clips":true,"source":"ActionBarContainer"}]}
 {"type":"end","frames":240,"averageCaptureMs":2.07,"slowestCaptureMs":4.27}
+{"type":"inspect","minimum":44,"hit":[...],"frame":{...},"texts":[...],"corners":[...]}
 ```
 
 - Coordinates are window coordinates: points on iOS, pixels on Android (`scale` converts).
 - `nodes` are in paint order, `z` 0 first; a higher `z` paints over a lower one. Only nodes that draw something are listed.
 - `kind`: `layer` (fill and/or border), `shape` (custom SwiftUI `Path` shapes), `gradient` (`gradient` holds the colors), `bitmap` (text, images, drawables), `opaque-drawing` (SwiftUI `Canvas` or `drawingGroup`: the shapes inside are gone, so `pixels` reads what it shows: `colors` (top 3 with their `share` of painted pixels), `peakAlpha`, `coverage` of its box), `draw` (Android: one shape a Compose `Canvas` or `drawBehind` drew this frame, with `op` such as `circle`, `rect`, `path`, `line`, and its fill or stroke; color alpha shows fades). Tag the Canvas with `testTag` so it is reached. `read` reports `draws`, the number of visible draw ops an element owns, so a ring that flashes shows as `draws: 1 -> 1 ... max 2 TRANSIENT`.
+- `corner` is the largest corner radius; `corners` (`[top-left, top-right, bottom-right, bottom-left]`) when they differ (iOS `maskedCorners`, Android per-corner radii).
+- `effects` when the node is under something that changes its pixels on screen: a filter, a compositing filter or a mask (iOS), a layer with its own paint, a render effect, a blend mode or a blur (Android). Pixel checks leave it out.
+- `missed` on a frame: refreshes the app missed before it, its own work alone, with the library's capture left out. The header says `"missed": true` when frames count them.
+- The `inspect` line, after the frames of a take a check recorded live: the app's hit test (`hit`, with `reach` for a control a touch reaches over less than `minimum`), the frame it was taken on, and per text and per corner place what the app's pixels show (`texts`, `corners`). The checks read only this line for overlap, corners, touch size and contrast.
 - `points` (Android `draw` lines): `[x0, y0, x1, y1]` in window coordinates. `clipRound` (Android): `[x, y, w, h, radius]` of the rounded clip around the node.
 - `shadow` (iOS): `{"radius", "opacity", "color"}` of a layer shadow, which is how SwiftUI draws `.shadow` and most glows.
 - Optional fields appear only when they apply: `visible` when clipped, `opacity` when under 1, `clips` when the node clips its children, `source` when the native view class is known.
-- `text` on a text node: `{"size", "color", "weight"}`, size in the recording's unit. Android reads it from the laid-out Compose style or the TextView; iOS from UILabel / UITextField, and for SwiftUI `Text` from its pixels every frame, sampled at 24 px a side (`"estimated": true`, size from the line height).
+- `text` on a text node: `{"size", "color", "weight"}`, size in the recording's unit; `colors` when it draws in more than one (attributed text, spans, links); `unknownColor` when another color paints over it that the recorder cannot read (Compose `BasicText` with a color producer). Android reads it from the laid-out Compose style or the TextView; iOS from UILabel / UITextField, and for SwiftUI `Text` from its pixels every frame, sampled at 24 px a side (`"estimated": true`, size from the line height).
 - `own` (Android): the index in `elements` of the element whose subtree drew the node, `-1` for none. The CLI uses it for ownership instead of geometry, so a plain box drawn over a label counts as covering it.
 - Elements: `role`, the ARIA role a browser would give it (`button`, `link`, `textbox`, `searchbox`, `checkbox`, `radio`, `switch`, `slider`, `tab`, `combobox`, `heading`, `image`, `StaticText`, `generic`), from iOS accessibility traits or the Android Compose role, actions and View class. `tap` when the element is a control (iOS button, link or adjustable trait; Android click action), and `touch` (Android) when its touch area is bigger than what it draws, such as a Material chip padded to 48 dp. `disabled` when the platform says so (iOS `notEnabled` trait, Android `Disabled` semantics or a disabled View).
 - The header carries `startedAt` (ms since 1970) so `ddp logs` can line log lines up with the take.
@@ -224,9 +249,10 @@ A drawn node belongs to the smallest element whose frame holds it (4 pt toleranc
 - Physical iOS devices: the CLI uses `simctl`.
 - `history`, Android: it is woken by the activity window only, so a dialog that animates while the screen under it is still shows up at the next draw of the screen. iOS: animations Core Animation runs by itself (`UIView.animate`) do not wake the app, so only their start and end are kept; SwiftUI and display-link animations are kept frame by frame.
 - The single shapes inside a SwiftUI `Canvas` or `drawingGroup`: one bitmap, read by its pixels.
-- System UI outside the app: iOS alerts like "Open in ...?", Android system dialogs.
+- System UI outside the app: iOS alerts like "Open in ...?", Android system dialogs. Pixel checks read only the app's own windows.
+- Text that is only partly covered; a corner bleed in the middle of an animation (pixel checks look at the end of the take); Android popups' pixels before API 34.
 - Compose `drawWithCache` and `drawWithContent`, text drawn inside a Canvas.
-- A parent that takes a touch only at its release or after a move, and on iOS any gesture that wins over the control once the touch is under way (a parent's `UITapGestureRecognizer`, a SwiftUI `highPriorityGesture`): UIKit decides that only during a real touch, so `screen.hit` says the touch reaches the control and `tap` shows it as `nothing changed`. On iOS, a cover exactly the size of a control and with the same kind of gesture reads as the control's own.
+- A parent that takes a touch only at its release or after a move, and on iOS any gesture that wins over the control once the touch is under way (a parent's `UITapGestureRecognizer`, a SwiftUI `highPriorityGesture`): UIKit decides that only during a real touch, so `screen.hit` says the touch reaches the control and `tap` shows it as `nothing changed`. Android: a View on top whose own code decides whether it takes a touch (a touch listener, a TouchDelegate, its own `onTouchEvent`, such as most Material widgets) is unknown and not reported.
 
 ## Adding it to an app (Debug only)
 

@@ -16,6 +16,7 @@ This folder is the project's memory. Anything a person or an agent needs to know
 | --- | --- |
 | The wire format between the library and a client | [protocol.md](protocol.md) |
 | Every command, its output and the recording format | [agents.md](agents.md) |
+| The private, hidden and internal platform pieces the libraries use, and the versions they were checked on | [hooks.md](hooks.md) |
 | The guides `ddp skills` prints to agents | [skills/](skills) |
 | What changed in each release | [../CHANGELOG.md](../CHANGELOG.md) |
 | The dated history of every maintainer decision | [decisions-log.md](decisions-log.md) |

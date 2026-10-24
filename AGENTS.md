@@ -4,6 +4,7 @@ This file is for agents that change agent-ddp itself. To use ddp on an app, run 
 
 - Zero false positives is the hard rule, above everything else: no check or refusal reports a problem it is not sure of. Unsure means silent (see ARCHITECTURE.md).
 - The platform engine is the only source of truth, the second hard rule: what ddp reports comes from UIKit, SwiftUI, Core Animation, View dispatch or Compose answering, never from ddp's own model of them. When the engine cannot answer without a real action, do not guess (see ARCHITECTURE.md).
+- Every engine hook is measured, the third hard rule: a private, hidden or internal platform piece goes through `Hooks` with its kind, is counted when it answers, fails or falls back, shows in `ddp doctor`, and is listed in docs/hooks.md. A failing hook means unknown, never a problem (see ARCHITECTURE.md).
 - Start with [docs/README.md](docs/README.md): the read order, the project status, the maintainer's standing decisions and the ADRs. Follow decisions in `docs/DECISIONS.md` without asking again.
 - Nothing leaves the machine without the maintainer's yes: no push, tag, release or publish.
 - Read [ARCHITECTURE.md](ARCHITECTURE.md) before a change. Its rules are not optional: Debug only, read-only library, cheap main thread, local endpoint, one wire format, no daemon, stable output.

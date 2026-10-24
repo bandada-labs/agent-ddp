@@ -275,7 +275,7 @@ enum SwiftUIResponders {
     }
 }
 /// The radius UIKit gives SwiftUI's hit test for a touch (`_UIHitTestContext contextWithPoint:radius:event:`, private).
-/// It is UIKit's own value, read from its call the first time the app gets a touch; before that, 20 pt, what iOS 26
+/// It is UIKit's own value, read from its call the first time the app gets a touch; before that, 20 pt, what iOS 27
 /// passes for every touch whatever the finger's size. The method is wrapped once and calls through unchanged.
 enum TouchRadius {
     private(set) static var points: CGFloat = 20

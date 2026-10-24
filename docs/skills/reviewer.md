@@ -51,8 +51,8 @@ Each live command records first and leaves `.ddp/last.jsonl`. Add `--file` to as
 ## 5. Run the checks
 
 ```
-ddp check overlap --all-frames --file .ddp/last.jsonl    # something drawn over a control
-ddp check corners --all-frames --file .ddp/last.jsonl    # a fill or hatch past rounded corners
+ddp check overlap --for 4s --then "agent-device press id=start"   # text something is drawn over, at the end
+ddp check corners --file .ddp/last.jsonl                 # a fill or hatch past rounded corners
 ddp check timeline --expect cases.json --for 4s --then "agent-device press id=start"
 ```
 

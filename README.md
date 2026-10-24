@@ -81,9 +81,10 @@ Checks that exit 1 on a problem, so the same command works as a gate in CI:
 
 ```
 $ ddp check all
-COVERED coveredLabel at t=5050ms: 9/9 sample points, frame [199, 352.33, 104.33, 20.33]
-  by z=12 {"kind": "layer", "fill": "#8E8E93FF", "frame": [181.33, 347.67, 140, 30]}
-check all over 300 frames: overlap 1 (ran overlap, corners, jank, settle, a11y)
+COVERED coveredLabel: the screen shows #8E8E93FF where its text has ink and around it, so the text cannot be seen in [199, 352.33, 104.33, 20.33]
+SMALL TARGET smallTarget: a touch reaches it over 34x43, under 44x44
+LOW CONTRAST faintText: 1.6:1, #CCCCCCFF on #FFFFFFFF, needs 3:1 at least (its size is estimated)
+check all over 61 frames: overlap 1, a11y 2 (ran overlap, corners, jank, settle, a11y)
 ```
 
 ## What it does today
@@ -91,7 +92,7 @@ check all over 300 frames: overlap 1 (ran overlap, corners, jank, settle, a11y)
 - Reads the screen per element: frame, fill, border, corner radius, opacity, clipping, text style and what covers it.
 - Records takes frame by frame as JSON lines, and summarizes each element's tracks as sparklines and easing curves.
 - Watches a value until a condition, waits for an element or for the screen to settle, and pauses or steps the app's time.
-- Checks: overlap, corners past their radius, jank, animations that never settle, accessibility (touch targets, labels, contrast), an expected timeline, iOS vs Android parity and a saved baseline.
+- Checks: covered text, corners past their radius, jank, animations that never settle, accessibility (touch targets, labels, contrast), an expected timeline, iOS vs Android parity and a saved baseline. A check reports a problem only when the platform itself says so: its hit test, the pixels of the app's own windows, its frame times. What it cannot tell, it does not report.
 - Taps, deep links, appearance, text size, reduce motion and locale. Logs and network requests from the take, secrets redacted.
 - Keeps the last 15 minutes inside the app: every change, tap and screen. `ddp history` shows them, `ddp history at <time>` turns one moment into a take to check.
 - `explore` taps every control on a screen and runs every check after each tap.

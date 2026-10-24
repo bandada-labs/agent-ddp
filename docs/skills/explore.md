@@ -49,4 +49,4 @@ Set things back when you are done.
 
 ## 5. Report
 
-One finding per line: element, what is wrong, the take to reproduce it. For example: "`animatedButton`: text is white on a white fill for the first 300 ms of the tap animation (LOW CONTRAST 1.0:1), take explore-animatedButton".
+One finding per line: element, what is wrong, the take to reproduce it. For example: "`faintText`: light gray on white (LOW CONTRAST 1.6:1), take explore-animatedButton".

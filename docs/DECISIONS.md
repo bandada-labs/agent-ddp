@@ -10,6 +10,10 @@ A line leaves this file when the maintainer replaces it or when its work has lan
 
 - The platform engine is the only source of truth. ddp reports what UIKit, SwiftUI, Core Animation, View dispatch or Compose answer, and never rebuilds a part of them with its own rules (a "reduced engine"). What the engine cannot answer without a real action is not guessed. (2026-10-24, "make that a hard rule too, we need reliability and certainty against the engine being used, it is our source of trust")
 
+- Every engine hook is measured: how stable its path is and whether it works, in every run, shown by `ddp doctor`. (2026-10-24, "make a hard rule too to measure each hook's instability and whether it works")
+- No reduced engine, even where hooks are fragile: a hook that breaks fails closed (unknown, silent) and shows in doctor; a reduced engine is wrong without anyone seeing it. (2026-10-24, asked "should we use a reduced engine?"; the hooks rule was the answer)
+- All seven places that modeled the engine are fixed before 0.2.0 ships. (2026-10-24, "fix them first and everything should be working fine")
+
 ## What needs the maintainer's yes
 
 - Anything that leaves the machine: pushing, tagging, releasing, publishing to npm, JitPack or anywhere else, opening issues or pull requests outside the repo. (2026-10-23, "we publish whenever I say, it doesn't have to be all the time")

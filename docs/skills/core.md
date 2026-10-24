@@ -92,16 +92,16 @@ ddp check all --file .ddp/last.jsonl
 
 ## Checks
 
-Every check exits 1 when it finds a problem, so any of them works as a gate in a script or CI.
+Every check exits 1 when it finds a problem, so any of them works as a gate in a script or CI. Checks report only what the platform itself answers; a take without its answers (history, an old file) says `not judged`. `ddp doctor` shows every engine hook the answers need and whether it works on this OS.
 
 ```
-ddp check overlap      # something drawn over a control
-ddp check corners      # a fill or hatch past rounded corners
+ddp check overlap      # text something is drawn over, from the app's own pixels
+ddp check corners      # a fill or hatch past rounded corners, confirmed by the pixels
 ddp check timeline --expect cases.json   # MISSING / LATE / EARLY / SHOWN against an expected timeline
 ddp check parity --file ios.jsonl --against android.jsonl
-ddp check jank         # missed refreshes: hitches with their time and length
+ddp check jank         # refreshes the app missed, from the platform's frame times
 ddp check settle       # still moving at the end (a loop?) or shaking by about 1 pt
-ddp check a11y         # small touch targets, controls with no label, low text contrast
+ddp check a11y         # touch targets (the app's hit test), labels, contrast (the app's pixels)
 ddp check all          # overlap, corners, jank, settle and a11y over one take, problems only
 ddp baseline save before            # keep the take in ddp-baselines/ (commit it)
 ddp check baseline --against before [--junit report.xml]   # what changed since, per element
