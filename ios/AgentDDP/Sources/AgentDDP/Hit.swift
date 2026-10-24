@@ -218,17 +218,22 @@ enum Hit {
 /// Read with `Mirror` and `AGGraphGetWeakValue`, the call SwiftUI's `WeakAttribute.value` makes. Empty or nil when a
 /// SwiftUI version stores them differently; the caller then does not know.
 enum SwiftUIResponders {
+    /// iOS 26 keeps the responder on the container (`ViewResponderGestureContainer`); iOS 27 keeps it in its `base`.
     static func winner(of container: NSObject) -> AnyObject? {
-        guard let ivar = class_getInstanceVariable(object_getClass(container), "base"),
-              let pointer = UnsafeRawPointer(Unmanaged.passUnretained(container).toOpaque())
-                .advanced(by: ivar_getOffset(ivar)).load(as: UnsafeRawPointer?.self),
-              let responder = unwrap(child(Unmanaged<AnyObject>.fromOpaque(pointer).takeUnretainedValue(), "responder"))
+        guard let responder = unwrap(child(container, "responder")) ?? base(of: container).flatMap({ unwrap(child($0, "responder")) })
         else {
             Hooks.failed("swiftui.gestureWinner", "no base.responder on the gesture container")
             return nil
         }
         Hooks.ok("swiftui.gestureWinner")
         return responder as AnyObject
+    }
+
+    private static func base(of container: NSObject) -> AnyObject? {
+        guard let ivar = class_getInstanceVariable(object_getClass(container), "base"),
+              let pointer = UnsafeRawPointer(Unmanaged.passUnretained(container).toOpaque())
+                .advanced(by: ivar_getOffset(ivar)).load(as: UnsafeRawPointer?.self) else { return nil }
+        return Unmanaged<AnyObject>.fromOpaque(pointer).takeUnretainedValue()
     }
 
     static func selfAndParents(_ responder: AnyObject) -> [AnyObject] {
@@ -329,3 +334,4 @@ enum TouchRadius {
     private static let selector = NSSelectorFromString("contextWithPoint:radius:event:")
 }
 #endif
+

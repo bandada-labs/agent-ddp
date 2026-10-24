@@ -8,12 +8,12 @@ Kinds: `private` (an Apple symbol, class or selector without a public header), `
 
 | Hook | Kind | What depends on it | When it fails | Checked on |
 | --- | --- | --- | --- | --- |
-| `accessibility.automation` (`_AXSSetAutomationEnabled`) | private | SwiftUI elements at all | no SwiftUI elements; doctor fails on 0 elements | iOS 27.0 simulator |
-| `swiftui.hitTest` (`_UIHitTestContext`, `_hitTestWithContext:`) | private | tap, check tappable, touch size in SwiftUI | points in SwiftUI content are unknown | iOS 27.0 simulator |
-| `swiftui.gestureWinner` (gesture container `base.responder`) | internal | whose gesture takes a touch | a SwiftUI gesture never counts as covering | iOS 27.0 simulator |
-| `swiftui.responders` (accessibility node geometry, `AGGraphGetWeakValue`) | internal | whose gesture takes a touch | as above; it also fails, instead of reading memory, when the attribute is no longer a one-argument `WeakAttribute` struct whose metadata names its `Value` | iOS 27.0 simulator |
-| `uikit.touchRadius` (`contextWithPoint:radius:event:`) | private | the radius SwiftUI hit-tests a touch with | 20 pt, what iOS 27 gives every touch | iOS 27.0 simulator |
-| `input.hid` (IOHIDEvent functions, `_enqueueHIDEvent:`, `_contextId`) | private | tap, type, press, input.touch | those commands fail with the missing name | iOS 27.0 simulator |
+| `accessibility.automation` (`_AXSSetAutomationEnabled`) | private | SwiftUI elements at all | no SwiftUI elements; doctor fails on 0 elements | iOS 26.5 and 27.0 simulators |
+| `swiftui.hitTest` (`_UIHitTestContext`, `_hitTestWithContext:`) | private | tap, check tappable, touch size in SwiftUI | points in SwiftUI content are unknown | iOS 26.5 and 27.0 simulators |
+| `swiftui.gestureWinner` (gesture container `responder`, iOS 27 `base.responder`) | internal | whose gesture takes a touch | a SwiftUI gesture never counts as covering | iOS 26.5 and 27.0 simulators |
+| `swiftui.responders` (accessibility node geometry, `AGGraphGetWeakValue`) | internal | whose gesture takes a touch | as above; it also fails, instead of reading memory, when the attribute is no longer a one-argument `WeakAttribute` struct whose metadata names its `Value` | iOS 26.5 and 27.0 simulators |
+| `uikit.touchRadius` (`contextWithPoint:radius:event:`) | private | the radius SwiftUI hit-tests a touch with | 20 pt, what iOS 27 gives every touch | iOS 26.5 and 27.0 simulators |
+| `input.hid` (IOHIDEvent functions, `_enqueueHIDEvent:`, `_contextId`) | private | tap, type, press, input.touch | those commands fail with the missing name | iOS 26.5 and 27.0 simulators |
 
 ## Android
 
