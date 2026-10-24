@@ -68,6 +68,13 @@ Docs and guides are read by agents and by people whose first language is not Eng
 
 Maintainers release by pushing a `vX.Y.Z` tag. The release workflow builds the CLI for macOS, Linux and Windows, creates the GitHub release and publishes `agent-ddp` to npm with provenance. JitPack and SwiftPM pick up the same tag. Before tagging, bump the version in `cli/Cargo.toml`, `npm/package.json` and the install lines in `README.md` and `docs/`, and move "Unreleased" in the changelog under the new version.
 
+Before tagging, also run the hook matrix on every OS version in [docs/hooks.md](docs/hooks.md), one simulator or emulator at a time, and update its "Checked on" column. It builds the sample app, starts it fresh, and needs `ddp doctor` to show no failing hook and the checks to report every trap in the sample and nothing else:
+
+```bash
+python3 samples/hook_matrix.py ios <simulator UDID>
+python3 samples/hook_matrix.py android <emulator serial>
+```
+
 ## License
 
 By contributing you agree that your work is released under the [MIT license](LICENSE).
