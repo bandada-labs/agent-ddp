@@ -79,7 +79,7 @@ final class ControlTests: XCTestCase {
         session.receive(#"{"id":1,"method":"net.intercept","params":{"urls":["*/items\\?*"]}}"#)
         var request = URLRequest(url: URL(string: "http://127.0.0.1/items?page=1")!)
         request.setValue("Bearer real", forHTTPHeaderField: "Authorization")
-        let sent = Task {
+        let sent = Task { [request] in
             try await AgentDDP.send(request) { sent in
                 (Data(), HTTPURLResponse(url: sent.url!, statusCode: 200, httpVersion: nil, headerFields: [
                     "X-Authorization": sent.value(forHTTPHeaderField: "Authorization") ?? "",
