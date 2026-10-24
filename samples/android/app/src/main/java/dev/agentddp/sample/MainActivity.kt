@@ -211,6 +211,18 @@ fun SampleScreen(initialAction: String = "none") {
                     }, Modifier.size(120.dp, 48.dp))
                 }
             }
+            item {
+                // A parent that keeps every touch for itself (onInterceptTouchEvent), as a "busy" overlay can.
+                AndroidView({ context ->
+                    BlockingLayout(context).apply {
+                        addView(android.widget.Button(context).apply {
+                            text = "Blocked"
+                            id = R.id.trapIntercepted
+                            setOnClickListener { lastAction = "intercepted" }
+                        }, FrameLayout.LayoutParams(dp(context, 110), dp(context, 48)))
+                    }
+                }, Modifier.padding(horizontal = 8.dp).size(110.dp, 48.dp))
+            }
             item { Text("Last action: $lastAction", Modifier.padding(16.dp)) }
             item {
                 // For `Input` typing: Enter submits and shows the text as the last action.
@@ -228,6 +240,10 @@ fun SampleScreen(initialAction: String = "none") {
             }
         }
     }
+}
+
+class BlockingLayout(context: Context) : FrameLayout(context) {
+    override fun onInterceptTouchEvent(event: android.view.MotionEvent) = true
 }
 
 private fun dp(context: Context, value: Int) = (value * context.resources.displayMetrics.density).toInt()

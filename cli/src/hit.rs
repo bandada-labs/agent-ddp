@@ -131,6 +131,7 @@ fn detail(hit: &Value) -> String {
         "disabled" => "disabled".into(),
         "covered" => format!("covered by {}", if by.is_empty() { "another view" } else { by }),
         "outside" => format!("outside its parent ({by})"),
+        "intercepted" => format!("taken first by a parent's {by}"),
         _ if by.is_empty() => "taking no touch".into(),
         _ => format!("taking no touch ({by})"),
     }

@@ -5,7 +5,11 @@ import UIKit
 /// UIKit answers with `hitTest`. Inside SwiftUI content the hosting view's `_hitTestWithContext:` (private, the
 /// call UIKit makes for a touch) answers with the gesture that would get it. A gesture belongs to the element when it
 /// does not also win just outside the element's frame; a clear view on top that takes touches wins there too.
-// ponytail: a coverer exactly the element's size and with the same kind of gesture reads as the element's own.
+/// A touch that reaches the element can still be taken on its way: a parent's tap recognizer cancels a table row's
+/// touches, a parent's `highPriorityGesture` wins over a Button. UIKit and SwiftUI chain gesture containers from the
+/// hit up to the window (`_parentGestureRecognizerContainer`, private); that chain is the touch's way, read for them.
+// ponytail: a coverer exactly the element's size and with the same kind of gesture reads as the element's own. A
+// parent recognizer whose delegate decides per touch is left out, unknown; `ddp tap` notices it after the touch.
 enum Hit {
     /// Every tappable element, or the one named by id or label.
     static func check(name: String?) throws -> [[String: Any]] {
@@ -42,10 +46,16 @@ enum Hit {
             fractions.map { x in CGPoint(x: frame.minX + frame.width * x, y: frame.minY + frame.height * y) }
         }
         let reaching = points.filter { reaches(object, frame, at: $0) }
-        result["points"] = reaching.count
-        if let point = reaching.first { result["point"] = [round2(point.x), round2(point.y)] }
+        // A parent that takes the touch on its way takes it at every point of the element.
+        let thief = reaching.first.flatMap { parentTaking(object, at: $0) }
+        let taking = thief == nil ? reaching : []
+        result["points"] = taking.count
+        if let point = taking.first { result["point"] = [round2(point.x), round2(point.y)] }
         if object.accessibilityTraits.contains(.notEnabled) {
             result["reason"] = "disabled"
+        } else if let thief {
+            result["reason"] = "intercepted"
+            result["by"] = thief
         } else if reaching.first != points[0] {
             let (reason, by) = blocker(object, at: points[0])
             result["reason"] = reason
@@ -70,12 +80,17 @@ enum Hit {
         }
     }
 
-    private static func taker(at point: CGPoint) -> Taker {
+    /// The view UIKit hands a touch at `point` (screen coordinates): the topmost window's `hitTest`.
+    private static func hitView(at point: CGPoint) -> UIView? {
         let windows = FrameCapture.visibleWindows().sorted { $0.windowLevel > $1.windowLevel }
-        guard let window = windows.first(where: { $0.hitTest($0.convert(point, from: nil), with: nil) != nil }),
-              let view = window.hitTest(window.convert(point, from: nil), with: nil) else { return .nothing }
+        return windows.lazy.compactMap { $0.hitTest($0.convert(point, from: nil), with: nil) }.first
+    }
+
+    private static func taker(at point: CGPoint) -> Taker {
+        guard let view = hitView(at: point), let window = view.window else { return .nothing }
         guard let host = sequence(first: view, next: \.superview).first(where: isHostingView) else { return .view(view) }
-        if let gesture = swiftUIHit(host, at: host.convert(point, from: nil)) {
+        // The hit test context takes window coordinates, also for a hosting view nested in UIKit.
+        if let gesture = swiftUIHit(host, at: window.convert(point, from: nil)) {
             return .gesture(gesture, gestureName(gesture))
         }
         if let cell = sequence(first: view, next: \.superview).first(where: { $0 is UICollectionViewCell || $0 is UITableViewCell }) {
@@ -109,6 +124,63 @@ enum Hit {
         if description.contains("_ButtonGesture") { return "Button" }
         let names = ["SpatialTapGesture", "TapGesture", "LongPressGesture", "DragGesture", "MagnifyGesture", "RotateGesture"]
         return names.first { description.contains($0) } ?? "a SwiftUI gesture"
+    }
+
+    /// A parent that takes a touch at `point` before the element can act on it, described; nil when none does.
+    private static func parentTaking(_ object: NSObject, at point: CGPoint) -> String? {
+        switch taker(at: point) {
+        case .nothing: return nil
+        case let .gesture(container, _): return highPriorityTap(above: container)
+        case .view, .cell:
+            guard let hit = hitView(at: point), let own = ownView(of: object) else { return nil }
+            return parentTapRecognizer(from: hit, own: own)
+        }
+    }
+
+    private static let parentContainerSelector = NSSelectorFromString("_parentGestureRecognizerContainer")
+
+    /// A SwiftUI tap gesture made `highPriorityGesture` on the way up from the element's gesture: it wins the tap.
+    private static func highPriorityTap(above container: NSObject) -> String? {
+        var current = container
+        while current.responds(to: parentContainerSelector),
+              let parent = current.perform(parentContainerSelector)?.takeUnretainedValue() as? NSObject, !(parent is UIView) {
+            let description = parent.description
+            if description.contains("exclusionPolicy: highPriority"), description.contains("TapGesture") {
+                return "\(gestureName(parent)) (highPriorityGesture)"
+            }
+            current = parent
+        }
+        return nil
+    }
+
+    // A delegate with one of these decides per touch, which cannot be known without one.
+    private static let perTouchDelegateSelectors = ["gestureRecognizer:shouldReceiveTouch:", "gestureRecognizer:shouldReceiveEvent:",
+                                                    "gestureRecognizerShouldBegin:"].map(NSSelectorFromString)
+
+    /// A single-tap recognizer on a parent of the element that cancels its touches: a table row or a view that acts
+    /// on `touchesEnded` never gets the tap. A tap recognizer of the element's own is deeper and wins first; a
+    /// UIButton refuses the parent's through `gestureRecognizerShouldBegin`, as UIKit asks it.
+    private static func parentTapRecognizer(from hit: UIView, own: UIView) -> String? {
+        for view in sequence(first: hit, next: \.superview) where !(view is UIWindow) {
+            let isOwn = view === own || view.isDescendant(of: own)
+            for case let recognizer as UITapGestureRecognizer in view.gestureRecognizers ?? []
+            where recognizer.isEnabled && recognizer.numberOfTapsRequired == 1 && recognizer.numberOfTouchesRequired == 1 {
+                if isOwn { return nil }
+                // UIKit's private subclasses (text selection, double tap to zoom) are not the app's.
+                let isApps = type(of: recognizer) == UITapGestureRecognizer.self || Bundle(for: type(of: recognizer)) == .main
+                let perTouch = (recognizer.delegate as? NSObject).map { delegate in perTouchDelegateSelectors.contains(where: delegate.responds) } ?? false
+                if isApps, !perTouch, recognizer.cancelsTouchesInView, hit.gestureRecognizerShouldBegin(recognizer) {
+                    return "UITapGestureRecognizer on \(described(view))"
+                }
+            }
+        }
+        return nil
+    }
+
+    /// The view an element is or lives in: a view element itself, or the view holding a UIAccessibilityElement.
+    private static func ownView(of object: NSObject) -> UIView? {
+        sequence(first: object as AnyObject?) { ($0 as? UIAccessibilityElement)?.accessibilityContainer as AnyObject? }
+            .lazy.compactMap { $0 as? UIView }.first
     }
 
     /// Why the touch at the element's center misses it, and what takes it instead.

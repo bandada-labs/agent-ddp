@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- The View trap's id, so ddp names it like the Compose test tags. -->
+    <!-- The View traps' ids, so ddp names them like the Compose test tags. -->
     <item name="trapOutside" type="id" />
+    <item name="trapIntercepted" type="id" />
 </resources>

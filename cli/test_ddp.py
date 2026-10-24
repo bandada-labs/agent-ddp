@@ -355,7 +355,9 @@ class FakeApp:
         elements = [{"id": "button", "label": "Go", "tap": True, "frame": [0, 0, 100, 50]},
                     {"id": "spinner", "frame": [0, 100, 20, 20]},
                     # Shows but a clear view on top takes its touches.
-                    {"id": "locked", "label": "Locked", "tap": True, "frame": [0, 60, 100, 30]}]
+                    {"id": "locked", "label": "Locked", "tap": True, "frame": [0, 60, 100, 30]},
+                    # Reached, but a parent takes the touch on its way.
+                    {"id": "row", "label": "Row", "tap": True, "frame": [0, 130, 100, 30]}]
         nodes = [{"z": 0, "kind": "layer", "fill": "#0000FFFF", "frame": [0, 0, 100, 50]},
                  {"z": 1, "kind": "layer", "fill": "#000000FF", "frame": [0, 100, 20 + i % 3, 20]}]
         if self.tapped_at is not None:
@@ -418,8 +420,9 @@ class FakeApp:
                     if self.tapped_clock is not None and clock.monotonic() - self.tapped_clock > 0.05:
                         result["elements"].append({"id": "toast", "label": "Saved", "frame": [0, 200, 100, 30]})
                 elif method == "screen.hit":
-                    hits = [{**e, "points": 9, "point": [50, 25]} if e["id"] == "button" else
-                            {**e, "points": 0, "reason": "covered", "by": "scrim"}
+                    misses = {"locked": ("covered", "scrim"), "row": ("intercepted", "UITapGestureRecognizer on UIView")}
+                    hits = [{**e, "points": 0, "reason": misses[e["id"]][0], "by": misses[e["id"]][1]} if e["id"] in misses else
+                            {**e, "points": 9, "point": [50, 25]}
                             for e in self.frame(0)["elements"] if e.get("tap")]
                     result = {"elements": [h for h in hits if params.get("id") in (None, h["id"], h["label"])]}
                 elif method == "input.touch":
@@ -482,9 +485,13 @@ with tempfile.TemporaryDirectory() as directory:
     refused = ddp_in(directory, "tap", "locked")
     assert refused.returncode == 1 and "locked is covered by scrim" in refused.stderr, refused.stderr
     assert "tapped locked at (50, 75)" in ddp_in(directory, "tap", "locked", "--force").stdout
+    intercepted = ddp_in(directory, "tap", "row")
+    assert intercepted.returncode == 1 and \
+        "row is taken first by a parent's UITapGestureRecognizer on UIView" in intercepted.stderr, intercepted.stderr
     tappable = ddp_in(directory, "check", "tappable")
     assert tappable.returncode == 1 and "COVERED locked: covered by scrim" in tappable.stdout and \
-        "1 of 2 controls take a touch" in tappable.stdout, tappable.stdout + tappable.stderr
+        "INTERCEPTED row: taken first by a parent's UITapGestureRecognizer on UIView" in tappable.stdout and \
+        "1 of 3 controls take a touch" in tappable.stdout, tappable.stdout + tappable.stderr
     then_tap = f"{DDP[0]} tap button"
     waited = ddp_in(directory, "wait", "text", "saved", "--timeout", "2s")
     assert waited.returncode == 1 and "next:" in waited.stderr, waited.stderr  # nothing tapped yet: times out

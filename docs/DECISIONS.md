@@ -4,6 +4,10 @@ The maintainer's decisions in force, one line each with their words. The maintai
 
 A line leaves this file when the maintainer replaces it or when its work has landed and the code or an ADR carries it. The log keeps the history.
 
+## The hard rule
+
+- Zero false positives, more important than anything else. Nothing ddp reports as a problem may be wrong; a case it cannot decide is not reported. (2026-10-24, "make zero false positives a hard rule, it's more important than anything else")
+
 ## What needs the maintainer's yes
 
 - Anything that leaves the machine: pushing, tagging, releasing, publishing to npm, JitPack or anywhere else, opening issues or pull requests outside the repo. (2026-10-23, "we publish whenever I say, it doesn't have to be all the time")
@@ -33,6 +37,7 @@ A line leaves this file when the maintainer replaces it or when its work has lan
 - The CLI speaks the control endpoint with its own small WebSocket client (`cli/src/control.rs`), no new crate. Existing commands keep their output; `tap` is a real touch on both platforms. Then new commands, then v1 goes. (2026-10-23, "continue with phase 6")
 - The control endpoint carries over v1's snapshot, stream, eval and time as `screen.*` and `time.*`, and serves the history files. v1's iOS `tap` (the accessibility action) is not carried over, since `input.touch` is a real finger. History stays on disk too, so the CLI can still read it after a crash. (2026-10-23)
 - Tappability is checked when acting, like Playwright's actionability checks, not stored per frame: `ddp tap` asks the app's hit test (`screen.hit`) first and fails with the reason, `--force` skips it, `check tappable` reports without touching. The hit test is the platform's own (UIKit, SwiftUI's gesture hit test, View dispatch, Compose `LayoutNode.hitTest`), so it sees what a finger would. (2026-10-24, "yes, start the test and based on that implement it")
+- A parent that takes the touch on its way down is covered too (`intercepted`), on every case each platform lets us decide without a real touch. A case that cannot be decided is not reported (the hard rule); a miss still shows after the tap as `nothing changed`. (2026-10-24, "I'd say all those cases should be covered")
 - v1 is removed and there is one protocol number, 2, for `app.info` and every header (ADR 0004 and 0008). The CLI checks both in `model::check_protocol`. (2026-10-23, "continue with phase 7")
 
 ## Distribution

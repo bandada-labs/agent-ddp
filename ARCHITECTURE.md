@@ -22,6 +22,7 @@ There are three parts. Each one can change on its own as long as the protocol ho
 
 ## Rules every change keeps
 
+- Zero false positives. This rule comes before every other one. A check, a `tap` refusal or any other report says something is wrong only when it is sure. When a case cannot be decided, say nothing, or say it is unknown; never report it as a problem. A false alarm teaches agents to ignore ddp (`--force` on every tap), and that costs more than a miss. Every new check or reason has a case in the sample apps where it must stay quiet, next to the one where it must fire.
 - Debug only. On iOS everything is inside `#if DEBUG`, and outside Debug `start()` is empty. On Android the library is a `debugImplementation` dependency. A change that adds code to a Release build is a bug.
 - The library reads unless a method exists to act: `input.*`, `net.intercept` and its answers, `prefs.write|remove|clear`, plus `tap`, `time` and the opt-in network log (ADR 0008). Anything else that changes app state needs its own reason in the PR.
 - The core is Android and iOS. Names, types and units come from the platforms; a name is shared only when both platforms mean the same thing. No browser concepts (HTML document, CSS, localStorage) (ADR 0008).

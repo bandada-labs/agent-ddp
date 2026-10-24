@@ -129,6 +129,22 @@ struct ContentView: View {
             }
             .padding(.trailing, 60)
 
+            // Controls a parent takes the touch from while it travels down to them.
+            HStack(spacing: 12) {
+                HStack {
+                    Button("High") { lastAction = "high" }
+                        .accessibilityIdentifier("trapHighPriority")
+                }
+                .padding(6)
+                .highPriorityGesture(TapGesture())
+                TapAwayRow(
+                    row: { lastAction = "row" },
+                    button: { lastAction = "uikit button" },
+                    swiftUI: AnyView(Button("SwiftUI") { lastAction = "hosted" }.accessibilityIdentifier("tapAwaySwiftUI"))
+                )
+                .frame(width: 240, height: 44)
+            }
+
             List {
                 Text("Row with context menu")
                     .accessibilityIdentifier("menuRow")
@@ -166,6 +182,62 @@ struct OutsideButton: UIViewRepresentable {
     }
 
     func updateUIView(_ view: UIView, context: Context) {}
+}
+
+/// "Tap anywhere to close the keyboard": a tap recognizer on the parent. It takes the tap from a table row (the row is
+/// never selected) but not from a UIButton, which UIKit lets win.
+struct TapAwayRow: UIViewRepresentable {
+    let row: () -> Void
+    let button: () -> Void
+    let swiftUI: AnyView
+
+    func makeCoordinator() -> Coordinator { Coordinator(row: row, hosted: UIHostingController(rootView: swiftUI)) }
+
+    func makeUIView(context: Context) -> UIView {
+        let parent = UIView()
+        parent.addGestureRecognizer(UITapGestureRecognizer(target: parent, action: #selector(UIView.endEditing(_:))))
+        let table = UITableView(frame: CGRect(x: 0, y: 0, width: 80, height: 44))
+        table.dataSource = context.coordinator
+        table.delegate = context.coordinator
+        table.rowHeight = 44
+        table.isScrollEnabled = false
+        parent.addSubview(table)
+        let uiButton = UIButton(type: .system, primaryAction: UIAction { _ in button() })
+        uiButton.setTitle("UIKit", for: .normal)
+        uiButton.accessibilityIdentifier = "tapAwayButton"
+        uiButton.frame = CGRect(x: 90, y: 0, width: 60, height: 44)
+        parent.addSubview(uiButton)
+        let hosted = context.coordinator.hosted.view!
+        hosted.backgroundColor = .clear
+        hosted.frame = CGRect(x: 160, y: 0, width: 80, height: 44)
+        parent.addSubview(hosted)
+        return parent
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {}
+
+    final class Coordinator: NSObject, UITableViewDataSource, UITableViewDelegate {
+        let row: () -> Void
+        let hosted: UIHostingController<AnyView>
+        init(row: @escaping () -> Void, hosted: UIHostingController<AnyView>) {
+            self.row = row
+            self.hosted = hosted
+        }
+
+        func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { 1 }
+
+        func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+            let cell = UITableViewCell()
+            cell.textLabel?.text = "Row"
+            cell.isAccessibilityElement = true
+            cell.accessibilityLabel = "Row"
+            cell.accessibilityTraits = .button
+            cell.accessibilityIdentifier = "trapTapAway"
+            return cell
+        }
+
+        func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) { row() }
+    }
 }
 
 struct Triangle: Shape {
