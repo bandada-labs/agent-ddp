@@ -14,7 +14,7 @@ The library now serves a control endpoint with names taken from Android and iOS 
 ### Breaking
 
 - Protocol version 2. The v1 JSON lines endpoint is gone from both libraries: iOS no longer writes `live.json`, Android no longer opens the socket `agentddp.<package>`. `app.info` and every header say `"protocol": 2`.
-- `ddp tap` asks the app's hit test before it touches. It waits up to 2 s for the element to hold still, be enabled and have a point a touch reaches, and fails with `disabled`, `covered`, `untouchable`, `outside` or `intercepted` (a parent takes the touch on its way down) otherwise. After the touch it prints what changed, or `nothing changed within 1000ms; look again before a second tap`.
+- `ddp tap` asks the app's hit test before it touches. It waits up to 2 s for the element to hold still, be enabled and have a point a touch reaches, and fails with `disabled`, `covered`, `untouchable`, `outside` or, on Android, `intercepted` (a parent takes the touch on its way down) otherwise. After the touch it prints what changed, or `nothing changed within 1000ms; look again before a second tap`.
 - `ddp tap` on iOS is a real touch, as on Android, instead of the element's accessibility action. Elements with no accessibility action can now be tapped; the button's pressed look shows.
 
 ### Added
@@ -22,7 +22,7 @@ The library now serves a control endpoint with names taken from Android and iOS 
 - Control endpoint in the library: JSON-RPC over a WebSocket. Android: the abstract socket `agentddp.<package>.control`, open to adb and root only. iOS simulator: the port in `Library/Caches/agent-ddp/control.json`. Requests from web pages (with an `Origin`) and with a foreign `Host` are refused. Methods, documented in docs/protocol.md:
   - `app.info`, `app.commands`, `app.run`: the app's details, and named actions the app adds in Debug with `AgentDDP.command` (iOS) or `AgentDdpCommands.add` (Android), in its own Swift or Kotlin.
   - `screen.elements`, `screen.capture`, `screen.frame`, `screen.watch`, `screen.value`: the elements, an image of every window, one frame, a frame stream and one property.
-  - `screen.hit`: where a touch on an element would land, from the platform's own hit test (UIKit, SwiftUI's gesture hit test, View dispatch, Compose `LayoutNode.hitTest`), without touching. It also finds a parent that takes the touch first: a `UITapGestureRecognizer` that cancels a table row's touches, a SwiftUI `highPriorityGesture`, an `onInterceptTouchEvent`, a Compose `PointerEventPass.Initial` consumer.
+  - `screen.hit`: where a touch on an element would land, from the platform's own hit test (UIKit, SwiftUI's gesture hit test, View dispatch, Compose `LayoutNode.hitTest`), without touching. On Android it also finds a parent that takes the touch first: an `onInterceptTouchEvent`, a Compose `PointerEventPass.Initial` consumer.
   - `input.touch`, `input.type`, `input.key`: real touches and typing, delivered the way the system delivers them, so gesture recognizers, SwiftUI and Compose see a real finger.
   - `net.list`, `net.get`, `net.watch`, `net.send`, and `net.intercept` with `net.continue`, `net.respond`, `net.fail`, `net.release`: the request log, a request sent with the app's own client, and pausing the app's requests to let them go on changed, answer them or fail them the way the app's client fails (`offline`, `timeout`, ...).
   - `log.watch`: the app's log lines (os_log on iOS, logcat on Android).

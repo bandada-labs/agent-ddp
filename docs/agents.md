@@ -147,7 +147,7 @@ ddp: trapCovered is covered by TapGesture: no point of it takes a touch
 next: ddp check tappable, or ddp tap trapCovered --force to touch it anyway
 ```
 
-The error codes are `disabled`, `covered` (something on top takes the touch), `untouchable` (nothing takes it: SwiftUI `allowsHitTesting(false)`, iOS `isUserInteractionEnabled = false`) `outside` (the element is drawn outside its parent's bounds, so the parent never passes the touch on) and `intercepted` (the touch reaches the element, but a parent takes it on its way down: on iOS a parent's `UITapGestureRecognizer` that cancels a table row's touches, or a SwiftUI `highPriorityGesture`; on Android a parent's `onInterceptTouchEvent`, or a Compose parent that consumes the press in `PointerEventPass.Initial`). For `intercepted`, each parent is asked with a press and then a cancel, so nothing is clicked. `nothing changed within 1000ms` after a tap means the touch reached nothing that reacts, or the action is slow (a request): look again before a second tap. `--force` touches the center with no checks.
+The error codes are `disabled`, `covered` (something on top takes the touch), `untouchable` (nothing takes it: SwiftUI `allowsHitTesting(false)`, iOS `isUserInteractionEnabled = false`) `outside` (the element is drawn outside its parent's bounds, so the parent never passes the touch on) and `intercepted` (Android only: the touch reaches the element, but a parent's `onInterceptTouchEvent` or a Compose parent that consumes the press in `PointerEventPass.Initial` takes it on its way down). For `intercepted`, each parent is asked with a press and then a cancel, so nothing is clicked. `nothing changed within 1000ms` after a tap means the touch reached nothing that reacts, or the action is slow (a request): look again before a second tap. `--force` touches the center with no checks.
 
 `check tappable` runs the same hit test on every control on screen and touches nothing:
 
@@ -157,9 +157,7 @@ DISABLED trapDisabled
 COVERED trapCovered: covered by TapGesture, no point of it takes a touch
 UNTOUCHABLE trapIgnored: taking no touch, no point of it takes a touch
 OUTSIDE trapOutside: outside its parent (UIView bounds), no point of it takes a touch
-INTERCEPTED trapHighPriority: taken first by a parent's TapGesture (highPriorityGesture), no point of it takes a touch
-INTERCEPTED trapTapAway: taken first by a parent's UITapGestureRecognizer on UIView, no point of it takes a touch
-5 of 11 controls take a touch at their center
+7 of 11 controls take a touch at their center
 ```
 
 `PARTLY` is a control whose center is blocked while other points take a touch; `tap` uses one of those. `explore` skips the controls a touch does not reach and says why.
@@ -228,7 +226,7 @@ A drawn node belongs to the smallest element whose frame holds it (4 pt toleranc
 - The single shapes inside a SwiftUI `Canvas` or `drawingGroup`: one bitmap, read by its pixels.
 - System UI outside the app: iOS alerts like "Open in ...?", Android system dialogs.
 - Compose `drawWithCache` and `drawWithContent`, text drawn inside a Canvas.
-- A parent that takes a touch only at its release or after a move, and on iOS a parent tap recognizer whose delegate decides per touch (`gestureRecognizer(_:shouldReceive:)`): `screen.hit` says the touch reaches the child; `tap` shows it only as `nothing changed`. On iOS, a cover exactly the size of a control and with the same kind of gesture reads as the control's own.
+- A parent that takes a touch only at its release or after a move, and on iOS any gesture that wins over the control once the touch is under way (a parent's `UITapGestureRecognizer`, a SwiftUI `highPriorityGesture`): UIKit decides that only during a real touch, so `screen.hit` says the touch reaches the control and `tap` shows it as `nothing changed`. On iOS, a cover exactly the size of a control and with the same kind of gesture reads as the control's own.
 
 ## Adding it to an app (Debug only)
 

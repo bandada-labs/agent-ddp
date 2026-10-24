@@ -420,7 +420,7 @@ class FakeApp:
                     if self.tapped_clock is not None and clock.monotonic() - self.tapped_clock > 0.05:
                         result["elements"].append({"id": "toast", "label": "Saved", "frame": [0, 200, 100, 30]})
                 elif method == "screen.hit":
-                    misses = {"locked": ("covered", "scrim"), "row": ("intercepted", "UITapGestureRecognizer on UIView")}
+                    misses = {"locked": ("covered", "scrim"), "row": ("intercepted", "BlockingLayout (onInterceptTouchEvent)")}
                     hits = [{**e, "points": 0, "reason": misses[e["id"]][0], "by": misses[e["id"]][1]} if e["id"] in misses else
                             {**e, "points": 9, "point": [50, 25]}
                             for e in self.frame(0)["elements"] if e.get("tap")]
@@ -487,10 +487,10 @@ with tempfile.TemporaryDirectory() as directory:
     assert "tapped locked at (50, 75)" in ddp_in(directory, "tap", "locked", "--force").stdout
     intercepted = ddp_in(directory, "tap", "row")
     assert intercepted.returncode == 1 and \
-        "row is taken first by a parent's UITapGestureRecognizer on UIView" in intercepted.stderr, intercepted.stderr
+        "row is taken first by a parent's BlockingLayout (onInterceptTouchEvent)" in intercepted.stderr, intercepted.stderr
     tappable = ddp_in(directory, "check", "tappable")
     assert tappable.returncode == 1 and "COVERED locked: covered by scrim" in tappable.stdout and \
-        "INTERCEPTED row: taken first by a parent's UITapGestureRecognizer on UIView" in tappable.stdout and \
+        "INTERCEPTED row: taken first by a parent's BlockingLayout (onInterceptTouchEvent)" in tappable.stdout and \
         "1 of 3 controls take a touch" in tappable.stdout, tappable.stdout + tappable.stderr
     then_tap = f"{DDP[0]} tap button"
     waited = ddp_in(directory, "wait", "text", "saved", "--timeout", "2s")
