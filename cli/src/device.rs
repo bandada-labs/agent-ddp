@@ -1,8 +1,9 @@
 //! Acting on the device and the app: record, tap, wait, logs, settings, deep links, annotate, explore.
 use crate::args::Args;
 use crate::checks::{check_parity, RECORDING_CHECKS};
+use crate::control::Control;
 use crate::live::{
-    live_session, open, platform_of, record_live, require_session, run_then, snapshot_live, stream_frames,
+    follow_logs, live_session, open, platform_of, record_live, require_session, run_then, snapshot_live, stream_frames,
     AndroidDevice, IosDevice, OfflineDevice,
 };
 use crate::model::{
@@ -114,22 +115,62 @@ fn adb(device: &str, command: &[&str]) -> Result<state::Output> {
     Ok(capture(&adb_path()?, &all))
 }
 
-pub fn tap(args: &mut Args) -> Result<i32> {
-    let session = require_session()?;
-    let recording = snapshot_live(&session)?;
+/// The center of an element on screen now, where a finger would go.
+fn element_center(session: &Value, id: &str) -> Result<(f64, f64)> {
+    let recording = snapshot_live(session)?;
     let frame = recording.frames.last().unwrap();
-    let id = args.id.clone().unwrap_or_default();
     let Some(element) = frame.elements().iter().find(|e| element_key(e) == id) else {
         fail!(format!("no element '{id}' on screen"), "unknown_element", "ddp tree -i");
     };
     let [x, y, w, h] = rect(&element["frame"]);
-    let (x, y) = (x + w / 2.0, y + h / 2.0);
-    let mut control = open(&session)?;
+    Ok((x + w / 2.0, y + h / 2.0))
+}
+
+fn touch(control: &mut Control, (x, y): (f64, f64)) -> Result<()> {
     for phase in ["down", "up"] {
         control.call("input.touch", json!({"phase": phase, "x": x, "y": y}))?;
     }
+    Ok(())
+}
+
+pub fn tap(args: &mut Args) -> Result<i32> {
+    let session = require_session()?;
+    let id = args.id.clone().unwrap_or_default();
+    let (x, y) = element_center(&session, &id)?;
+    let mut control = open(&session)?;
+    touch(&mut control, (x, y))?;
     control.close();
     say!("tapped {id} at ({x:.0}, {y:.0})");
+    Ok(0)
+}
+
+const FOCUS_WAIT_MS: u64 = 200;
+
+/// Types into the focused field, or into `--into` after tapping it.
+pub fn type_text(args: &mut Args) -> Result<i32> {
+    let session = require_session()?;
+    let text = args.value.clone().unwrap_or_default();
+    let mut control = open(&session)?;
+    if let Some(id) = &args.id {
+        touch(&mut control, element_center(&session, id)?)?;
+        // The field takes the focus on a later turn of the main loop; typed text before that goes nowhere.
+        std::thread::sleep(Duration::from_millis(FOCUS_WAIT_MS));
+    }
+    control.call("input.type", json!({"text": text}))?;
+    control.close();
+    say!(
+        "typed {} characters{}",
+        text.chars().count(),
+        args.id.as_ref().map(|id| format!(" into {id}")).unwrap_or_default()
+    );
+    Ok(0)
+}
+
+pub fn press(args: &mut Args) -> Result<i32> {
+    let session = require_session()?;
+    let key = args.value.clone().unwrap_or_default();
+    open(&session)?.call("input.key", json!({"key": key}))?;
+    say!("pressed {key}");
     Ok(0)
 }
 
@@ -214,6 +255,9 @@ pub fn wait(args: &mut Args) -> Result<i32> {
 
 /// The app's log lines during the last take (or --file), at their time in the take.
 pub fn logs(args: &mut Args) -> Result<i32> {
+    if args.follow {
+        return follow_logs(args);
+    }
     let recording = load(args.file.as_deref().unwrap_or(&ctx().last))?;
     let Some(started) = recording.header.get("startedAt").map(f).filter(|s| *s != 0.0) else {
         fail!("this recording has no start time (an older library)", "no_start_time", "record again");

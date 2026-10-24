@@ -72,8 +72,8 @@ pub fn view(args: &mut Args) -> Result<i32> {
 }
 
 const MCP_PROFILES: [(&str, &[&str]); 3] = [
-    ("core", &["doctor", "connect", "tree", "find", "get", "read", "check", "wait", "tap", "skills"]),
-    ("live", &["watch", "eval", "time", "net", "record", "logs", "annotate", "history"]),
+    ("core", &["doctor", "connect", "tree", "find", "get", "read", "check", "wait", "tap", "type", "press", "skills"]),
+    ("live", &["watch", "eval", "time", "net", "record", "logs", "annotate", "history", "prefs", "run"]),
     ("checks", &["check", "baseline", "diff"]),
 ];
 

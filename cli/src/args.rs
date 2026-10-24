@@ -62,6 +62,12 @@ pub struct Args {
     pub since: String,
     pub time: Option<String>,
     pub dir: Option<PathBuf>,
+    pub method: Option<String>,
+    pub body: Option<String>,
+    pub status: Option<u16>,
+    pub error: Option<String>,
+    pub key: Option<String>,
+    pub follow: bool,
 }
 
 const ABOUT: &str = "ddp: see what a Debug iOS/Android app draws, frame by frame, live or from a recording.
@@ -71,7 +77,8 @@ Start here (for agents): ddp skills get core
 
   connect | disconnect | doctor            attach to a running Debug app; check the setup
   tree | find | get | read | watch | eval  what is drawn, now or over a take (@refs from tree and find)
-  record | wait | tap | open | set | logs  take a recording, wait, act, set up the device, read app logs
+  record | wait | tap | type | press       take a recording, wait, touch and type
+  open | set | logs | prefs | run          deep links, device settings, app logs, preferences, app commands
   check overlap|corners|jank|settle|a11y|timeline|parity|baseline|all
   history                                  the last 15 minutes: what changed, taps, requests; or one moment as a take
   diff | baseline | annotate | view | explore | net | time
@@ -165,10 +172,18 @@ pub fn parser() -> Command {
             .arg(positional("id", "element id, label or @ref").required(true))
             .arg(positional("path", "iOS: element.<key path> or layer.<key path>; \
                                      Android: <modifier>.<property> (border.width) or semantics.<Key>").required(true)))
-        .subcommand(sub("net", "live: network requests the app reported (redacted)")
-            .arg(choices("action", &["list", "get", "watch"]).required(true))
-            .arg(positional("request_id", "get: request id from `ddp net list`"))
-            .arg(opt("until", "watch: stop when true, e.g. 'status>=400' or 'url~/api'")))
+        .subcommand(sub("net", "live: the app's requests (redacted): see them, send one, or answer them yourself")
+            .arg(choices("action", &["list", "get", "watch", "send", "mock", "fail"]).required(true))
+            .arg(positional("request_id", "get: request id from `ddp net list`; send: URL; mock, fail: URL pattern with *"))
+            .arg(opt("until", "watch: stop when true, e.g. 'status>=400' or 'url~/api'"))
+            .arg(opt("method", "send: GET, POST..."))
+            .arg(opt("body", "send: request body; mock: response body"))
+            .arg(opt("status", "mock: response status (default 200)").value_parser(clap::value_parser!(u16).range(100..600)))
+            .arg(choices("error", &["offline", "host", "timeout", "refused", "unreachable", "lost", "cancelled", "failed"])
+                .long("error").help("fail: what the app's client throws (default offline)"))
+            .arg(opt("for", "mock, fail: how long to answer requests (default 10s)").id("duration"))
+            .arg(opt("limit", "mock, fail: stop after this many requests").value_parser(clap::value_parser!(usize)))
+            .arg(opt("then", "mock, fail: program to run meanwhile (no shell)")))
         .subcommand(sub("time", "live: pause, step, slow down or seek the app's animations")
             .arg(choices("action", &["pause", "resume", "step", "rate", "seek", "status"]).required(true))
             .arg(positional("value", "step: frames (default 1); rate: factor (0.1); seek: time from the pause point (500ms, -1s)")
@@ -181,8 +196,21 @@ pub fn parser() -> Command {
             .arg(opt("against", "parity: the other platform's recording; baseline: its name"))
             .arg(opt("junit", "baseline: also write a JUnit XML report here"))
             .arg(flag("all-frames", "check every frame, not only the last")))))
-        .subcommand(sub("tap", "live: tap an element (Android: a real touch; iOS: its accessibility action)")
+        .subcommand(sub("tap", "live: tap an element with a real touch at its center")
             .arg(positional("id", "element id, label or @ref").required(true)))
+        .subcommand(sub("type", "live: type into the focused field, as the keyboard does")
+            .arg(positional("value", "the text").required(true))
+            .arg(opt("into", "tap this element first (id, label or @ref)").id("id")))
+        .subcommand(sub("press", "live: press a key in the focused field")
+            .arg(choices("value", &["Enter", "Tab", "Backspace"]).required(true)))
+        .subcommand(sub("prefs", "live: the app's UserDefaults (iOS) or SharedPreferences (Android), secrets redacted")
+            .arg(choices("action", &["list", "set", "rm", "clear", "files"]).default_value("list"))
+            .arg(positional("key", "set, rm: the key"))
+            .arg(positional("value", "set: the value as text; the key keeps its type"))
+            .arg(opt("in", "a suite (iOS) or preferences file (Android); default the app's own").id("name")))
+        .subcommand(sub("run", "live: run a command the app added in Debug; without a name, list them")
+            .arg(positional("name", "the command's name"))
+            .arg(positional("value", "params as a JSON object")))
         .subcommand(sub("wait", "live: until an element is drawn, a label shows, or the screen settles")
             .arg(choices("by", &["id", "text"]))
             .arg(positional("value", "the id or the text"))
@@ -190,6 +218,8 @@ pub fn parser() -> Command {
             .arg(opt("timeout", "give up after this long").default_value("10s"))
             .arg(many("ignore", "--settled: elements that never stop (a spinner, a clock) and should not count")))
         .subcommand(file(device_options(sub("logs", "the app's log lines during the last take, at their time in it")
+            .arg(flag("follow", "live: the last 100 lines, then each new one"))
+            .arg(opt("for", "--follow: stop after this long").id("duration"))
             .arg(opt("grep", "only lines holding this text"))
             .arg(opt("limit", "at most this many lines").value_parser(clap::value_parser!(usize)).default_value("50")))))
         .subcommand(device_options(sub("history", "the last 15 minutes from the app's flight recorder")
@@ -344,5 +374,11 @@ pub fn parse(argv: &[String]) -> Result<Args, clap::Error> {
         since: string(m, "since").unwrap_or_else(|| "15m".into()),
         time: string(m, "time"),
         dir: string(m, "dir").map(PathBuf::from),
+        method: string(m, "method"),
+        body: string(m, "body"),
+        status: number::<u16>(m, "status"),
+        error: string(m, "error"),
+        key: string(m, "key"),
+        follow: boolean(m, "follow"),
     })
 }

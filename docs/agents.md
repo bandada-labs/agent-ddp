@@ -19,9 +19,17 @@ ddp record [--for 5s] [--then "<cmd>"] [--name N] saves .ddp/last.jsonl for offl
 ddp eval <element> <path>                          one property, read-only
 ddp time pause | resume | step [frames] | rate 0.1 | seek <time> | status
 ddp net list | get <id> | watch [--until 'status>=400']
+ddp net send <url> [--method POST] [--body <text>]  a request through the app's own client
+ddp net mock <url pattern> [--status 503] [--body <text>] [--for 10s] [--limit N] [--then "<cmd>"]
+ddp net fail <url pattern> [--error offline|timeout|...] [--for 10s] [--limit N] [--then "<cmd>"]
 ddp tap <element>                                  a real touch at the element's center
+ddp type <text> [--into <element>]                 type as the keyboard does, into the focused field
+ddp press Enter | Tab | Backspace
+ddp prefs [list | set <key> <value> | rm <key> | clear | files] [--in <suite or file>]
+ddp run [<command> ['<params JSON>']]              run a command the app added in Debug; no name lists them
 ddp wait id <id> | text <label> | --settled 300ms [--ignore <el>] [--timeout 10s]
 ddp logs [--grep <text>]                           app log lines during the last take, at their time in it
+ddp logs --follow [--for 10s] [--grep <text>]      the last 100 lines, then each new one
 ddp set appearance dark | text-size large | reduce-motion on | locale es-ES
 ddp open <deep link or URL>
 ddp annotate [out.png]                             screenshot with numbered boxes, label N is @eN
@@ -42,6 +50,9 @@ An element goes by its id, its label, or an `@ref` from the last `tree` or `find
 - `eval` paths. iOS: `element.<key path>` on the accessibility element, `layer.<key path>` on the topmost layer with the element's frame, presentation values (`layer.shadowRadius`, `layer.opacity`). Android: `<modifier>.<property>` from the Compose inspector (`border.width`, `background.color`, `graphicsLayer.alpha`) or `semantics.<Key>` (`semantics.Selected`). An unknown name lists what is there.
 - `time` runs one virtual clock. `pause` freezes it, `step 30` moves it 30 frames, `rate 0.1` slows it, `seek 500ms` / `seek -400ms` moves it relative to the pause point, `resume` lets it run. What follows it: iOS Core Animation / UIKit animations; Android Compose animations; on both, any app timeline that reads `AgentDDP.elapsedTime()` (iOS) or `AgentDdpTime.elapsedMillis()` (Android) from its clock port, and only those rewind. What does not: SwiftUI `withAnimation` (its clock is not reachable), Android View `ValueAnimator`s and system UI.
 - `net` lists requests the app reported from its Debug network decorator: `list` (id, method, status, ms, size, URL), `get <id>` (headers, bodies), `watch`. Redaction happens inside the app before anything is kept: `Authorization`, `Cookie`, any header, query item or JSON key matching `secret|token|key|password|attest`, and literal values the app registers (its dev secret). Bodies are cut at 16 KB.
+- `net mock` and `net fail` hold the requests that match the pattern (`*` is any text) and answer them for `--for`: `mock` with `--status` and `--body`, `fail` with the error the app's client throws (`offline`, `host`, `timeout`, `refused`, `unreachable`, `lost`, `cancelled`, `failed`). `--then` runs meanwhile, so `--then "ddp tap @e3"` makes the request that gets the answer. Only requests through `AgentDDP.send` (iOS) or `AgentDdpInterceptor` (Android) are held.
+- `prefs` reads UserDefaults on iOS and SharedPreferences on Android. Secrets read as `[redacted]`. `set` keeps the type the key holds (a Boolean stays a Boolean); a new key is a string.
+- `run` calls the app's own Swift or Kotlin, added with `AgentDDP.command` or `AgentDdpCommands.add` (log in a test user, reset state, open a screen). It prints what the command returned, as JSON.
 
 The endpoint is local only. iOS simulator: a TCP port on 127.0.0.1 that the app writes in its own container; web pages may not connect. Android: an abstract unix socket reached with `adb forward`, which accepts only the shell user (adb) and root.
 

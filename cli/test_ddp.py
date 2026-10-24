@@ -334,6 +334,7 @@ class FakeApp:
 
     def __init__(self):
         self.tapped_at = None
+        self.typed, self.prefs, self.interceptor, self.answers = "", {}, None, {}
         self.server = socket.socket()
         self.server.bind(("127.0.0.1", 0))
         self.server.listen()
@@ -407,6 +408,28 @@ class FakeApp:
                         self.tapped_at = self.stream_index
                 elif method == "screen.watch":
                     threading.Thread(target=watch, daemon=True).start()
+                elif method == "input.type":
+                    self.typed += params["text"]
+                elif method == "input.key":
+                    self.typed += f"<{params['key']}>"
+                elif method == "prefs.read":
+                    result = {"values": dict(self.prefs)}
+                elif method == "prefs.write":
+                    self.prefs[params["key"]] = params["value"]
+                elif method == "prefs.remove":
+                    self.prefs.pop(params["key"], None)
+                elif method == "app.commands":
+                    result = {"commands": ["load"]}
+                elif method == "app.run":
+                    # Waits, off the reading loop, for whoever intercepts: like the library's waiting methods.
+                    threading.Thread(target=self.load, args=(message["id"], send), daemon=True).start()
+                    continue
+                elif method == "net.intercept":
+                    self.interceptor = send
+                elif method in ("net.respond", "net.fail"):
+                    self.answers[params["id"]].set_result(params)
+                elif method == "net.release":
+                    self.interceptor = None
                 send({"id": message["id"], "result": result})
         except OSError:
             pass  # the client hung up, as it does when it has enough
@@ -414,6 +437,16 @@ class FakeApp:
             connection.close()
 
     stream_index = 0
+
+    def load(self, id, send):
+        status = 200
+        if self.interceptor:
+            import concurrent.futures
+            answer = self.answers["f1"] = concurrent.futures.Future()
+            self.interceptor({"method": "net.paused", "params": {"id": "f1", "request": {"method": "GET", "url": "http://x/items"}}})
+            params = answer.result(timeout=5)
+            status = params.get("status", params.get("error"))
+        send({"id": id, "result": {"value": f"loaded {status}"}})
 
 
 with tempfile.TemporaryDirectory() as directory:
@@ -452,6 +485,21 @@ with tempfile.TemporaryDirectory() as directory:
     marker = Path(directory, "injected")
     safe = ddp_in(directory, "read", "--for", "200ms", "--then", f"echo safe ; touch {marker}")
     assert safe.returncode == 0 and not marker.exists(), safe.stdout + safe.stderr
+    # Typing, preferences, app commands, and a mock that answers the request its own --then is waiting on.
+    assert "typed 3 characters into button" in ddp_in(directory, "type", "Ana", "--into", "@e1").stdout
+    assert "pressed Enter" in ddp_in(directory, "press", "Enter").stdout and app.typed == "Ana<Enter>", app.typed
+    ddp_in(directory, "prefs", "set", "flag", "on")
+    assert ddp_in(directory, "prefs").stdout == "flag = on\n"
+    ddp_in(directory, "prefs", "rm", "flag")
+    assert ddp_in(directory, "prefs").stdout == "no values\n"
+    assert ddp_in(directory, "run").stdout == "load\n" and ddp_in(directory, "run", "load").stdout == '"loaded 200"\n'
+    mocked = ddp_in(directory, "net", "mock", "*items*", "--status", "503", "--for", "5s", "--limit", "1",
+                    "--then", f"{DDP[0]} run load")
+    assert mocked.returncode == 0 and '"loaded 503"' in mocked.stdout and "GET http://x/items -> 503" in mocked.stdout, \
+        mocked.stdout + mocked.stderr
+    failed = ddp_in(directory, "net", "fail", "*items*", "--error", "timeout", "--for", "5s", "--limit", "1",
+                    "--then", f"{DDP[0]} run load")
+    assert '"loaded timeout"' in failed.stdout and "1 request answered" in failed.stdout, failed.stdout + failed.stderr
 
 # History: a closed (gzipped) minute and the open one, cut mid-line as when the app dies.
 import gzip

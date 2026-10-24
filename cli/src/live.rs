@@ -9,7 +9,7 @@ use crate::state::{
 use crate::{fail, say, warn};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
 /// The control endpoint's version this ddp speaks (`app.info` `protocol`).
@@ -96,23 +96,35 @@ impl OfflineDevice for AndroidDevice {
     }
 }
 
-/// Runs the action without a shell: no pipes, globs or variables, only a program and its arguments.
-pub fn run_then(command: &str) -> bool {
-    let words = match state::shell_split(command) {
-        Ok(words) if !words.is_empty() => words,
-        Ok(_) => return false,
+/// The action without a shell: no pipes, globs or variables, only a program and its arguments.
+fn then_command(command: &str) -> Option<Command> {
+    match state::shell_split(command) {
+        Ok(words) if !words.is_empty() => {
+            let mut program = Command::new(&words[0]);
+            program.args(&words[1..]);
+            Some(program)
+        }
+        Ok(_) => None,
         Err(error) => {
             warn!("ddp: --then: {}", error.message);
-            return false;
+            None
         }
-    };
-    match Command::new(&words[0]).args(&words[1..]).status() {
+    }
+}
+
+pub fn run_then(command: &str) -> bool {
+    let Some(mut program) = then_command(command) else { return false };
+    match program.status() {
         Ok(status) => status.success(),
         Err(error) => {
             warn!("ddp: --then: {error}");
             false
         }
     }
+}
+
+fn spawn_then(command: &str) -> Option<Child> {
+    then_command(command)?.spawn().map_err(|error| warn!("ddp: --then: {error}")).ok()
 }
 
 /// The saved `ddp connect` session, unless this command reads a file (offline mode).
@@ -415,6 +427,21 @@ pub fn net(args: &mut Args) -> Result<i32> {
             };
             say!("{}", py::dumps_pretty(&control.call("net.get", json!({"id": id}))?));
         }
+        Some("send") => {
+            let Some(url) = &args.request_id else {
+                fail!("net send needs a URL", "missing_option", "ddp net send https://example.com/api");
+            };
+            let mut params = json!({"url": url, "method": args.method.as_deref().unwrap_or("GET")});
+            if let Some(body) = &args.body {
+                params["body"] = json!(body);
+            }
+            let answer = control.call("net.send", params)?;
+            say!("{}", py::str(&answer["status"]));
+            if let Some(body) = answer["body"].as_str().filter(|b| !b.is_empty()) {
+                say!("{body}");
+            }
+        }
+        Some(action @ ("mock" | "fail")) => answer_paused(&mut control, args, action)?,
         Some("list") => {
             let answer = control.call("net.list", json!({}))?;
             let requests = answer["requests"].as_array().cloned().unwrap_or_default();
@@ -447,6 +474,145 @@ pub fn net(args: &mut Args) -> Result<i32> {
             })();
             result?;
         }
+    }
+    control.close();
+    Ok(0)
+}
+
+/// Holds the requests that match the pattern for `--for` (default 10s) and answers each one itself: `mock` with
+/// `--status` and `--body`, `fail` with the `--error` the app's client would throw. `--then` runs meanwhile.
+fn answer_paused(control: &mut Control, args: &Args, action: &str) -> Result<()> {
+    let Some(pattern) = &args.request_id else {
+        fail!(
+            format!("net {action} needs a URL pattern"),
+            "missing_option",
+            "ddp net list, then a pattern like '*/api/*'"
+        );
+    };
+    let (method, answer, outcome) = if action == "mock" {
+        let status = args.status.unwrap_or(200);
+        let body = args.body.clone().unwrap_or_default();
+        ("net.respond", json!({"status": status, "body": body}), status.to_string())
+    } else {
+        let error = args.error.clone().unwrap_or_else(|| "offline".into());
+        ("net.fail", json!({"error": error}), error)
+    };
+    let duration = parse_ms(args.duration.as_deref().unwrap_or("10s"))?;
+    control.call("net.intercept", json!({"urls": [pattern]}))?;
+    say!("{action} {pattern} -> {outcome} for {}ms", py::fixed(&py::fnum(duration), 0));
+    // Spawned, not waited for: the action may wait on a request only this loop can answer.
+    let mut then = args.then.as_deref().and_then(spawn_then);
+    let deadline = Instant::now() + Duration::from_millis(duration as u64);
+    let mut answered = 0;
+    while let Some(event) = control.next_event(Some(deadline))? {
+        if event["method"] != "net.paused" {
+            continue;
+        }
+        let mut params = answer.clone();
+        params["id"] = event["params"]["id"].clone();
+        control.call(method, params)?;
+        answered += 1;
+        let request = &event["params"]["request"];
+        say!("{} {} -> {outcome}", py::str(&request["method"]), py::str(&request["url"]));
+        if args.limit.is_some_and(|limit| answered >= limit) {
+            break;
+        }
+    }
+    control.call("net.release", json!({}))?;
+    if let Some(child) = then.as_mut() {
+        if !child.wait().is_ok_and(|status| status.success()) {
+            warn!("ddp: warning: --then command failed");
+        }
+    }
+    say!("{answered} {} answered", if answered == 1 { "request" } else { "requests" });
+    Ok(())
+}
+
+/// The app's preferences: UserDefaults on iOS, SharedPreferences on Android. `--in` picks a suite or file.
+pub fn prefs(args: &mut Args) -> Result<i32> {
+    let session = require_session()?;
+    let mut control = open(&session)?;
+    let file = args.name.clone().map(Value::from).unwrap_or(Value::Null);
+    let key = || match &args.key {
+        Some(key) => Ok(key.clone()),
+        None => Err(failure("which key?", "missing_option", Some("ddp prefs list"))),
+    };
+    match args.action.as_deref().unwrap_or("list") {
+        "files" => {
+            for name in control.call("prefs.files", json!({}))?["files"].as_array().into_iter().flatten() {
+                say!("{}", py::str(name));
+            }
+        }
+        "set" => {
+            let (key, value) = (key()?, args.value.clone().unwrap_or_default());
+            control.call("prefs.write", json!({"file": file, "key": key, "value": value}))?;
+            say!("set {key}");
+        }
+        "rm" => {
+            let key = key()?;
+            control.call("prefs.remove", json!({"file": file, "key": key}))?;
+            say!("removed {key}");
+        }
+        "clear" => {
+            control.call("prefs.clear", json!({"file": file}))?;
+            say!("cleared");
+        }
+        _ => {
+            let answer = control.call("prefs.read", json!({"file": file}))?;
+            let mut values: Vec<(&String, &Value)> = answer["values"].as_object().into_iter().flatten().collect();
+            values.sort_by(|a, b| a.0.cmp(b.0));
+            if values.is_empty() {
+                say!("no values");
+            }
+            for (key, value) in values {
+                say!("{key} = {}", py::str(value));
+            }
+        }
+    }
+    control.close();
+    Ok(0)
+}
+
+/// Runs a command the app added in Debug (`AgentDDP.command`, `AgentDdpCommands.add`); without a name, lists them.
+pub fn run_command(args: &mut Args) -> Result<i32> {
+    let session = require_session()?;
+    let mut control = open(&session)?;
+    let Some(name) = &args.name else {
+        let names = control.call("app.commands", json!({}))?;
+        let names: Vec<String> = names["commands"].as_array().into_iter().flatten().map(py::str).collect();
+        say!("{}", if names.is_empty() { "the app added no commands".to_string() } else { names.join("\n") });
+        return Ok(0);
+    };
+    let params: Value = match &args.value {
+        Some(text) => serde_json::from_str(text).map_err(|e| {
+            failure(format!("params are not JSON ({e})"), "bad_value", Some("ddp run NAME '{\"user\": \"test\"}'"))
+        })?,
+        None => json!({}),
+    };
+    let answer = control.call("app.run", json!({"name": name, "params": params}))?;
+    say!("{}", py::dumps(&answer["value"]));
+    Ok(0)
+}
+
+/// The app's log lines as they come: the last 100, then each new one, for `--for` or until stopped.
+pub fn follow_logs(args: &Args) -> Result<i32> {
+    let session = require_session()?;
+    let duration = args.duration.as_deref().map(parse_ms).transpose()?;
+    let deadline = duration.map(|ms| Instant::now() + Duration::from_millis(ms as u64));
+    let grep = args.grep.as_deref().map(str::to_lowercase);
+    let mut control = open(&session)?;
+    control.call("log.watch", json!({}))?;
+    while let Some(event) = control.next_event(deadline)? {
+        if event["method"] != "log.entry" {
+            continue;
+        }
+        let entry = &event["params"];
+        let text = py::str(&entry["text"]);
+        if grep.as_ref().is_some_and(|grep| !text.to_lowercase().contains(grep)) {
+            continue;
+        }
+        let time = state::local_time("%H:%M:%S", f(&entry["t"]) / 1000.0);
+        say!("{time} {} {} {text}", py::str(&entry["level"]), py::str(&entry["tag"]));
     }
     control.close();
     Ok(0)

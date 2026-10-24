@@ -90,3 +90,8 @@ The last open part of phase 3 was device settings. `ddp set` already changes the
 
 ### Scripts are app commands, not JavaScript
 Asked why I had said JavaScript before. JavaScript came from the CDP plan (`Runtime.evaluate`); under ADR 0008 it has no reason left, Android has no engine without a new dependency, and it cannot reach the app's Swift or Kotlin without a bridge. Proposed app commands: named closures the app adds in Debug. Asked whether they are Kotlin and Swift and whether they let the app send a request: yes, through the app's own API client, plus a built-in `net.send` with the app's client. Answer: "buenísimo hagamos eso entonces". (Great, let's do that.)
+
+### Phase 6: the CLI on the control endpoint
+Proposed the order: a small WebSocket client in the CLI with the standard library (the server is ours and local, so no crate), the existing commands first with the same output, then new commands with agent-browser as a guide, then phase 7. Answer: "continue with phase 6".
+
+`ddp tap` on iOS was the accessibility action of the v1 endpoint. It is now `input.touch`, a real finger, as on Android.

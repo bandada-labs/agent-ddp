@@ -63,6 +63,12 @@ ddp watch @e3 --until 'alpha>0.9'
 
 ```
 ddp tap @e3                      # a real touch at the element's center
+ddp type "ana@example.com" --into @e5   # tap the field, then type as the keyboard does
+ddp press Enter
+ddp net mock '*/api/cart*' --status 500 --then "ddp tap @e3"   # the app gets a 500 for that request
+ddp net fail '*/api/*' --error offline --then "ddp tap @e3"     # the app's client throws "offline"
+ddp prefs set onboardingDone true                # the app's UserDefaults / SharedPreferences
+ddp run                                          # commands the app added in Debug; ddp run login '{"user": "test"}'
 ddp open ddpsample://item/3      # a deep link (iOS asks "Open in ...?" for a custom scheme: confirm it)
 ddp set appearance dark          # also text-size, reduce-motion on|off, locale es-ES
 ddp logs --grep error            # the app's log lines during the last take, at their time in it

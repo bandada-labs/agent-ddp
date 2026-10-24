@@ -14,6 +14,8 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 - `app.commands`, `app.run`: named actions the app adds in Debug with `AgentDDP.command` (iOS) or `AgentDdpCommands.add` (Android), in its own Swift or Kotlin.
 - `screen.frame`, `screen.watch`, `screen.value`, `time.*`, `history.files`, `history.read`: what the v1 endpoint gives (snapshot, stream, eval, time) and the flight recorder's files, over the control endpoint.
 - The CLI talks to the control endpoint: `ddp connect` reads `control.json` on iOS and forwards `agentddp.<package>.control` on Android. Output is unchanged. `ddp tap` on iOS is now a real touch instead of the accessibility action, so it works on elements without one.
+- New commands: `ddp type` and `ddp press` (keyboard input), `ddp net send`, `ddp net mock` and `ddp net fail` (answer the app's requests for a while, `--then` runs meanwhile), `ddp prefs` (UserDefaults and SharedPreferences), `ddp run` (the app's own commands), `ddp logs --follow`.
+- Android: `prefs.*` with `"file": null` wrote to a file called `null` instead of the app's own preferences.
 - Android: a streamed frame could go out with the flight recorder's frame number and time, when the recorder stamped it before it was sent.
 - `net.send`: a request sent with the app's own client, logged and pausable like the app's requests. On iOS, the closure given to `AgentDDP.send` is now `@escaping`, because `net.send` reuses the last one.
 

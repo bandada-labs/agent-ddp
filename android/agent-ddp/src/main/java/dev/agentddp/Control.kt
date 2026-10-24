@@ -170,7 +170,8 @@ internal class ControlSession(private val app: ControlApp, private val send: (St
         networkWatch = null
     }
 
-    private fun JSONObject.file(): String? = optString("file").ifEmpty { null }
+    // optString reads a JSON null as the text "null".
+    private fun JSONObject.file(): String? = (opt("file") as? String)?.ifEmpty { null }
 
     private fun time(action: String, key: String? = null): (JSONObject) -> Any = { params ->
         Control.answer(onMain { TimeControl.handle(action, key?.let { params.optDouble(it) }?.takeUnless(Double::isNaN)) })
