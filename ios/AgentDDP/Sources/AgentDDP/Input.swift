@@ -2,7 +2,7 @@
 import Darwin
 import UIKit
 
-/// The CDP Input domain: real touches and typing from inside the app. iOS has no public API for an app to touch
+/// Real touches and typing from inside the app. iOS has no public API for an app to touch
 /// itself, so touches are IOHIDEvents handed to UIKit the way backboardd hands it a finger (the approach of Lyft's
 /// Hammer). UIKit then builds the UITouch itself, so gesture recognizers and SwiftUI see a real touch. Private API,
 /// so a new iOS version can break it (decisions log). Main thread only.
@@ -16,7 +16,7 @@ enum Input {
     static func touch(_ point: CGPoint?) throws {
         switch (finger, point) {
         case (nil, let point?):
-            guard let window = window(at: point) else { throw Cdp.Failure(description: "No window at that point") }
+            guard let window = window(at: point) else { throw Control.Failure(description: "No window at that point") }
             finger = (window, point)
             try send(point, phase: .began, to: window)
         case (let down?, let point?):
@@ -36,7 +36,7 @@ enum Input {
         (firstResponder() as? UIKeyInput)?.insertText(text.replacingOccurrences(of: "\r", with: "\n"))
     }
 
-    /// A key without text of its own, by its CDP `key` name. Other keys do nothing.
+    /// A key without text of its own, by name (`Enter`, `Tab`, `Backspace`). Other keys do nothing.
     static func press(_ key: String) {
         guard let field = firstResponder() as? UIKeyInput else { return }
         switch key {
@@ -109,8 +109,8 @@ enum Input {
         return unsafeBitCast(address, to: T.self)
     }
 
-    private static func unsupported(_ name: String) -> Cdp.Failure {
-        Cdp.Failure(description: "Touches need \(name), which this iOS version does not have")
+    private static func unsupported(_ name: String) -> Control.Failure {
+        Control.Failure(description: "Touches need \(name), which this iOS version does not have")
     }
 }
 #endif

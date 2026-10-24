@@ -8,35 +8,43 @@ Version: 1. The `header` of every stream, recording and history file carries it 
 - Changing what a field means, or removing a field or a command, raises the version and is listed in [CHANGELOG.md](../CHANGELOG.md).
 - A client stops when the version is higher than the one it knows, instead of guessing. The `ddp` CLI fails with code `protocol_too_new` and tells the user to update. It still reads every lower version.
 
-## Chrome DevTools Protocol endpoint
+## Control endpoint
 
-The library is moving to the Chrome DevTools Protocol (ADR 0007). Both endpoints run side by side until the `ddp` CLI has moved; everything below this section is the v1 JSON lines endpoint.
+The library also serves a control endpoint (ADR 0008), built from what Android and iOS have, not from a browser. Both endpoints run side by side until the `ddp` CLI has moved; everything below this section is the v1 JSON lines endpoint.
 
-Discovery and messages are the same as Chrome's: `GET /json/version` and `GET /json/list` (or `/json`), then a WebSocket at the `webSocketDebuggerUrl` from the list, carrying `{"id", "method", "params"}` and answering `{"id", "result"}` or `{"id", "error": {"code", "message"}}`. An unknown method answers `-32601` with `'<method>' wasn't found`.
+- Android: the abstract socket `agentddp.<package>.control`. From a host: `adb forward tcp:9333 localabstract:agentddp.<package>.control`. Only the shell user and root may connect.
+- iOS simulator: TCP on 127.0.0.1, the port in `Library/Caches/agent-ddp/control.json`. A `Host` other than localhost, 127.0.0.1 or ::1 gets a 403.
+- Connect with a WebSocket upgrade on any path. A request with an `Origin` header (a web page) gets a 403.
 
-- Android: the abstract socket `agentddp_<package>_devtools_remote`, listed by `chrome://inspect`. From a host: `adb forward tcp:9222 localabstract:agentddp_<package>_devtools_remote`. Only the shell user and root may connect.
-- iOS simulator: TCP on 127.0.0.1, the port in `Library/Caches/agent-ddp/cdp.json`. A `Host` other than localhost, 127.0.0.1 or ::1 gets a 500, a WebSocket `Origin` other than `devtools://` gets a 403, as in Chrome.
+Messages are JSON-RPC: `{"id", "method", "params"}`, answered by `{"id", "result"}` or `{"id", "error": {"code", "message"}}`. Events are `{"method", "params"}` with no `id`. Codes: -32700 not JSON, -32600 no integer `id`, -32601 unknown method, -32000 anything else, with a message for a person.
 
-The app is one target with id `app`, type `page`, and the URL `android-app://<package>` or `ios-app://<bundle id>`.
+Coordinates are window coordinates in the platform's unit, the same as in frames: points on iOS, pixels on Android. `app.info` gives the unit and the scale.
 
-`/json/version` points at `/devtools/browser/app`, the list at `/devtools/page/app`. Both reach the same page. The difference is the one Chrome has: on the browser connection `Target.setAutoAttach` attaches the page, on the page connection it attaches nothing.
+| Method | Params | Result or events |
+| --- | --- | --- |
+| `app.info` | | `protocol` (2), `platform`, `app` (bundle id or package), `name`, `unit`, `scale` |
+| `screen.elements` | | `elements`, the same shape as in a `frame` |
+| `screen.capture` | `format` png or jpeg, `quality`, `clip` `[x, y, width, height]` | `data`, base64, in device pixels. Every window of the app, dialogs included. On Android, SurfaceView and TextureView content is not drawn |
+| `input.touch` | `phase` down, move or up; `x`, `y` | One finger, delivered as the system delivers it: an IOHIDEvent handed to UIKit (private API) on iOS, a `MotionEvent` to the window under the point on Android. Gesture recognizers, SwiftUI and Compose see a real finger. Scroll with down, moves, up |
+| `input.type` | `text` | Types into the focused field as the keyboard does. Nothing happens with no field focused |
+| `input.key` | `key`: `Enter`, `Tab`, `Backspace` | Enter in a single-line field runs its action (Done, Search) |
+| `net.list` | | `requests`: the `request` summaries of `ddp net` |
+| `net.get` | `id` | The full entry with headers and bodies, redacted, bodies cut at 16 KB |
+| `net.watch`, `net.unwatch` | | `net.request` event with each summary as the request ends |
+| `net.intercept` | `urls`: wildcards with `*` and `?`; none pauses every request | `net.paused` event: `{id, request: {url, method, headers, body}}`, redacted |
+| `net.continue` | `id`, and any of `url`, `method`, `headers` (object), `body` (text) | The request goes on. A value sent back as it was shown, such as a `[redacted]` header, keeps its real value |
+| `net.respond` | `id`, `status`, `headers`, `body` (text) | The app gets this answer; nothing is sent |
+| `net.fail` | `id`, `error`: `offline`, `host`, `timeout`, `refused`, `unreachable`, `lost`, `cancelled`, `failed` | The app gets the error its client would throw: a `URLError` on iOS, the OkHttp `IOException` on Android |
+| `net.release` | | Paused requests go on unchanged. The same happens when the client disconnects. One client intercepts at a time: the last `net.intercept` wins |
+| `log.watch`, `log.unwatch` | | The last 100 lines, then each new one, as `log.entry` events: `{t, level, tag, text}`. `t` is ms since 1970, `level` debug, info, warn or error, `tag` the logcat tag or the os_log category. iOS reads os_log, Logger and NSLog once a second (not `print`); Android reads `logcat --pid` |
+| `prefs.files` | | `files`: the preferences files (Android) or suites (iOS) on disk, the app's own included |
+| `prefs.read` | `file`: none for the app's own preferences | `values`: key to text. Sets and arrays are JSON, dates ISO 8601, data base64. Secrets (keys like `token`, and registered values) read as `[redacted]` |
+| `prefs.write` | `file`, `key`, `value` (text) | Keeps the type the key holds: a Boolean stays a Boolean, a set takes a JSON array. A new key is a string. `[redacted]` leaves the real value |
+| `prefs.remove`, `prefs.clear` | `file`, and `key` for remove | |
 
-Coordinates are CSS pixels the way the platform's browser counts them: points on iOS, dp on Android. Screenshots are in device pixels.
+Only requests through `AgentDDP.send` (iOS) or `AgentDdpInterceptor` (Android) are paused. Bodies in `net.*` are UTF-8 text.
 
-Methods today:
-
-- `Browser.getVersion`, `Schema.getDomains`.
-- `Target.getTargets`, `getTargetInfo`, `setDiscoverTargets`, `attachToTarget`, `detachFromTarget`, `setAutoAttach`. Sessions are flat (`flatten: true`): a message with a `sessionId` gets it back on its answer. Attaching sends `Target.attachedToTarget` first, as Chrome does.
-- `enable` and `disable` of Accessibility, DOM, Log, Network, Page and Runtime. Network and Log send events; the others do not send any yet. `Runtime.runIfWaitingForDebugger`.
-- `Accessibility.getFullAXTree`: a `RootWebArea` node named after the app, with one child per element. `role` is the element's role, `name` its label or else its id. Node ids are positions in that read and hold only until the screen changes.
-- DOM: `getDocument` (`depth`, default 1, -1 for all), `describeNode`, `getAttributes`, `getOuterHTML`, `querySelector`, `querySelectorAll`, `getBoxModel`, `requestChildNodes` (answered with `DOM.setChildNodes`, as Chrome does). The tree is `#document > html > body`, then one node per element in the same order as the accessibility tree, so `backendDOMNodeId` points at the same node. The tag is the role (`text` for StaticText); the attributes are `role`, `id` and `label` on both platforms. Selectors are compound selectors with tag, `#id`, `[attr]` and `[attr=, ^=, $=, *= value]`, in comma lists. The tree has no view hierarchy yet, so combinators fail with `DOM Error while querying`. The box model has no padding, border or margin: all four quads are the frame.
-- Network: `enable` sends `requestWillBeSent`, `responseReceived` and `loadingFinished` or `loadingFailed` for each request the app's Debug network decorator reports (the same requests as `ddp net`), with the `sessionId` that enabled it. The decorator only hears of a request when it ends, so the events of one request arrive together; `timestamp` and `wallTime` are seconds since 1970, start and end. `getResponseBody` and `getRequestPostData` return the redacted text, cut at 16 KB, never base64. Request ids are the `ddp net` ids (`n1`).
-- Log: `enable` replays the last 100 entries, as Chrome replays its buffer, then sends `Log.entryAdded` for each new one. iOS reads the app's process log (os_log, Logger, NSLog; not `print`) once a second, with the category before the text. Android reads `logcat --pid` of the app, with the tag before the text. The same lines `ddp logs` shows.
-- `Page.captureScreenshot`: `format` png or jpeg, `quality`, `clip`. Every window of the app, like a frame capture. On Android, SurfaceView and TextureView content is not drawn.
-- Input: real touches inside the app, so gesture recognizers, Compose and SwiftUI see a finger. `dispatchMouseEvent` with `mousePressed`, `mouseMoved` and `mouseReleased`; `dispatchTouchEvent` with the first touch point; `x` and `y` in CSS px (points on iOS, dp on Android). One finger. `mouseWheel` is refused: scroll with touch events. On iOS the touch is an IOHIDEvent handed to UIKit through private API; on Android a `MotionEvent` sent to the window under the point, popups and dialogs included. `dispatchKeyEvent` and `insertText` type into the focused field: text as the keyboard types it, plus `Enter`, `Tab` and `Backspace`. Enter in a single-line field runs its action (Done, Search). With no field focused, keys do nothing.
-- Fetch, request stage: `enable` with `patterns` (`urlPattern` with `*` and `?`; no patterns pauses every request), `disable`, `continueRequest` (`url`, `method`, `headers`, `postData`), `fulfillRequest` (`responseCode`, `responseHeaders`, `body` in base64) and `failRequest` (`errorReason`). Each paused request sends `Fetch.requestPaused`, redacted like Network. A value sent back unchanged, such as a `[redacted]` header, keeps its real value. A `requestStage` of `Response` is refused. Only requests through `AgentDDP.send` (iOS) or `AgentDdpInterceptor` (Android) are paused. One client at a time: the last `enable` wins. Paused requests go on unchanged on `disable` or when the client disconnects.
-
-The rest of the domains come in the order in [STATUS.md](STATUS.md).
+The rest comes in the order in [STATUS.md](STATUS.md).
 
 ## Transport
 

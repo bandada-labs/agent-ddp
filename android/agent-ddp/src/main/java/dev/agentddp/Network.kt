@@ -33,7 +33,7 @@ object AgentDdpNetwork {
 }
 
 /**
- * OkHttp interceptor for the app's Debug client. Add it with `addInterceptor`, not `addNetworkInterceptor`: CDP Fetch
+ * OkHttp interceptor for the app's Debug client. Add it with `addInterceptor`, not `addNetworkInterceptor`: a client
  * can answer a request without sending it. Reads at most 16 KB of each response body, without consuming it.
  */
 class AgentDdpInterceptor : Interceptor {
@@ -134,7 +134,7 @@ internal object NetworkLog {
 internal class Redactor(private val values: List<String>) {
     companion object {
         const val BODY_LIMIT = 16 * 1024
-        private const val MASK = "[redacted]"
+        const val MASK = "[redacted]"
         private val secretName = Regex("secret|token|key|password|attest|authorization|cookie", RegexOption.IGNORE_CASE)
         fun isSecret(name: String) = secretName.containsMatchIn(name)
     }

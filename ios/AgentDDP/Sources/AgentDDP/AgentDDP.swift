@@ -11,7 +11,7 @@ public enum AgentDDP {
         #if DEBUG && canImport(UIKit)
         FrameRecorder.shared.listenForRequests()
         LiveServer.shared.start(directory: FrameRecorder.shared.outputDirectory)
-        CdpServer.shared.start(directory: FrameRecorder.shared.outputDirectory)
+        ControlServer.shared.start(directory: FrameRecorder.shared.outputDirectory)
         History.shared.start(directory: FrameRecorder.shared.outputDirectory.appendingPathComponent("history"))
         #endif
     }
@@ -26,8 +26,8 @@ public enum AgentDDP {
         #endif
     }
 
-    /// Sends `request` with the app's own client, for its Debug network decorator: `ddp net` and CDP Network see it,
-    /// and CDP Fetch can pause, change, answer or fail it before `send` runs. Outside Debug it only calls `send`.
+    /// Sends `request` with the app's own client, for its Debug network decorator: `ddp net` sees it,
+    /// and a client can pause, change, answer or fail it before `send` runs. Outside Debug it only calls `send`.
     public static func send(_ request: URLRequest,
                             using send: (URLRequest) async throws -> (Data, URLResponse)) async throws -> (Data, URLResponse) {
         #if DEBUG && canImport(UIKit)

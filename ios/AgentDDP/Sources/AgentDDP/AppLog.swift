@@ -2,7 +2,7 @@
 import Foundation
 import OSLog
 
-/// The app's own log (os_log, Logger, NSLog) for CDP `Log.entryAdded`. `print` goes to stdout, not the log, so it
+/// The app's own log (os_log, Logger, NSLog). `print` goes to stdout, not the log, so it
 /// is not seen. Polls once a second while someone listens.
 final class AppLog {
     private static let replayed = 100
@@ -14,7 +14,7 @@ final class AppLog {
 
     init(send: @escaping ([String: Any]) -> Void) { self.send = send }
 
-    /// Sends the last entries, as Chrome replays its buffer on `Log.enable`, then each new one.
+    /// Sends the last entries, then each new one.
     func start() {
         queue.async { [self] in
             guard let store = try? OSLogStore(scope: .currentProcessIdentifier) else { return }
@@ -54,13 +54,12 @@ final class AppLog {
 
     private func key(_ entry: OSLogEntryLog) -> String { "\(entry.category)|\(entry.composedMessage)" }
 
-    /// Chrome's `Log.LogEntry`. The category goes before the text, the way `ddp logs` shows it.
+    /// `{t, level, tag, text}`, with the os_log category as the tag, the way `ddp logs` shows it.
     static func logEntry(level: OSLogEntryLog.Level, category: String, message: String, date: Date) -> [String: Any] {
-        let levels: [OSLogEntryLog.Level: String] = [.debug: "verbose", .info: "info", .notice: "info",
+        let levels: [OSLogEntryLog.Level: String] = [.debug: "debug", .info: "info", .notice: "info",
                                                      .error: "error", .fault: "error"]
-        return ["source": "other", "level": levels[level] ?? "info",
-                "text": category.isEmpty ? message : "\(category): \(message)",
-                "timestamp": (date.timeIntervalSince1970 * 1000).rounded()]
+        return ["t": Int((date.timeIntervalSince1970 * 1000).rounded()), "level": levels[level] ?? "info",
+                "tag": category, "text": message]
     }
 }
 #endif

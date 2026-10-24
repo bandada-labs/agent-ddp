@@ -1,10 +1,12 @@
 #if DEBUG && canImport(UIKit)
 import Foundation
 
-/// The CDP Fetch domain at the request stage. Requests the app sends through `AgentDDP.send` wait here while a client
-/// has them paused, then go on (changed or not), get the client's answer, or fail. Paused requests show redacted, as
-/// in Network; a value the client sends back unchanged keeps the real one, so a secret never has to leave the app.
-// ponytail: one client intercepts at a time, the last Fetch.enable wins. Chain them when two clients need it.
+/// Pausing the app's requests. Requests the app sends through `AgentDDP.send` wait here while a client intercepts
+/// them, then go on (changed or not), get the client's answer, or fail with the URLError the app's code would see.
+/// Paused requests show redacted, as in the network log; a value the client sends back unchanged keeps the real one,
+/// so a secret never has to leave the app.
+// ponytail: one client intercepts at a time, the last net.intercept wins. Chain them when two clients need it.
+// ponytail: bodies are UTF-8 text. Add base64 when a client needs to send binary bodies.
 final class Fetch {
     static let shared = Fetch()
 
@@ -27,8 +29,9 @@ final class Fetch {
     private var paused: [String: Paused] = [:]
     private var nextNumber = 1
 
-    func enable(owner: AnyObject, params: [String: Any], listener: @escaping ([String: Any]) -> Void) throws {
-        let patterns = try (params["patterns"] as? [[String: Any]] ?? [["urlPattern": "*"]]).compactMap(Self.pattern)
+    /// `urls` are wildcards; without them every request pauses.
+    func intercept(owner: AnyObject, params: [String: Any], listener: @escaping ([String: Any]) -> Void) {
+        let patterns = (params["urls"] as? [String] ?? ["*"]).map(Self.wildcard)
         lock.lock()
         let released = paused.values
         paused = [:]
@@ -39,8 +42,8 @@ final class Fetch {
         released.forEach { $0.resume(.proceed($0.request)) }
     }
 
-    /// Lets every paused request go on unchanged, as Chrome does when the client goes away.
-    func disable(owner: AnyObject) {
+    /// Lets every paused request go on unchanged.
+    func release(owner: AnyObject) {
         lock.lock()
         guard self.owner == ObjectIdentifier(owner) else { return lock.unlock() }
         let released = paused.values
@@ -65,64 +68,60 @@ final class Fetch {
             let shown = Self.shown(request, NetworkLog.shared.currentRedactor)
             paused[id] = Paused(request: request, shown: shown, resume: { continuation.resume(returning: $0) })
             lock.unlock()
-            listener(["requestId": id, "request": shown, "frameId": "app", "resourceType": "Fetch"])
+            listener(["id": id, "request": shown])
         }
     }
 
-    func continueRequest(_ params: [String: Any]) throws {
+    func proceed(_ params: [String: Any]) throws {
         try resume(params) { paused in
             var request = paused.request
             if let url = params["url"] as? String, url != paused.shown["url"] as? String {
-                guard let changed = URL(string: url) else { throw Cdp.Failure(description: "Invalid URL") }
+                guard let changed = URL(string: url) else { throw Control.Failure(description: "Invalid url") }
                 request.url = changed
             }
             if let method = params["method"] as? String { request.httpMethod = method }
-            if let postData = params["postData"] as? String {
-                let body = try Self.base64(postData)
-                if String(decoding: body, as: UTF8.self) != paused.shown["postData"] as? String { request.httpBody = body }
-            }
-            if let headers = params["headers"] as? [[String: Any]] {
+            if let body = params["body"] as? String, body != paused.shown["body"] as? String { request.httpBody = Data(body.utf8) }
+            if let headers = params["headers"] as? [String: String] {
                 let shown = paused.shown["headers"] as? [String: String] ?? [:]
                 let real = paused.request.allHTTPHeaderFields ?? [:]
                 request.allHTTPHeaderFields = headers.reduce(into: [:]) { result, header in
-                    let name = header["name"] as? String ?? "", value = header["value"] as? String ?? ""
-                    result[name] = value == shown[name] ? real[name] ?? value : value
+                    result[header.key] = header.value == shown[header.key] ? real[header.key] ?? header.value : header.value
                 }
             }
             return .proceed(request)
         }
     }
 
-    func fulfillRequest(_ params: [String: Any]) throws {
+    func respond(_ params: [String: Any]) throws {
         try resume(params) { paused in
-            guard let status = params["responseCode"] as? Int else { throw Cdp.Failure(description: "Invalid parameters: responseCode") }
-            let headers = (params["responseHeaders"] as? [[String: Any]] ?? []).reduce(into: [String: String]()) {
-                $0[$1["name"] as? String ?? ""] = $1["value"] as? String ?? ""
+            guard let status = params["status"] as? Int, (100...599).contains(status) else {
+                throw Control.Failure(description: "status is 100 to 599")
             }
-            let body = try (params["body"] as? String).map(Self.base64) ?? Data()
             guard let url = paused.request.url,
-                  let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers) else {
-                throw Cdp.Failure(description: "Invalid http status code or phrase")
+                  let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1",
+                                                 headerFields: params["headers"] as? [String: String] ?? [:]) else {
+                throw Control.Failure(description: "Invalid response")
             }
-            return .fulfill(body, response)
+            return .fulfill(Data((params["body"] as? String ?? "").utf8), response)
         }
     }
 
-    func failRequest(_ params: [String: Any]) throws {
+    func fail(_ params: [String: Any]) throws {
         try resume(params) { _ in
-            let reason = params["errorReason"] as? String ?? ""
-            guard let code = Self.errorCodes[reason] else { throw Cdp.Failure(description: "Invalid parameters: errorReason") }
+            guard let code = Self.errors[params["error"] as? String ?? ""] else {
+                throw Control.Failure(description: "error is one of \(Self.errors.keys.sorted().joined(separator: ", "))")
+            }
             return .fail(URLError(code))
         }
     }
 
     /// Decides first, so a bad message leaves the request paused for the next one.
     private func resume(_ params: [String: Any], _ decide: (Paused) throws -> Decision) throws {
-        let id = params["requestId"] as? String ?? ""
+        let id = params["id"] as? String ?? ""
         lock.lock()
         let found = paused[id]
         lock.unlock()
-        guard let found else { throw Cdp.Failure(description: "Invalid InterceptionId.") }
+        guard let found else { throw Control.Failure(description: "No paused request '\(id)'") }
         let decision = try decide(found)
         lock.lock()
         let stillPaused = paused.removeValue(forKey: id) != nil
@@ -130,15 +129,7 @@ final class Fetch {
         if stillPaused { found.resume(decision) }
     }
 
-    private static func pattern(_ pattern: [String: Any]) throws -> NSRegularExpression? {
-        if let stage = pattern["requestStage"] as? String, stage != "Request" {
-            throw Cdp.Failure(description: "Only requestStage Request; answer a request with Fetch.fulfillRequest")
-        }
-        if let type = pattern["resourceType"] as? String, !["Fetch", "XHR"].contains(type) { return nil }
-        return wildcard(pattern["urlPattern"] as? String ?? "*")
-    }
-
-    /// Chrome's URL pattern: `*` is any run of characters, `?` one character, a backslash escapes the next one.
+    /// `*` is any run of characters, `?` one character, a backslash escapes the next one.
     static func wildcard(_ pattern: String) -> NSRegularExpression {
         var regex = "^"
         var escaped = false
@@ -157,25 +148,15 @@ final class Fetch {
     private static func shown(_ request: URLRequest, _ redactor: Redactor) -> [String: Any] {
         var shown: [String: Any] = [
             "url": request.url.map(redactor.url) ?? "", "method": request.httpMethod ?? "GET",
-            "headers": redactor.headers(request.allHTTPHeaderFields ?? [:]), "hasPostData": request.httpBody != nil,
-            "initialPriority": "High", "referrerPolicy": "strict-origin-when-cross-origin",
+            "headers": redactor.headers(request.allHTTPHeaderFields ?? [:]),
         ]
-        if let body = redactor.body(request.httpBody) { shown["postData"] = body }
+        if let body = redactor.body(request.httpBody) { shown["body"] = body }
         return shown
     }
 
-    private static func base64(_ text: String) throws -> Data {
-        guard let data = Data(base64Encoded: text) else { throw Cdp.Failure(description: "Invalid parameters: not base64") }
-        return data
-    }
-
-    private static let errorCodes: [String: URLError.Code] = [
-        "Failed": .unknown, "Aborted": .cancelled, "TimedOut": .timedOut, "AccessDenied": .noPermissionsToReadFile,
-        "ConnectionClosed": .networkConnectionLost, "ConnectionReset": .networkConnectionLost,
-        "ConnectionAborted": .networkConnectionLost, "ConnectionRefused": .cannotConnectToHost,
-        "ConnectionFailed": .cannotConnectToHost, "AddressUnreachable": .cannotConnectToHost,
-        "NameNotResolved": .cannotFindHost, "InternetDisconnected": .notConnectedToInternet,
-        "BlockedByClient": .cancelled, "BlockedByResponse": .badServerResponse,
+    private static let errors: [String: URLError.Code] = [
+        "offline": .notConnectedToInternet, "host": .cannotFindHost, "timeout": .timedOut, "refused": .cannotConnectToHost,
+        "unreachable": .cannotConnectToHost, "lost": .networkConnectionLost, "cancelled": .cancelled, "failed": .unknown,
     ]
 }
 #endif

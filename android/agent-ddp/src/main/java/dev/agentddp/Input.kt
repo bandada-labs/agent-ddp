@@ -11,7 +11,7 @@ import android.view.View
 import android.view.inputmethod.EditorInfo
 
 /**
- * The CDP Input domain: touches and typing dispatched into the app's own windows, the way the system delivers them,
+ * Touches and typing dispatched into the app's own windows, the way the system delivers them,
  * so gesture detectors and Compose see a real finger. Main thread only.
  */
 // ponytail: one finger. Add more when a client sends multi-touch (pinch).
@@ -22,19 +22,19 @@ internal object Input {
     val isTouching get() = finger != null
 
     /**
-     * Moves the one finger to [point] in dp on screen, or lifts it when null. Pressing, moving and lifting follow from
-     * whether a finger is down, so mouse and touch events share this.
+     * Moves the one finger to [point] in pixels on screen, or lifts it when null. Pressing, moving and lifting follow from
+     * whether a finger is down.
      */
     fun touch(point: PointF?) {
         val down = finger
         when {
             down == null && point != null -> {
-                val screenPx = toPx(point)
+                val screenPx = point
                 val root = roots().lastOrNull { it.isShown && screenRect(it).contains(screenPx.x, screenPx.y) }
                     ?: throw IllegalStateException("No window at that point")
                 Finger(root, SystemClock.uptimeMillis(), screenPx).also { finger = it }.dispatch(MotionEvent.ACTION_DOWN)
             }
-            down != null && point != null -> down.apply { screenPx = toPx(point) }.dispatch(MotionEvent.ACTION_MOVE)
+            down != null && point != null -> down.apply { screenPx = point }.dispatch(MotionEvent.ACTION_MOVE)
             down != null -> {
                 finger = null
                 down.dispatch(MotionEvent.ACTION_UP)
@@ -44,7 +44,7 @@ internal object Input {
 
     /**
      * Text into the focused field through its input connection, as the keyboard types it. Nothing happens when no
-     * field has focus, like keys sent to a page with nothing focused.
+     * field has focus.
      */
     fun type(text: String) {
         val connection = focused()?.onCreateInputConnection(EditorInfo()) ?: return
@@ -55,7 +55,7 @@ internal object Input {
     }
 
     /**
-     * A key without text of its own, by its CDP `key` name. Other keys do nothing. Enter in a single-line field runs
+     * A key without text of its own, by name (`Enter`, `Tab`, `Backspace`). Other keys do nothing. Enter in a single-line field runs
      * the field's action, as the keyboard's action button does: Compose ignores a hardware Enter there.
      */
     fun press(key: String) {
@@ -87,11 +87,6 @@ internal object Input {
     private fun roots(): List<View> = FrameRecorder.resumedActivity?.window?.decorView?.let(FrameCapture::windowRoots).orEmpty()
 
     private fun focused(): View? = roots().asReversed().firstNotNullOfOrNull { it.findFocus() }
-
-    private fun toPx(point: PointF): PointF {
-        val density = roots().firstOrNull()?.resources?.displayMetrics?.density ?: 1f
-        return PointF(point.x * density, point.y * density)
-    }
 
     private fun screenRect(view: View): RectF {
         val origin = IntArray(2).also(view::getLocationOnScreen)

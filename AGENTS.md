@@ -5,6 +5,7 @@ This file is for agents that change agent-ddp itself. To use ddp on an app, run 
 - Start with [docs/README.md](docs/README.md): the read order, the project status, the maintainer's standing decisions and the ADRs. Follow decisions in `docs/DECISIONS.md` without asking again.
 - Nothing leaves the machine without the maintainer's yes: no push, tag, release or publish.
 - Read [ARCHITECTURE.md](ARCHITECTURE.md) before a change. Its rules are not optional: Debug only, read-only library, cheap main thread, local endpoint, one wire format, no daemon, stable output.
+- The core is Android and iOS. Names, types and units come from the platforms; never build around browser concepts the app does not have (HTML document, CSS, localStorage). agent-browser is a guide for the CLI's good ideas, not something to copy 1:1 (ADR 0008).
 - The protocol in [docs/protocol.md](docs/protocol.md) is shared by the iOS library, the Android library and the CLI. A change to it touches all three, or explains why not.
 - CLI output is a contract that tests compare as text. `py.rs` keeps numbers and JSON printed the same way everywhere. Do not format values by hand.
 - Errors go through `fail!` with a stable code and a `next` command the agent can run.

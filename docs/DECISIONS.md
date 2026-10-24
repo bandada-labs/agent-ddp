@@ -22,10 +22,11 @@ A line leaves this file when the maintainer replaces it or when its work has lan
 
 - The CLI is Rust. (2026-10-23, "Rust first")
 - The flight recorder ("what happened 15 minutes ago") exists on both platforms. (2026-10-23, "add iOS, I think it is missing for the black box")
-- The library speaks CDP itself (same messages, domains, methods and events), not new ddp options. `Runtime.evaluate` runs JavaScript: JavaScriptCore on iOS, QuickJS on Android in a debug-only artifact. No Rust core for now. ADR 0007. (2026-10-23)
-- CDP work is checked against agent-browser, the client agents use. Making Chrome DevTools panels work is not a goal. (2026-10-23)
-- The CDP phases go in order (ADR 0007, STATUS.md). Every answer stays small for agents: only the fields we have, no padding to look like Chrome. Low memory in the app and the CLI. Each phase should give agents something agent-device cannot. (2026-10-23)
-- No CSS domain. Styles reach clients through `getComputedStyle` in the phase 4 JavaScript DOM, with CSS names for the values the library captures. (2026-10-23)
+- The core is Android and iOS: names, types and units come from the platforms, never from a browser. No 1:1 compatibility with Chrome or agent-browser. (2026-10-23, "in the core it must be Android and iOS")
+- agent-browser is a reference and a guide, not something to copy literally. Take its good ideas (short commands, refs, small output); do not copy browser concepts the app does not have. (2026-10-23, "it's a reference, not literal, it's there to help us as a guide")
+- The library serves its own protocol with native names over a WebSocket, not CDP. Translating to browser concepts only pays off for 1:1 compatibility, which is not wanted. ADR 0008, which replaced ADR 0007. (2026-10-23, "yes go ahead")
+- No CSS domain and no `getComputedStyle`. Styles are the native values the library captures (layer fill, border, corner, Compose modifiers), under their own names. (2026-10-23, replaces "CSS through the JavaScript DOM")
+- The phases go in order (ADR 0008, STATUS.md). Every answer stays small for agents: only the fields we have, no padding to look like Chrome. Low memory in the app and the CLI. Each phase should give agents something agent-device cannot. (2026-10-23)
 - `Input` on iOS synthesizes real touches with private API, Debug only: an IOHIDEvent handed to UIKit as backboardd hands it a finger (the approach of Lyft's Hammer). On Android it dispatches `MotionEvent`s to the window. (2026-10-23)
 
 ## Distribution

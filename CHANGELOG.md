@@ -4,14 +4,13 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 
 ## Unreleased
 
-- The library also serves the Chrome DevTools Protocol (ADR 0007): discovery on `/json/version` and `/json/list`, a WebSocket with `Browser.getVersion`, `Target.getTargets` and `Schema.getDomains`. On Android `chrome://inspect` lists the app. The v1 endpoint is unchanged.
-- CDP: flat Target sessions, `Accessibility.getFullAXTree` and `Page.captureScreenshot`. agent-browser can `connect`, `snapshot` and `screenshot` an app on both platforms.
-- CDP DOM over the elements: `getDocument`, `querySelector(All)` with `button#saveButton` or `[label='Save']` on both platforms, `getBoxModel`, `getOuterHTML`.
-- CDP Network events and `getResponseBody` for the requests `ddp net` sees, redacted the same way.
-- CDP `Log.entryAdded` with the app's own log lines (os_log on iOS, logcat on Android).
-- CDP Fetch: pause the app's requests, then let them go on changed, answer them or fail them (`continueRequest`, `fulfillRequest`, `failRequest`). New on iOS: `AgentDDP.send(request) { ... }` for the Debug network decorator, which logs the request and lets Fetch reach it.
-- CDP Input: `dispatchMouseEvent`, `dispatchTouchEvent`, `dispatchKeyEvent` and `insertText` touch and type inside the app. Taps, long presses and drags reach gesture recognizers, SwiftUI and Compose as a real finger.
-- Elements have a `role` (`button`, `textbox`, `checkbox` and so on), the same words on iOS and Android.
+- New control endpoint in the library (ADR 0008), next to the v1 one: JSON-RPC over a WebSocket, with names taken from the app. Android: the abstract socket `agentddp.<package>.control`. iOS simulator: the port in `Library/Caches/agent-ddp/control.json`. Web pages may not connect. `app.info` answers `"protocol": 2`. The v1 endpoint is unchanged.
+- `screen.elements` and `screen.capture`: the elements of the screen, in the same shape as in frames, and an image of every window.
+- `input.touch`, `input.type`, `input.key`: real touches and typing inside the app, in points on iOS and pixels on Android. Taps, long presses and drags reach gesture recognizers, SwiftUI and Compose.
+- `net.list`, `net.get`, `net.watch`: the requests `ddp net` sees, redacted the same way.
+- `net.intercept`, `net.continue`, `net.respond`, `net.fail`: pause the app's requests, then let them go on changed, answer them, or fail them the way the app's code sees a failure (`offline`, `timeout`). New on iOS: `AgentDDP.send(request) { ... }` for the app's Debug network decorator.
+- `log.watch`: the app's own log lines (os_log on iOS, logcat on Android).
+- `prefs.files`, `prefs.read`, `prefs.write`, `prefs.remove`, `prefs.clear`: UserDefaults and SharedPreferences. A write keeps the type the key holds; secrets read as `[redacted]`.
 
 ## 0.1.5 (2026-10-23)
 

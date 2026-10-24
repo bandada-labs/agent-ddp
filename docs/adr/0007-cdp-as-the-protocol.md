@@ -1,6 +1,6 @@
 # 0007 The library speaks the Chrome DevTools Protocol
 
-Status: accepted, 2026-10-23. Amends 0001 (the endpoint) and the "the library reads" rule in ARCHITECTURE.md.
+Status: superseded by [0008](0008-native-protocol.md), 2026-10-23. Kept for the history: the library no longer speaks CDP.
 
 ## Decision
 
@@ -8,11 +8,15 @@ The library inside the Debug build serves the Chrome DevTools Protocol itself: t
 
 - Transport as in Chrome: HTTP discovery (`/json/version`, `/json/list`) and JSON-RPC over a WebSocket. On Android an abstract socket named `<package>_devtools_remote`, the name `chrome://inspect` looks for. On the iOS simulator a TCP port on 127.0.0.1, written to `Library/Caches/agent-ddp/cdp.json`.
 - Messages as in Chrome: `{"id", "method", "params"}` answered by `{"id", "result"}` or `{"id", "error": {"code", "message"}}`, events as `{"method", "params"}`. An unknown method answers `-32601` like Chrome does.
-- Each domain keeps its CDP names and does the native thing underneath: DOM is the view tree, `getComputedStyle` in the JavaScript DOM the drawn values (no CSS domain, see the decisions log), Network and Fetch the app's own client, DOMStorage UserDefaults and SharedPreferences, Input touches inside the app.
+- A domain keeps its CDP names where they fit the app, and does the native thing underneath: DOM is a thin view over the element tree, Network and Fetch the app's own client, DOMStorage UserDefaults and SharedPreferences, Input touches inside the app. No CSS domain.
 - What CDP has no name for (per-frame fills, borders, what covers what, the flight recorder) goes in one vendor domain, `DDP`.
-- `Runtime.evaluate` runs real JavaScript: JavaScriptCore on iOS (part of the system), QuickJS on Android, compiled with the NDK into a separate artifact the app adds with `debugImplementation`. Scripts reach the app through one `app` object with the same API on both platforms (`app.fetch`, `app.storage`, `app.element`, `app.action`), and through `ObjC` and `Java` bridges for platform code.
+- `Runtime.evaluate` runs real JavaScript: JavaScriptCore on iOS (part of the system), QuickJS on Android, compiled with the NDK into a separate artifact the app adds with `debugImplementation`. Scripts reach the app through one `app` object with the same API on both platforms (`app.fetch`, `app.storage`, `app.element`, `app.action`), and through `ObjC` and `Java` bridges for platform code. There is no `document` and no `getComputedStyle`.
 - Debugger, Profiler and HeapProfiler are made for JavaScript sources the app does not have. They answer "not supported".
 - The library may change app state in Debug through the domains that exist for it (Input, Fetch, DOMStorage, Emulation, Runtime). Release builds still contain none of it.
+
+## Native core
+
+The core is Android and iOS. Every feature is first a native module with native names and types (a preferences file with its Bool and Int values, a layer with its fill and corner). The CDP method is an adapter of a few lines on top of it. Browser concepts the app does not have (an HTML document, CSS, localStorage and sessionStorage) never enter the core; where an adapter needs one to answer a CDP client, it stays in the adapter. There is no goal of 1:1 compatibility with Chrome or with any client. agent-browser is a guide for good ideas (short commands, refs, small output), not a spec.
 
 ## Why
 

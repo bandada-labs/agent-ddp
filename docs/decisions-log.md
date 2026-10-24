@@ -70,3 +70,16 @@ After hearing that agent-browser reads styles with `getComputedStyle` in JavaScr
 
 ### Touches on iOS
 Asked how `Input` should touch the app on iOS, where no public API lets an app touch itself. Picked "Synthesized touch": private UIKit and IOKit calls, the way KIF and EarlGrey do it, Debug only. Real touches, so gesture recognizers, SwiftUI, drags and scrolling work. A new iOS version can break it and then we fix it. Built as an IOHIDEvent handed to UIKit (Lyft's Hammer approach): KIF's UITouch path reached the view but not SwiftUI's gesture recognizers.
+
+### Native core, browser names only outside
+After seeing Storage built as "localStorage" and the plan for a JavaScript DOM with `getComputedStyle`: "osea la idea es usar como cosas parecidas mismos api nombres y cositas así pero en el core debe ser android y ios ok? me preocupa qué tanto de agent-ddp está así, porque está mal". (The idea is to use similar things, the same API names and so on, but in the core it must be Android and iOS. I'm worried about how much of Agent-DDP is like that, because it's wrong.)
+
+Then: "yo no quiero compatibilidad 1 a 1, solo quiero que se use agent-browser como referencia, anota eso, no quiero tener que repetirlo constantemente, es referencia no literal, es para ayudarnos como guía". (I don't want 1:1 compatibility. I only want agent-browser used as a reference. Write it down, I don't want to keep repeating it. It's a reference, not literal, it's there to help us as a guide.)
+
+This replaces "CSS through the JavaScript DOM": no `document` and no `getComputedStyle` in phase 4. ADR 0007 is amended.
+
+### A native protocol instead of CDP
+Asked: "mi preocupación es porque estamos convirtiendo algo en que no es propio de Android e iOS, entonces estamos convirtiendo los conceptos y eso puede complejizar las cosas, ¿no? Más bien definamos cuál es el camino correcto. ¿Cuál sería la mejor forma de manejar estos conceptos, como CSS o de su forma nativa?" (My worry is that we are turning something into what is not native to Android and iOS, converting the concepts, and that can make things complex. Let's define the right path: CSS-like or their own native form?)
+
+Proposed: native concepts end to end, agent-browser as a UX guide for the CLI, keep the WebSocket transport and the native cores, drop the fake DOM and the JavaScript DOM plan, replace ADR 0007 with ADR 0008. Answer: "yes go ahead and continue".
+

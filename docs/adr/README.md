@@ -10,7 +10,8 @@ Read the ADR before changing what it decides. A superseded or amended ADR says s
 | [0004](0004-protocol-version.md) | A protocol version in every header; clients refuse a newer one | accepted |
 | [0005](0005-flight-recorder.md) | A flight recorder in the library for the last 15 minutes | accepted |
 | [0006](0006-output-for-agents.md) | Output is a contract made for agents | accepted |
-| [0007](0007-cdp-as-the-protocol.md) | The library speaks the Chrome DevTools Protocol; JavaScriptCore and QuickJS for `Runtime.evaluate` | accepted |
+| [0007](0007-cdp-as-the-protocol.md) | The library speaks the Chrome DevTools Protocol; JavaScriptCore and QuickJS for `Runtime.evaluate` | superseded by 0008 |
+| [0008](0008-native-protocol.md) | A native protocol over a WebSocket; agent-browser is a guide, not a spec | accepted |
 
 ## Writing a new one
 
