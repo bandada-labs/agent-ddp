@@ -28,7 +28,7 @@ jobs:
       - run: cargo build --release --manifest-path cli/Cargo.toml --target ${{ matrix.target }}
       - shell: bash
         run: cp cli/target/${{ matrix.target }}/release/ddp${{ matrix.exe }} ddp-${{ matrix.npm }}${{ matrix.exe }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ddp-${{ matrix.npm }}
           path: ddp-${{ matrix.npm }}${{ matrix.exe }}
