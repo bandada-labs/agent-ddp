@@ -37,6 +37,7 @@ import kotlin.concurrent.thread
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        addSampleCommands()
         // A deep link (ddpsample://...) shows up as the last action, for `ddp open`.
         val link = intent?.data?.let { "link $it" } ?: "none"
         setContent { MaterialTheme { SampleScreen(link) } }

@@ -29,6 +29,7 @@ A line leaves this file when the maintainer replaces it or when its work has lan
 - The phases go in order (ADR 0008, STATUS.md). Every answer stays small for agents: only the fields we have, no padding to look like Chrome. Low memory in the app and the CLI. Each phase should give agents something agent-device cannot. (2026-10-23)
 - `Input` on iOS synthesizes real touches with private API, Debug only: an IOHIDEvent handed to UIKit as backboardd hands it a finger (the approach of Lyft's Hammer). On Android it dispatches `MotionEvent`s to the window. (2026-10-23)
 - Device settings (appearance, text size, reduce motion, locale) are not in the library. `ddp set` changes the real setting on the simulator or emulator, so the app reacts as it would for a user. Phase 3 is closed with that. (2026-10-23)
+- Scripts are app commands: named Swift or Kotlin closures the app adds in Debug, run with `app.run`. No JavaScript. `net.send` sends a request with the app's own client. (2026-10-23, "buenísimo hagamos eso entonces")
 
 ## Distribution
 

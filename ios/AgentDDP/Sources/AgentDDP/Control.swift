@@ -124,6 +124,7 @@ final class ControlSession {
 
     private lazy var methods: [String: ([String: Any]) throws -> Any] = [
         "app.info": { [app] _ in Control.info(app) },
+        "app.commands": { _ in ["commands": Commands.shared.names()] },
         "screen.elements": { _ in ["elements": onMain { FrameCapture.visibleWindows().flatMap(AccessibilityReader.elements(in:)) }] },
         "screen.capture": { params in try Control.capture(params) },
         "input.touch": { params in
@@ -181,6 +182,13 @@ final class ControlSession {
         "prefs.clear": { params in try Preferences.clear(Self.file(params)); return [:] },
     ]
 
+    /// These wait on the app's code or the network, apart from the other messages, so a request they send can still be
+    /// paused and continued.
+    private let waitingMethods: [String: ([String: Any]) async throws -> Any] = [
+        "app.run": { try await Commands.shared.run($0) },
+        "net.send": { try await AppClient.shared.send($0) },
+    ]
+
     init(app: ControlApp, send: @escaping (String) -> Void) {
         self.app = app
         self.send = send
@@ -208,11 +216,22 @@ final class ControlSession {
         }
         guard let id = message["id"] as? Int else { return reply(Control.error(id: nil, code: -32600, message: "No integer id")) }
         let method = message["method"] as? String ?? ""
+        let params = message["params"] as? [String: Any] ?? [:]
+        if let waiting = waitingMethods[method] {
+            Task {
+                do {
+                    reply(["id": id, "result": try await waiting(params)])
+                } catch {
+                    reply(Control.error(id: id, code: -32000, message: "\(error)"))
+                }
+            }
+            return
+        }
         guard let handler = methods[method] else {
             return reply(Control.error(id: id, code: -32601, message: "Unknown method '\(method)'"))
         }
         do {
-            reply(["id": id, "result": try handler(message["params"] as? [String: Any] ?? [:])])
+            reply(["id": id, "result": try handler(params)])
         } catch {
             reply(Control.error(id: id, code: -32000, message: "\(error)"))
         }

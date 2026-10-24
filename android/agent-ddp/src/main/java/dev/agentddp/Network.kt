@@ -2,12 +2,14 @@ package dev.agentddp
 
 import okhttp3.Headers.Companion.toHeaders
 import okhttp3.Interceptor
+import okhttp3.OkHttpClient
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
+import okhttp3.internal.connection.RealCall
 import okio.Buffer
 import org.json.JSONArray
 import org.json.JSONObject
@@ -39,6 +41,7 @@ object AgentDdpNetwork {
 class AgentDdpInterceptor : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
+        (chain.call() as? RealCall)?.let { AppClient.latest = it.client }
         val startedAt = System.currentTimeMillis()
         val asked = Fetch.Sent(request.url.toString(), request.method, request.headers.toMultimap().mapValues { it.value.joinToString() },
             request.body?.takeUnless { it.isOneShot() || it.isDuplex() }?.let { body -> Buffer().also(body::writeTo).readByteArray() })
@@ -75,6 +78,33 @@ class AgentDdpInterceptor : Interceptor {
         val contentType = answer.headers.entries.firstOrNull { it.key.equals("content-type", ignoreCase = true) }?.value
         return Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(answer.status).message("")
             .headers(answer.headers.toHeaders()).body(answer.body.toResponseBody(contentType?.toMediaTypeOrNull())).build()
+    }
+}
+
+/**
+ * `net.send`: a request sent with the app's own OkHttp client, so its interceptors add what they add (a token, a base
+ * header) and [AgentDdpInterceptor] logs it and can pause it. Before the app sends a request, a plain client.
+ */
+// ponytail: the last client that sent a request wins. Name clients when an app has several that matter.
+internal object AppClient {
+    @Volatile var latest: OkHttpClient? = null
+
+    fun send(params: JSONObject): JSONObject {
+        val client = latest ?: OkHttpClient.Builder().addInterceptor(AgentDdpInterceptor()).build()
+        val headers = params.optJSONObject("headers")?.let { given -> given.keys().asSequence().associateWith(given::getString) }.orEmpty()
+        val contentType = headers.entries.firstOrNull { it.key.equals("content-type", ignoreCase = true) }?.value?.toMediaTypeOrNull()
+        val body = if (params.has("body")) params.getString("body").toRequestBody(contentType) else null
+        val request = try {
+            Request.Builder().url(params.getString("url")).headers(headers.toHeaders()).method(params.optString("method", "GET"), body).build()
+        } catch (invalid: IllegalArgumentException) {
+            throw IllegalArgumentException("Bad request: ${invalid.message}", invalid)
+        }
+        client.newCall(request).execute().use { response ->
+            val redactor = NetworkLog.redactor
+            return JSONObject().put("status", response.code)
+                .put("headers", JSONObject(redactor.headers(response.headers.toMultimap().mapValues { it.value.joinToString() })))
+                .put("body", redactor.body(response.peekBody(Redactor.BODY_LIMIT + 1L).bytes()) ?: "")
+        }
     }
 }
 

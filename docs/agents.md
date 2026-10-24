@@ -198,6 +198,7 @@ Opt-ins from the app's Debug composition root (the app's own ports stay as they 
 
 - Network, iOS: wrap the app's network port in a decorator that sends through `AgentDDP.send(request) { try await session.data(for: $0) }`, and call `AgentDDP.redact(values: [devSecret])` once. `send` logs the request and lets a client pause, answer or fail it (`net.intercept`). A decorator that only calls `AgentDDP.logRequest(...)` when a request ends still logs, without pausing. See `ObservedSession` in `samples/ios`.
 - Network, Android: add `AgentDdpInterceptor()` to the Debug OkHttp client with `addInterceptor` (not `addNetworkInterceptor`, so a client can answer without sending) and call `AgentDdpNetwork.redact(devSecret)`; other clients call `AgentDdpNetwork.log(...)`, without pausing. See `samples/android/app/src/debug`.
+- Commands: add named actions for agents from Debug code, `AgentDDP.command("login") { params in ... }` (iOS, async) or `AgentDdpCommands.add("login") { params -> ... }` (Android, on a background thread). Return any JSON value. See `addSampleCommands` in `samples/android` and `DDPSampleApp` in `samples/ios`.
 - Time: let the app's clock port read `AgentDDP.elapsedTime()` (iOS) or `AgentDdpTime.elapsedMillis()` (Android) in Debug, so `ddp time` can pause and rewind the app's own timelines.
 
 The library keeps recordings in `Library/Caches/agent-ddp/` (iOS) or `files/agent-ddp/` (Android) inside the app's own sandbox. On iOS it turns on the private accessibility automation switch that XCTest uses, so SwiftUI builds its accessibility tree.

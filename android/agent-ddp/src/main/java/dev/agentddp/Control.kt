@@ -90,6 +90,8 @@ internal class ControlSession(private val app: ControlApp, private val send: (St
 
     private val methods: Map<String, (JSONObject) -> Any> = mapOf(
         "app.info" to { _ -> Control.info(app) },
+        "app.commands" to { _ -> JSONObject().put("commands", JSONArray(AgentDdpCommands.names())) },
+        "app.run" to AgentDdpCommands::run,
         "screen.elements" to { _ -> JSONObject().put("elements", onMain { FrameCapture.frame(0, 0.0).getJSONArray("elements") }) },
         "screen.capture" to { params -> Control.capture(params) },
         "input.touch" to { params ->
@@ -121,6 +123,10 @@ internal class ControlSession(private val app: ControlApp, private val send: (St
         "net.continue" to Fetch::proceed,
         "net.respond" to Fetch::respond,
         "net.fail" to Fetch::fail,
+        "net.send" to { params ->
+            // AppClient loads OkHttp classes, which an app without OkHttp does not have.
+            try { AppClient.send(params) } catch (missing: NoClassDefFoundError) { throw IllegalStateException("net.send needs OkHttp in the app") }
+        },
         "log.watch" to { _ ->
             appLog?.stop()
             appLog = AppLog { entry -> runCatching { event("log.entry", entry) } }.also { it.start() }
@@ -155,9 +161,21 @@ internal class ControlSession(private val app: ControlApp, private val send: (St
         val id = message.opt("id") as? Int ?: return send(Control.error(null, -32600, "No integer id").toString())
         val method = message.optString("method")
         val handler = methods[method] ?: return send(Control.error(id, -32601, "Unknown method '$method'").toString())
-        val answer = runCatching { JSONObject().put("id", id).put("result", handler(message.optJSONObject("params") ?: JSONObject())) }
+        val params = message.optJSONObject("params") ?: JSONObject()
+        if (method !in WAITING) return answer(id, handler, params)
+        // A closed socket must not end the thread with an exception nobody catches.
+        thread(name = "agentddp-$method", isDaemon = true) { runCatching { answer(id, handler, params) } }
+    }
+
+    private fun answer(id: Int, handler: (JSONObject) -> Any, params: JSONObject) {
+        val answer = runCatching { JSONObject().put("id", id).put("result", handler(params)) }
             .getOrElse { Control.error(id, -32000, it.message ?: it.toString()) }
         send(answer.toString())
+    }
+
+    private companion object {
+        /** These wait on the app's code or the network, off the reading thread, so a request they send can still be paused and continued. */
+        val WAITING = setOf("app.run", "net.send")
     }
 }
 

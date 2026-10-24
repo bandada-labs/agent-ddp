@@ -11,6 +11,8 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 - `net.intercept`, `net.continue`, `net.respond`, `net.fail`: pause the app's requests, then let them go on changed, answer them, or fail them the way the app's code sees a failure (`offline`, `timeout`). New on iOS: `AgentDDP.send(request) { ... }` for the app's Debug network decorator.
 - `log.watch`: the app's own log lines (os_log on iOS, logcat on Android).
 - `prefs.files`, `prefs.read`, `prefs.write`, `prefs.remove`, `prefs.clear`: UserDefaults and SharedPreferences. A write keeps the type the key holds; secrets read as `[redacted]`.
+- `app.commands`, `app.run`: named actions the app adds in Debug with `AgentDDP.command` (iOS) or `AgentDdpCommands.add` (Android), in its own Swift or Kotlin.
+- `net.send`: a request sent with the app's own client, logged and pausable like the app's requests. On iOS, the closure given to `AgentDDP.send` is now `@escaping`, because `net.send` reuses the last one.
 
 ## 0.1.5 (2026-10-23)
 

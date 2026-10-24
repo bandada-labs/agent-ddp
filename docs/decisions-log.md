@@ -87,3 +87,6 @@ Proposed: native concepts end to end, agent-browser as a UX guide for the CLI, k
 Asked "fase 3 no?" after I named the phase "acting". The phases are now numbered 1 to 7 in STATUS.md. Then "bueno continua, recuerda ir actualizando los archivos .md y todo el historial para que no pierdas el hilo". (Go on, and keep the .md files and the history updated so you don't lose the thread.)
 
 The last open part of phase 3 was device settings. `ddp set` already changes them on the device with `simctl` and `adb`, which is the native path: the app gets the same change a user makes. Nothing was added to the library, and phase 3 is closed.
+
+### Scripts are app commands, not JavaScript
+Asked why I had said JavaScript before. JavaScript came from the CDP plan (`Runtime.evaluate`); under ADR 0008 it has no reason left, Android has no engine without a new dependency, and it cannot reach the app's Swift or Kotlin without a bridge. Proposed app commands: named closures the app adds in Debug. Asked whether they are Kotlin and Swift and whether they let the app send a request: yes, through the app's own API client, plus a built-in `net.send` with the app's client. Answer: "buenísimo hagamos eso entonces". (Great, let's do that.)

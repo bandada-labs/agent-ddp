@@ -43,6 +43,8 @@ Both platforms have the same pieces, with the same names where the language allo
 | Live endpoint | `LiveServer`, `LiveSession`, `LiveEval` in `Live.swift` | same in `Live.kt` |
 | Network log | `NetworkLog`, `Redactor` in `Network.swift` | `AgentDdpNetwork`, `AgentDdpInterceptor`, `NetworkLog` in `Network.kt` |
 | Virtual clock | `TimeControl` in `Time.swift` | `AgentDdpTime`, `TimeControl` in `Time.kt` |
+| Control endpoint (ADR 0008) | `ControlServer`, `ControlSession` in `Control.swift` | same in `Control.kt` |
+| Acting and scripts | `Input`, `Fetch`, `Preferences`, `AppLog`, `Commands`, `AppClient` (in `Network.swift`) | `Input`, `Fetch`, `Preferences`, `AppLog`, `AgentDdpCommands`, `AppClient` (in `Network.kt`) |
 | Flight recorder | `History`, `ChangeTracker`, `FrameSignatures` in `History.swift` and `ChangeTracker.swift` | `History`, `ChangeTracker` in `History.kt` and `ChangeTracker.kt` |
 
 The iOS library has no dependencies. The Android one depends on Compose UI (the app's version wins) and compiles against OkHttp only for the optional interceptor. New dependencies in the library need a strong reason, because they end up in every app that adds it.

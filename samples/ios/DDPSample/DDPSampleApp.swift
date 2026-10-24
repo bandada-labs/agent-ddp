@@ -7,6 +7,7 @@ struct DDPSampleApp: App {
     init() {
         AgentDDP.start()
         AgentDDP.redact(values: [SampleNetwork.devSecret])
+        AgentDDP.command("load") { _ in await SampleNetwork.load() }
     }
 
     var body: some Scene {

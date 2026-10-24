@@ -91,6 +91,24 @@ final class ControlTests: XCTestCase {
         XCTAssertNil(Fetch.wildcard("*/items\\?*").firstMatch(in: "http://a/itemsX", range: NSRange(location: 0, length: 15)))
     }
 
+    func testACommandAnswersItsValue() async throws {
+        AgentDDP.command("login") { params in ["user": params["user"] as? String ?? ""] }
+        let answers = AsyncStream<[String: Any]>.makeStream()
+        let session = ControlSession(app: ControlApp(bundleIdentifier: "com.example", name: "Example")) { text in
+            answers.continuation.yield(try! JSONSerialization.jsonObject(with: Data(text.utf8)) as! [String: Any])
+        }
+        var iterator = answers.stream.makeAsyncIterator()
+        session.receive(#"{"id":1,"method":"app.run","params":{"name":"login","params":{"user":"test"}}}"#)
+        let result = await iterator.next()?["result"] as? [String: Any]
+        XCTAssertEqual((result?["value"] as? [String: String])?["user"], "test")
+        session.receive(#"{"id":2,"method":"app.run","params":{"name":"nope"}}"#)
+        let error = await iterator.next()?["error"] as? [String: Any]
+        XCTAssertEqual(error?["message"] as? String, "No command 'nope'; app.commands lists them")
+        session.receive(#"{"id":3,"method":"app.commands"}"#)
+        let commands = await iterator.next()?["result"] as? [String: Any]
+        XCTAssertEqual(commands?["commands"] as? [String], ["login"])
+    }
+
     func testPreferencesKeepATypeHideASecretAndClear() throws {
         let suite = "agentddp-prefs-test"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

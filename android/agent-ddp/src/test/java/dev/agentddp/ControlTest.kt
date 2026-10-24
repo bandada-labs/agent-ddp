@@ -100,6 +100,19 @@ class ControlTest {
         assertEquals("3", Preferences.shown(3))
     }
 
+    @Test
+    fun aCommandRunsOffTheReadingThreadAndAnswersItsValue() {
+        val reader = Thread.currentThread()
+        AgentDdpCommands.add("login") { params -> mapOf("user" to params.getString("user"), "apart" to (Thread.currentThread() != reader)) }
+        val answers = ArrayBlockingQueue<JSONObject>(2)
+        val session = ControlSession(ControlApp("com.example", "Example")) { answers.put(JSONObject(it)) }
+        session.receive("""{"id":1,"method":"app.run","params":{"name":"login","params":{"user":"test"}}}""")
+        assertEquals("""{"user":"test","apart":true}""", answers.poll(2, TimeUnit.SECONDS)!!.getJSONObject("result").getJSONObject("value").toString())
+        session.receive("""{"id":2,"method":"app.run","params":{"name":"nope"}}""")
+        assertEquals("No command 'nope'; app.commands lists them", answers.poll(2, TimeUnit.SECONDS)!!.getJSONObject("error").getString("message"))
+        assertEquals("[\"login\"]", answerTo("""{"id":3,"method":"app.commands"}""").getJSONObject("result").getJSONArray("commands").toString())
+    }
+
     private fun answerTo(message: String): JSONObject {
         var answer = ""
         ControlSession(ControlApp("com.example", "Example")) { answer = it }.receive(message)

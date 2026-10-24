@@ -27,10 +27,30 @@ public enum AgentDDP {
     }
 
     /// Sends `request` with the app's own client, for its Debug network decorator: `ddp net` sees it,
-    /// and a client can pause, change, answer or fail it before `send` runs. Outside Debug it only calls `send`.
+    /// and a client can pause, change, answer or fail it before `send` runs. `net.send` uses the last `send` given here.
+    /// Outside Debug it only calls `send`.
     public static func send(_ request: URLRequest,
-                            using send: (URLRequest) async throws -> (Data, URLResponse)) async throws -> (Data, URLResponse) {
+                            using send: @escaping (URLRequest) async throws -> (Data, URLResponse)) async throws -> (Data, URLResponse) {
         #if DEBUG && canImport(UIKit)
+        AppClient.shared.remember(send)
+        return try await logged(request, using: send)
+        #else
+        return try await send(request)
+        #endif
+    }
+
+    /// Adds a named action for agents (`app.commands`, `app.run`): log in a test user, reset state, open a screen.
+    /// `run` gets the agent's params and returns a JSON value (dictionary, array, string, number, Bool or nil). It runs
+    /// off the main thread; UI work goes through `MainActor.run`. Outside Debug it does nothing.
+    public static func command(_ name: String, _ run: @escaping ([String: Any]) async throws -> Any?) {
+        #if DEBUG && canImport(UIKit)
+        Commands.shared.add(name, run)
+        #endif
+    }
+
+    #if DEBUG && canImport(UIKit)
+    static func logged(_ request: URLRequest,
+                       using send: (URLRequest) async throws -> (Data, URLResponse)) async throws -> (Data, URLResponse) {
         let startedAt = Date()
         var sent = request
         do {
@@ -48,10 +68,8 @@ public enum AgentDDP {
             logRequest(sent, response: nil, body: nil, error: error, startedAt: startedAt)
             throw error
         }
-        #else
-        return try await send(request)
-        #endif
     }
+    #endif
 
     /// Seconds on ddp's controllable clock (`ddp time pause|step|seek|rate`). An app's Debug clock port can read
     /// this instead of the system clock so its own timelines pause, step and rewind with ddp.

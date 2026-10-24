@@ -23,6 +23,8 @@ Coordinates are window coordinates in the platform's unit, the same as in frames
 | Method | Params | Result or events |
 | --- | --- | --- |
 | `app.info` | | `protocol` (2), `platform`, `app` (bundle id or package), `name`, `unit`, `scale` |
+| `app.commands` | | `commands`: the names the app added with `AgentDDP.command` (iOS) or `AgentDdpCommands.add` (Android) |
+| `app.run` | `name`, `params` (object) | `value`: what the command returned, any JSON value. Commands are the app's own Swift or Kotlin code (log in a test user, reset state, open a screen) and run off the main thread |
 | `screen.elements` | | `elements`, the same shape as in a `frame` |
 | `screen.capture` | `format` png or jpeg, `quality`, `clip` `[x, y, width, height]` | `data`, base64, in device pixels. Every window of the app, dialogs included. On Android, SurfaceView and TextureView content is not drawn |
 | `input.touch` | `phase` down, move or up; `x`, `y` | One finger, delivered as the system delivers it: an IOHIDEvent handed to UIKit (private API) on iOS, a `MotionEvent` to the window under the point on Android. Gesture recognizers, SwiftUI and Compose see a real finger. Scroll with down, moves, up |
@@ -35,6 +37,7 @@ Coordinates are window coordinates in the platform's unit, the same as in frames
 | `net.continue` | `id`, and any of `url`, `method`, `headers` (object), `body` (text) | The request goes on. A value sent back as it was shown, such as a `[redacted]` header, keeps its real value |
 | `net.respond` | `id`, `status`, `headers`, `body` (text) | The app gets this answer; nothing is sent |
 | `net.fail` | `id`, `error`: `offline`, `host`, `timeout`, `refused`, `unreachable`, `lost`, `cancelled`, `failed` | The app gets the error its client would throw: a `URLError` on iOS, the OkHttp `IOException` on Android |
+| `net.send` | `url`, and any of `method`, `headers` (object), `body` (text) | `status`, `headers`, `body`, redacted. Sent with the app's own client: the last one that ran through `AgentDDP.send` or `AgentDdpInterceptor` (URLSession.shared or a plain OkHttp client before that), so the app's interceptors add what they add. It shows in `net.list` and can be paused like any request |
 | `net.release` | | Paused requests go on unchanged. The same happens when the client disconnects. One client intercepts at a time: the last `net.intercept` wins |
 | `log.watch`, `log.unwatch` | | The last 100 lines, then each new one, as `log.entry` events: `{t, level, tag, text}`. `t` is ms since 1970, `level` debug, info, warn or error, `tag` the logcat tag or the os_log category. iOS reads os_log, Logger and NSLog once a second (not `print`); Android reads `logcat --pid` |
 | `prefs.files` | | `files`: the preferences files (Android) or suites (iOS) on disk, the app's own included |
@@ -42,7 +45,7 @@ Coordinates are window coordinates in the platform's unit, the same as in frames
 | `prefs.write` | `file`, `key`, `value` (text) | Keeps the type the key holds: a Boolean stays a Boolean, a set takes a JSON array. A new key is a string. `[redacted]` leaves the real value |
 | `prefs.remove`, `prefs.clear` | `file`, and `key` for remove | |
 
-Only requests through `AgentDDP.send` (iOS) or `AgentDdpInterceptor` (Android) are paused. Bodies in `net.*` are UTF-8 text.
+Only requests through `AgentDDP.send` (iOS) or `AgentDdpInterceptor` (Android) are paused. Bodies in `net.*` are UTF-8 text. `app.run` and `net.send` answer when they finish, maybe after other messages, so match answers by `id`.
 
 The rest comes in the order in [STATUS.md](STATUS.md).
 

@@ -93,6 +93,44 @@ final class NetworkLog {
 
 /// Removes secrets before a request is kept: header and query names and JSON keys that look secret,
 /// plus literal values the app registers (its dev secret). Bodies are cut at 16 KB.
+/// `net.send`: a request sent through `AgentDDP.send` with the last client the app passed there, so it is logged and
+/// can be paused like the app's own. Headers the app adds before calling `AgentDDP.send` are not in it. Before the app
+/// sends a request, URLSession.shared.
+// ponytail: the last client wins. Name clients when an app has several that matter.
+final class AppClient {
+    static let shared = AppClient()
+
+    typealias Send = (URLRequest) async throws -> (Data, URLResponse)
+
+    private let lock = NSLock()
+    private var latest: Send?
+
+    func remember(_ send: @escaping Send) {
+        lock.lock()
+        latest = send
+        lock.unlock()
+    }
+
+    func send(_ params: [String: Any]) async throws -> [String: Any] {
+        guard let url = (params["url"] as? String).flatMap(URL.init(string:)) else { throw Control.Failure(description: "net.send needs a url") }
+        var request = URLRequest(url: url)
+        request.httpMethod = params["method"] as? String ?? "GET"
+        request.allHTTPHeaderFields = params["headers"] as? [String: String]
+        request.httpBody = (params["body"] as? String).map { Data($0.utf8) }
+        let (body, response) = try await AgentDDP.logged(request, using: client())
+        let http = response as? HTTPURLResponse
+        let redactor = NetworkLog.shared.currentRedactor
+        return ["status": http?.statusCode ?? 0, "headers": redactor.headers(http?.allHeaderFields as? [String: String] ?? [:]),
+                "body": redactor.body(body) ?? ""]
+    }
+
+    private func client() -> Send {
+        lock.lock()
+        defer { lock.unlock() }
+        return latest ?? { try await URLSession.shared.data(for: $0) }
+    }
+}
+
 struct Redactor {
     static let mask = "[redacted]"
     private static let secretName = try! NSRegularExpression(
