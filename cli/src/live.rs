@@ -1,17 +1,20 @@
 //! The live endpoint inside the app: connect, stream frames, and the commands that only make sense live.
 use crate::args::Args;
+use crate::control::Control;
 use crate::model::{self, element_alpha, element_state, load, save_recording, Frame, Recording};
-use crate::py::{self, f, obj};
+use crate::py::{self, f};
 use crate::state::{
     self, adb_path, capture, ctx, failure, parse_ms, read_json, write_file, Result, ANDROID_DIR, IOS_DIR,
 };
 use crate::{fail, say, warn};
 use serde_json::{json, Value};
-use std::io::{BufRead, BufReader, Write};
-use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+/// The control endpoint's version this ddp speaks (`app.info` `protocol`).
+const CONTROL_PROTOCOL: u64 = 2;
+const STILL_SCREEN_SLACK_MS: u64 = 500;
 
 /// Offline recording on an iOS simulator: a request file and a Darwin notification.
 pub struct IosDevice {
@@ -127,96 +130,33 @@ pub fn require_session() -> Result<Value> {
     }
 }
 
-/// One command on the app's live endpoint: a token line, a command line, then JSON lines back.
-pub struct LiveClient {
-    stream: TcpStream,
-    reader: BufReader<TcpStream>,
-    session: Value,
-    answered: bool,
-    done: bool,
+/// A connection to the saved session's control endpoint.
+pub fn open(session: &Value) -> Result<Control> {
+    Control::open(session)
 }
 
-impl LiveClient {
-    pub fn new(session: &Value, command: Value) -> Result<Self> {
-        let port = session["port"].as_u64().unwrap_or(0) as u16;
-        let address = SocketAddr::from(([127, 0, 0, 1], port));
-        let stream = TcpStream::connect_timeout(&address, Duration::from_secs(10)).map_err(|error| {
-            failure(
-                format!("can't reach the app ({error})"),
-                "unreachable",
-                Some(&format!(
-                    "is it running? ddp connect {} --app {}, or ddp doctor",
-                    py::str(&session["device"]),
-                    py::str(&session["app"])
-                )),
-            )
-        })?;
-        let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
-        let token = json!({"token": session.get("token").cloned().unwrap_or(json!(""))});
-        let mut writer = stream.try_clone().map_err(|e| failure(e.to_string(), "unreachable", None))?;
-        let _ = writer.write_all(format!("{}\n{}\n", py::dumps(&token), py::dumps(&command)).as_bytes());
-        let reader = BufReader::new(stream.try_clone().map_err(|e| failure(e.to_string(), "unreachable", None))?);
-        Ok(LiveClient { stream, reader, session: session.clone(), answered: false, done: false })
+/// The header of a recording, from `app.info`, for answers that are not a stream.
+fn header(control: &mut Control, frames: u64) -> Result<Value> {
+    let info = control.call("app.info", json!({}))?;
+    let spoken = info["protocol"].as_u64().unwrap_or(0);
+    if spoken > CONTROL_PROTOCOL {
+        fail!(
+            format!("the app's library speaks control protocol {spoken}; this ddp speaks up to {CONTROL_PROTOCOL}"),
+            "protocol_too_new",
+            "npm i -g agent-ddp@latest"
+        );
     }
+    Ok(json!({"type": "header", "protocol": model::PROTOCOL, "platform": info["platform"], "unit": info["unit"],
+              "scale": info["scale"], "frames": frames, "startedAt": py::fnum(state::now_ms().round())}))
+}
 
-    /// The next message, or None at the end of the answer.
-    pub fn next_message(&mut self) -> Result<Option<Value>> {
-        if self.done {
-            return Ok(None);
-        }
-        loop {
-            let mut line = String::new();
-            let read = self.reader.read_line(&mut line);
-            if matches!(read, Ok(0) | Err(_)) {
-                self.done = true;
-                if !self.answered {
-                    // adb forward accepts the connection even when nothing listens in the app, then closes it.
-                    fail!(
-                        "the app closed the connection without answering",
-                        "unreachable",
-                        format!(
-                            "is the app running? ddp doctor {} --app {}",
-                            py::str(&self.session["device"]),
-                            py::str(&self.session["app"])
-                        )
-                    );
-                }
-                return Ok(None);
-            }
-            if line.trim().is_empty() {
-                continue; // keep-alive
-            }
-            self.answered = true;
-            let message: Value = serde_json::from_str(&line)
-                .map_err(|e| failure(format!("the app sent something that is not JSON ({e})"), "app_error", None))?;
-            if message["type"] == "error" {
-                self.done = true;
-                fail!(py::str(&message["error"]), "app_error");
-            }
-            if message["type"] == "header" {
-                model::check_protocol(&message)?;
-            }
-            if message["type"] == "end" {
-                self.done = true;
-                if message.get("frames").is_none() {
-                    return Ok(None);
-                }
-            }
-            return Ok(Some(message));
-        }
-    }
-
-    pub fn all(mut self) -> Result<Vec<Value>> {
-        let mut messages = Vec::new();
-        while let Some(message) = self.next_message()? {
-            messages.push(message);
-        }
-        Ok(messages)
-    }
-
-    pub fn close(&self) {
-        let _ = self.stream.shutdown(std::net::Shutdown::Both);
-    }
+/// What is on screen now as a recording: header, one frame, end.
+pub fn snapshot_messages(session: &Value) -> Result<Vec<Value>> {
+    let mut control = open(session)?;
+    let header = header(&mut control, 1)?;
+    let frame = control.call("screen.frame", json!({}))?;
+    control.close();
+    Ok(vec![header, frame, json!({"type": "end", "frames": 1})])
 }
 
 fn guess_platform(device: &str) -> &'static str {
@@ -236,18 +176,17 @@ pub fn connect(args: &mut Args) -> Result<i32> {
     let app = args.app.clone().unwrap_or_default();
     let platform = platform_of(args.platform.as_deref(), &device);
     let session = if platform == "ios" {
-        let endpoint_file = Path::new(&model::app_container(&device, &app)?).join(IOS_DIR).join("live.json");
+        let endpoint_file = Path::new(&model::app_container(&device, &app)?).join(IOS_DIR).join("control.json");
         let Some(endpoint) = read_json(&endpoint_file) else {
             fail!(
-                "the app has no live endpoint",
+                "the app has no control endpoint",
                 "no_endpoint",
                 format!("run a Debug build that calls AgentDDP.start(); ddp doctor {device} --app {app}")
             );
         };
-        json!({"platform": "ios", "app": app, "device": device, "port": endpoint["port"], "token": endpoint["token"]})
+        json!({"platform": "ios", "app": app, "device": device, "port": endpoint["port"]})
     } else {
-        let forwarded =
-            capture(&adb_path()?, &["-s", &device, "forward", "tcp:0", &format!("localabstract:agentddp.{app}")]);
+        let forwarded = capture(&adb_path()?, &["-s", &device, "forward", "tcp:0", &android_socket(&app)]);
         if forwarded.code != 0 {
             fail!(
                 format!("adb forward failed: {}", forwarded.stderr.trim()),
@@ -258,7 +197,7 @@ pub fn connect(args: &mut Args) -> Result<i32> {
         let port: u64 = forwarded.stdout.trim().parse().unwrap_or(0);
         json!({"platform": "android", "app": app, "device": device, "port": port})
     };
-    let snapshot = LiveClient::new(&session, json!({"cmd": "snapshot"}))?.all()?;
+    let snapshot = snapshot_messages(&session)?;
     write_file(&ctx().session_file, py::dumps(&session))?;
     let frame = snapshot.iter().find(|m| m["type"] == "frame").cloned().unwrap_or(json!({"elements": [], "nodes": []}));
     let count = |field: &str| frame[field].as_array().map(Vec::len).unwrap_or(0);
@@ -305,11 +244,24 @@ pub fn stream_frames(
     then: Option<&str>,
     mut each: impl FnMut(&Value) -> Result<bool>,
 ) -> Result<()> {
-    let mut client = LiveClient::new(session, json!({"cmd": "stream", "frames": 0}))?;
+    let mut control = open(session)?;
+    control.call("screen.watch", json!({"frames": 0}))?;
+    // Android sends a frame only when something draws, so a still screen also ends at the wall clock.
+    let deadline = duration_ms.map(|ms| Instant::now() + Duration::from_millis(ms as u64 + STILL_SCREEN_SLACK_MS));
     let mut started_then = false;
     let result = (|| {
-        while let Some(message) = client.next_message()? {
-            if !each(&message)? {
+        while let Some(event) = control.next_event(deadline)? {
+            if event["method"] != "screen.stream" {
+                continue;
+            }
+            let message = &event["params"];
+            if message["type"] == "header" {
+                model::check_protocol(message)?;
+            }
+            if message["type"] == "end" {
+                return Ok(());
+            }
+            if !each(message)? {
                 return Ok(());
             }
             if message["type"] != "frame" {
@@ -329,7 +281,7 @@ pub fn stream_frames(
         }
         Ok(())
     })();
-    client.close();
+    control.close();
     result
 }
 
@@ -351,7 +303,7 @@ pub fn record_live(args: &Args) -> Result<Recording> {
 
 /// One frame of what is on screen now. Not kept in the history: it is not a take.
 pub fn snapshot_live(session: &Value) -> Result<Recording> {
-    let messages = LiveClient::new(session, json!({"cmd": "snapshot"}))?.all()?;
+    let messages = snapshot_messages(session)?;
     let text = messages.iter().map(py::dumps).collect::<Vec<_>>().join("\n") + "\n";
     write_file(&ctx().last, text)?;
     load(&ctx().last)
@@ -448,26 +400,24 @@ fn watch_state(frame: &Frame, key: &str) -> serde_json::Map<String, Value> {
 
 pub fn evaluate(args: &mut Args) -> Result<i32> {
     let session = require_session()?;
-    let command = json!({"cmd": "eval", "id": args.id, "path": args.path});
-    for message in LiveClient::new(&session, command)?.all()? {
-        say!("{}", py::dumps(message.get("value").unwrap_or(&Value::Null)));
-    }
+    let answer = open(&session)?.call("screen.value", json!({"id": args.id, "path": args.path}))?;
+    say!("{}", py::dumps(answer.get("value").unwrap_or(&Value::Null)));
     Ok(0)
 }
 
 pub fn net(args: &mut Args) -> Result<i32> {
     let session = require_session()?;
+    let mut control = open(&session)?;
     match args.action.as_deref() {
         Some("get") => {
             let Some(id) = &args.request_id else {
                 fail!("net get needs a request id", "missing_option", "ddp net list");
             };
-            for message in LiveClient::new(&session, json!({"cmd": "net-get", "id": id}))?.all()? {
-                say!("{}", py::dumps_pretty(&message));
-            }
+            say!("{}", py::dumps_pretty(&control.call("net.get", json!({"id": id}))?));
         }
         Some("list") => {
-            let requests = LiveClient::new(&session, json!({"cmd": "net"}))?.all()?;
+            let answer = control.call("net.list", json!({}))?;
+            let requests = answer["requests"].as_array().cloned().unwrap_or_default();
             if requests.is_empty() {
                 say!("no requests yet (the app reports them from its Debug network decorator)");
             }
@@ -477,11 +427,15 @@ pub fn net(args: &mut Args) -> Result<i32> {
         }
         _ => {
             let clauses = args.until.as_deref().map(model::parse_where).transpose()?;
-            let mut client = LiveClient::new(&session, json!({"cmd": "net-watch"}))?;
+            control.call("net.watch", json!({}))?;
             say!("watching requests live");
             let result = (|| {
-                while let Some(request) = client.next_message()? {
-                    say!("{}", net_line(&request));
+                while let Some(event) = control.next_event(None)? {
+                    if event["method"] != "net.request" {
+                        continue;
+                    }
+                    let request = &event["params"];
+                    say!("{}", net_line(request));
                     if let (Some(clauses), Some(fields)) = (&clauses, request.as_object()) {
                         if model::matches(fields, clauses)? {
                             say!("until met: {}", py::str(&request["id"]));
@@ -491,38 +445,44 @@ pub fn net(args: &mut Args) -> Result<i32> {
                 }
                 Ok(())
             })();
-            client.close();
             result?;
         }
     }
+    control.close();
     Ok(0)
 }
 
 pub fn time_control(args: &mut Args) -> Result<i32> {
     let session = require_session()?;
     let action = args.action.clone().unwrap_or_default();
-    let mut command = obj(vec![("cmd", "time".into()), ("action", action.clone().into())]);
+    let mut params = json!({});
     if let Some(value) = &args.value {
-        let number = if action == "seek" {
-            parse_ms(value)?
-        } else {
-            value.parse::<f64>().map_err(|_| failure(format!("can't read '{value}'"), "bad_value", None))?
+        let (key, number) = match action.as_str() {
+            "seek" => ("ms", parse_ms(value)?),
+            "step" => ("frames", read_number(value)?),
+            _ => ("rate", read_number(value)?),
         };
-        command["value"] = py::fnum(number);
+        params[key] = py::fnum(number);
     }
-    for state in LiveClient::new(&session, command)?.all()? {
-        let paused = if state["paused"] == json!(true) {
-            "paused".to_string()
-        } else {
-            format!("running at rate {}", py::str(&state["rate"]))
-        };
-        let since = state
-            .get("sincePauseMs")
-            .map(|v| format!(", {}ms from the pause point", py::fixed(v, 0)))
-            .unwrap_or_default();
-        say!("clock {paused}{since}");
-    }
+    let state = open(&session)?.call(&format!("time.{action}"), params)?;
+    let paused = if state["paused"] == json!(true) {
+        "paused".to_string()
+    } else {
+        format!("running at rate {}", py::str(&state["rate"]))
+    };
+    let since =
+        state.get("sincePauseMs").map(|v| format!(", {}ms from the pause point", py::fixed(v, 0))).unwrap_or_default();
+    say!("clock {paused}{since}");
     Ok(0)
+}
+
+fn read_number(value: &str) -> Result<f64> {
+    value.parse::<f64>().map_err(|_| failure(format!("can't read '{value}'"), "bad_value", None))
+}
+
+/// The abstract socket of the control endpoint, as `adb forward` names it.
+pub fn android_socket(app: &str) -> String {
+    format!("localabstract:agentddp.{app}.control")
 }
 
 pub fn net_line(request: &Value) -> String {

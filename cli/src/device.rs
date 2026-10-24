@@ -2,8 +2,8 @@
 use crate::args::Args;
 use crate::checks::{check_parity, RECORDING_CHECKS};
 use crate::live::{
-    live_session, platform_of, record_live, require_session, run_then, snapshot_live, stream_frames, AndroidDevice,
-    IosDevice, LiveClient, OfflineDevice,
+    live_session, open, platform_of, record_live, require_session, run_then, snapshot_live, stream_frames,
+    AndroidDevice, IosDevice, OfflineDevice,
 };
 use crate::model::{
     self, element_alpha, element_key, load, normalize_label, rect, save_recording, warn_if_empty, Frame,
@@ -123,35 +123,13 @@ pub fn tap(args: &mut Args) -> Result<i32> {
         fail!(format!("no element '{id}' on screen"), "unknown_element", "ddp tree -i");
     };
     let [x, y, w, h] = rect(&element["frame"]);
-    if session["platform"] == "android" {
-        let result = adb(
-            &py::str(&session["device"]),
-            &[
-                "shell",
-                "input",
-                "tap",
-                &format!("{}", (x + w / 2.0).round_ties_even() as i64),
-                &format!("{}", (y + h / 2.0).round_ties_even() as i64),
-            ],
-        )?;
-        if result.code != 0 {
-            fail!(format!("adb input tap failed: {}", result.stderr.trim()), "tap_failed");
-        }
-    } else {
-        let name = [element.get("id"), element.get("label")]
-            .into_iter()
-            .find(|v| py::truthy(*v))
-            .flatten()
-            .map(py::str)
-            .unwrap_or_default();
-        let mut client = LiveClient::new(&session, json!({"cmd": "tap", "id": name}))?;
-        let activated = client.next_message()?.map(|m| py::truthy(m.get("value"))).unwrap_or(false);
-        client.close();
-        if !activated {
-            fail!(format!("'{id}' has no accessibility action"), "tap_failed", "use agent-device for a real touch");
-        }
+    let (x, y) = (x + w / 2.0, y + h / 2.0);
+    let mut control = open(&session)?;
+    for phase in ["down", "up"] {
+        control.call("input.touch", json!({"phase": phase, "x": x, "y": y}))?;
     }
-    say!("tapped {id} at ({:.0}, {:.0})", x + w / 2.0, y + h / 2.0);
+    control.close();
+    say!("tapped {id} at ({x:.0}, {y:.0})");
     Ok(0)
 }
 

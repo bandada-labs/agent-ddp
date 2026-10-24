@@ -1,6 +1,6 @@
 //! For people and other tools: the HTML view, the MCP server, the guides, doctor, batch.
 use crate::args::Args;
-use crate::live::{platform_of, LiveClient};
+use crate::live::{android_socket, platform_of, snapshot_messages};
 use crate::model::{element_alpha, element_key, element_keys, element_state, load};
 use crate::py;
 use crate::state::{self, adb_path, capture, ctx, read_json, which, write_file, Result, IOS_DIR};
@@ -264,15 +264,15 @@ fn doctor_checks(platform: &str, device: &str, app: &str) -> Result<Vec<Step>> {
         if result.code != 0 {
             return Ok(steps);
         }
-        let endpoint = read_json(&Path::new(result.stdout.trim()).join(IOS_DIR).join("live.json"));
+        let endpoint = read_json(&Path::new(result.stdout.trim()).join(IOS_DIR).join("control.json"));
         steps.push((
             endpoint.is_some(),
-            "live endpoint written by AgentDDP.start()".into(),
+            "control endpoint written by AgentDDP.start()".into(),
             "launch the app (xcrun simctl launch); it must be a Debug build that calls AgentDDP.start() at launch"
                 .into(),
         ));
         let Some(endpoint) = endpoint else { return Ok(steps) };
-        json!({"platform": "ios", "app": app, "device": device, "port": endpoint["port"], "token": endpoint["token"]})
+        json!({"platform": "ios", "app": app, "device": device, "port": endpoint["port"]})
     } else {
         let adb = adb_path()?;
         let state = capture(&adb, &["-s", device, "get-state"]).stdout.trim().to_string();
@@ -307,10 +307,10 @@ fn doctor_checks(platform: &str, device: &str, app: &str) -> Result<Vec<Step>> {
         if running.is_empty() {
             return Ok(steps);
         }
-        let forwarded = capture(&adb, &["-s", device, "forward", "tcp:0", &format!("localabstract:agentddp.{app}")]);
+        let forwarded = capture(&adb, &["-s", device, "forward", "tcp:0", &android_socket(app)]);
         json!({"platform": "android", "app": app, "device": device, "port": forwarded.stdout.trim().parse::<u64>().unwrap_or(0)})
     };
-    let answer = LiveClient::new(&session, json!({"cmd": "snapshot"})).and_then(LiveClient::all);
+    let answer = snapshot_messages(&session);
     if platform == "android" && session["port"].as_u64().unwrap_or(0) > 0 {
         capture(&adb_path()?, &["-s", device, "forward", "--remove", &format!("tcp:{}", py::str(&session["port"]))]);
     }
@@ -319,13 +319,13 @@ fn doctor_checks(platform: &str, device: &str, app: &str) -> Result<Vec<Step>> {
         Err(failure) => {
             steps.push((
                 false,
-                format!("live endpoint answers ({})", failure.message),
+                format!("control endpoint answers ({})", failure.message),
                 "restart the app; then ddp connect".into(),
             ));
             return Ok(steps);
         }
     };
-    steps.push((true, "live endpoint answers".into(), String::new()));
+    steps.push((true, "control endpoint answers".into(), String::new()));
     let count = messages
         .iter()
         .find(|m| m["type"] == "frame")

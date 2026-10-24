@@ -2,7 +2,7 @@
 //! It keeps every frame that changed plus taps and screen changes, so a still screen costs nothing.
 use crate::args::Args;
 use crate::device::target;
-use crate::live::{live_session, LiveClient};
+use crate::live::{live_session, open};
 use crate::model::{self, contains, decode, element_key, element_state, option_equal, rect, save_recording, Frame};
 use crate::py::{self, f};
 use crate::state::{adb_path, ctx, local_time, now_ms, parse_ms, Result, ANDROID_DIR, IOS_DIR};
@@ -344,11 +344,13 @@ fn request_entries(args: &Args, since: f64) -> Vec<(f64, String)> {
     }
     let Some(session) = live_session(args) else { return Vec::new() };
     // The app may be gone: frames and taps are still worth showing.
-    let Ok(requests) = LiveClient::new(&session, json!({"cmd": "net"})).and_then(LiveClient::all) else {
+    let Ok(answer) = open(&session).and_then(|mut control| control.call("net.list", json!({}))) else {
         return Vec::new();
     };
-    requests
-        .iter()
+    answer["requests"]
+        .as_array()
+        .into_iter()
+        .flatten()
         .filter(|r| r.get("startedAt").map(f).unwrap_or(0.0) >= since)
         .map(|r| {
             let status = r.get("status").or_else(|| r.get("error")).map(py::str).unwrap_or_else(|| "failed".into());

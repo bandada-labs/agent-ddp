@@ -1,5 +1,6 @@
 mod args;
 mod checks;
+mod control;
 mod device;
 mod history;
 mod live;

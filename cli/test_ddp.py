@@ -319,8 +319,11 @@ with tempfile.TemporaryDirectory() as directory:
     assert any(tool["name"] == "ddp_tree" for tool in answers[1]["result"]["tools"])
     assert "@e1 tiny" in answers[2]["result"]["content"][0]["text"] and not answers[2]["result"]["isError"]
 
-# Live commands against a fake app: a socket server that speaks the recorder's protocol.
+# Live commands against a fake app: a WebSocket server that speaks the control endpoint's JSON-RPC.
+import base64
+import hashlib
 import socket
+import struct
 import threading
 import time as clock
 
@@ -355,28 +358,56 @@ class FakeApp:
             threading.Thread(target=self.session, args=(connection,), daemon=True).start()
 
     def session(self, connection):
-        lines = connection.makefile("r")
-        lines.readline()
-        command = json.loads(lines.readline())
+        reader = connection.makefile("rb")
+        headers = {}
+        for line in iter(reader.readline, b"\r\n"):
+            name, _, value = line.decode().partition(":")
+            headers[name.strip().lower()] = value.strip()
+        accept = base64.b64encode(hashlib.sha1(
+            (headers["sec-websocket-key"] + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).decode()
+        connection.sendall(f"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                           f"Sec-WebSocket-Accept: {accept}\r\n\r\n".encode())
+        lock = threading.Lock()
 
         def send(message):
-            connection.sendall((json.dumps(message) + "\n").encode())
-        header = {"type": "header", "platform": "ios", "unit": "pt", "scale": 3, "frames": 0}
-        try:
-            if command["cmd"] == "snapshot":
-                for message in (header, self.frame(0), {"type": "end"}):
-                    send(message)
-            elif command["cmd"] == "tap":
-                self.tapped_at = self.stream_index
-                send({"type": "value", "path": "tap", "value": command["id"] == "button"})
-                send({"type": "end"})
-            elif command["cmd"] == "stream":
-                send(header)
-                self.stream_index = 0
+            payload = json.dumps(message).encode()
+            size = bytes([len(payload)]) if len(payload) < 126 else b"\x7e" + struct.pack(">H", len(payload))
+            with lock:
+                connection.sendall(b"\x81" + size + payload)
+
+        def watch():
+            send({"method": "screen.stream", "params": {"type": "header", "platform": "ios", "unit": "pt", "scale": 3, "frames": 0}})
+            self.stream_index = 0
+            try:
                 while True:
-                    send(self.frame(self.stream_index))
+                    send({"method": "screen.stream", "params": self.frame(self.stream_index)})
                     self.stream_index += 1
                     clock.sleep(0.016)
+            except OSError:
+                pass
+
+        try:
+            while True:
+                head = reader.read(2)
+                if len(head) < 2 or head[0] & 0x0f == 8:
+                    return
+                size = head[1] & 0x7f
+                if size == 126:
+                    size = struct.unpack(">H", reader.read(2))[0]
+                mask = reader.read(4)
+                message = json.loads(bytes(b ^ mask[i % 4] for i, b in enumerate(reader.read(size))))
+                method, params = message["method"], message.get("params", {})
+                result = {}
+                if method == "app.info":
+                    result = {"protocol": 2, "platform": "ios", "app": "fake", "name": "Fake", "unit": "pt", "scale": 3}
+                elif method == "screen.frame":
+                    result = self.frame(0)
+                elif method == "input.touch":
+                    if params["phase"] == "down" and params["x"] < 100 and params["y"] < 50:
+                        self.tapped_at = self.stream_index
+                elif method == "screen.watch":
+                    threading.Thread(target=watch, daemon=True).start()
+                send({"id": message["id"], "result": result})
         except OSError:
             pass  # the client hung up, as it does when it has enough
         finally:
@@ -389,7 +420,7 @@ with tempfile.TemporaryDirectory() as directory:
     app = FakeApp()
     Path(directory, ".ddp").mkdir()
     Path(directory, ".ddp", "session.json").write_text(json.dumps(
-        {"platform": "ios", "app": "fake", "device": "fake", "port": app.port, "token": "t"}))
+        {"platform": "ios", "app": "fake", "device": "fake", "port": app.port}))
     live = ddp_in(directory, "tree", "-i")
     assert "@e1 button" in live.stdout and "@e2 spinner" in live.stdout, live.stdout + live.stderr
     assert "tapped button" in ddp_in(directory, "tap", "@e1").stdout
@@ -413,7 +444,7 @@ with tempfile.TemporaryDirectory() as directory:
     for name in ("ios", "android"):
         Path(directory, ".ddp", "sessions", name).mkdir(parents=True)
         Path(directory, ".ddp", "sessions", name, "session.json").write_text(json.dumps(
-            {"platform": name, "app": "fake", "device": "fake", "port": app.port, "token": "t"}))
+            {"platform": name, "app": "fake", "device": "fake", "port": app.port}))
     both = ddp_in(directory, "record", "--on", "ios,android", "--for", "300ms",
                   "--then", f'{sys.executable} -c "import sys; print(sys.argv[1:])" {{platform}} {{"k": 1}}')
     assert both.returncode == 0 and "['ios', '{k:', '1}']" in both.stdout and "parity" in both.stdout, both.stdout + both.stderr

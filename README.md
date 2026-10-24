@@ -126,7 +126,7 @@ Once it is set up, prompts like these work:
 
 ## How it works
 
-The library runs inside the Debug build, reads the platform's own view and layer trees on every frame and serves them on a local endpoint with a token. On iOS the CLI finds the port and token in the app's simulator container. On Android it reaches the app through `adb forward`. It asks for frames and turns them into text an agent can read in a few hundred tokens.
+The library runs inside the Debug build, reads the platform's own view and layer trees on every frame and serves them on a local endpoint. On iOS the CLI finds the port in the app's simulator container. On Android it reaches the app through `adb forward`. It asks for frames and turns them into text an agent can read in a few hundred tokens.
 
 There is no daemon. The library in the app is the server, and every `ddp` command is a short call to it. A recording is a plain JSON lines file, so every read and check also works offline on a saved take.
 

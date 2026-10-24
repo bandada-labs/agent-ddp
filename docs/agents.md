@@ -19,7 +19,7 @@ ddp record [--for 5s] [--then "<cmd>"] [--name N] saves .ddp/last.jsonl for offl
 ddp eval <element> <path>                          one property, read-only
 ddp time pause | resume | step [frames] | rate 0.1 | seek <time> | status
 ddp net list | get <id> | watch [--until 'status>=400']
-ddp tap <element>                                  Android: a real touch; iOS: the accessibility action
+ddp tap <element>                                  a real touch at the element's center
 ddp wait id <id> | text <label> | --settled 300ms [--ignore <el>] [--timeout 10s]
 ddp logs [--grep <text>]                           app log lines during the last take, at their time in it
 ddp set appearance dark | text-size large | reduce-motion on | locale es-ES
@@ -43,7 +43,7 @@ An element goes by its id, its label, or an `@ref` from the last `tree` or `find
 - `time` runs one virtual clock. `pause` freezes it, `step 30` moves it 30 frames, `rate 0.1` slows it, `seek 500ms` / `seek -400ms` moves it relative to the pause point, `resume` lets it run. What follows it: iOS Core Animation / UIKit animations; Android Compose animations; on both, any app timeline that reads `AgentDDP.elapsedTime()` (iOS) or `AgentDdpTime.elapsedMillis()` (Android) from its clock port, and only those rewind. What does not: SwiftUI `withAnimation` (its clock is not reachable), Android View `ValueAnimator`s and system UI.
 - `net` lists requests the app reported from its Debug network decorator: `list` (id, method, status, ms, size, URL), `get <id>` (headers, bodies), `watch`. Redaction happens inside the app before anything is kept: `Authorization`, `Cookie`, any header, query item or JSON key matching `secret|token|key|password|attest`, and literal values the app registers (its dev secret). Bodies are cut at 16 KB.
 
-The endpoint is local only. iOS simulator: a TCP port on 127.0.0.1 plus a token the app writes in its own container. Android: an abstract unix socket reached with `adb forward`, which accepts only the shell user (adb) and root.
+The endpoint is local only. iOS simulator: a TCP port on 127.0.0.1 that the app writes in its own container; web pages may not connect. Android: an abstract unix socket reached with `adb forward`, which accepts only the shell user (adb) and root.
 
 ## Options on every command
 

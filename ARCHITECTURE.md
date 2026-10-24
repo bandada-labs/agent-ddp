@@ -73,8 +73,8 @@ The guides in `docs/skills/` and `docs/agents.md` are compiled into the binary, 
 
 `ddp read --for 2s --then "ddp tap animatedButton"`, live:
 
-1. `live.rs` opens the endpoint from `.ddp/session.json`, sends the token line and `{"cmd":"stream","frames":0}`.
-2. The library starts a `FrameStream` on the main thread and sends a `header`, then one `frame` per drawn frame.
+1. `live.rs` opens the control endpoint from `.ddp/session.json` (`control.rs`, a WebSocket) and calls `screen.watch`.
+2. The library starts a `FrameStream` on the main thread and sends `screen.stream` events: a `header`, then one `frame` per drawn frame.
 3. On the first frame the CLI runs the `--then` program without a shell.
 4. After 2 s the CLI closes the stream, saves the take to `.ddp/last.jsonl` and a gzipped copy in `.ddp/recordings/`.
 5. `summary.rs` reads the take through `model.rs` and prints one block per element.

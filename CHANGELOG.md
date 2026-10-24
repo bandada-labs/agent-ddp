@@ -13,6 +13,8 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 - `prefs.files`, `prefs.read`, `prefs.write`, `prefs.remove`, `prefs.clear`: UserDefaults and SharedPreferences. A write keeps the type the key holds; secrets read as `[redacted]`.
 - `app.commands`, `app.run`: named actions the app adds in Debug with `AgentDDP.command` (iOS) or `AgentDdpCommands.add` (Android), in its own Swift or Kotlin.
 - `screen.frame`, `screen.watch`, `screen.value`, `time.*`, `history.files`, `history.read`: what the v1 endpoint gives (snapshot, stream, eval, time) and the flight recorder's files, over the control endpoint.
+- The CLI talks to the control endpoint: `ddp connect` reads `control.json` on iOS and forwards `agentddp.<package>.control` on Android. Output is unchanged. `ddp tap` on iOS is now a real touch instead of the accessibility action, so it works on elements without one.
+- Android: a streamed frame could go out with the flight recorder's frame number and time, when the recorder stamped it before it was sent.
 - `net.send`: a request sent with the app's own client, logged and pausable like the app's requests. On iOS, the closure given to `AgentDDP.send` is now `@escaping`, because `net.send` reuses the last one.
 
 ## 0.1.5 (2026-10-23)

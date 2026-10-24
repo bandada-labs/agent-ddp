@@ -18,7 +18,7 @@ A small library inside a Debug build of an iOS or Android app serves what the ap
    3. Acting: `input.*`, `net.*` pausing, `prefs.*`. Done on both platforms. Device settings (appearance, text size, reduce motion, locale) stay in `ddp set`, which changes the real setting through `simctl` and `adb`, so they need nothing in the library.
    4. Scripts in the app. Done: a script is an app command, Swift or Kotlin the app adds in Debug (`app.commands`, `app.run`), plus `net.send` with the app's own client. No JavaScript.
    5. Frames and history over the endpoint. Done: `screen.frame`, `screen.watch`, `screen.value`, `time.*`, `history.files`, `history.read`. The v1 `tap` (iOS accessibility action) is not carried over: `input.touch` is a real finger.
-   6. The CLI on top. Current phase.
+   6. The CLI on top. Current phase. Done: every live command (`connect`, `tree`, `read`, `watch`, `wait`, `tap`, `eval`, `time`, `net`, `history`, `doctor`) talks to the control endpoint, with the same output. `tap` is a real touch on both platforms. Next: new commands for typing, pausing requests, preferences, app commands and logs.
    7. v1 goes.
 2. A code of conduct, once the maintainer gives a contact address.
 3. iOS on physical devices (today the CLI uses `simctl`).

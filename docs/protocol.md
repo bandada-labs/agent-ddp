@@ -10,7 +10,7 @@ Version: 1. The `header` of every stream, recording and history file carries it 
 
 ## Control endpoint
 
-The library also serves a control endpoint (ADR 0008), built from what Android and iOS have, not from a browser. Both endpoints run side by side until the `ddp` CLI has moved; everything below this section is the v1 JSON lines endpoint.
+The library also serves a control endpoint (ADR 0008), built from what Android and iOS have, not from a browser. The `ddp` CLI uses only the control endpoint. The v1 JSON lines endpoint below this section stays until phase 7 removes it.
 
 - Android: the abstract socket `agentddp.<package>.control`. From a host: `adb forward tcp:9333 localabstract:agentddp.<package>.control`. Only the shell user and root may connect.
 - iOS simulator: TCP on 127.0.0.1, the port in `Library/Caches/agent-ddp/control.json`. A `Host` other than localhost, 127.0.0.1 or ::1 gets a 403.

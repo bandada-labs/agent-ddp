@@ -156,7 +156,9 @@ private class Segment(private val directory: File, val startedAt: Long, scale: D
             totalCaptureMs += it
             slowestCaptureMs = maxOf(slowestCaptureMs, it)
         }
-        write(frame.put("i", frames++), wall)
+        // A streamed frame is still waiting to be sent: number and stamp a copy, not the client's frame.
+        val copy = JSONObject(frame, frame.keys().asSequence().toList().toTypedArray())
+        write(copy.put("i", frames++), wall)
     }
 
     fun write(line: JSONObject, wall: Long) = line(line.put("t", (wall - startedAt).toDouble()))
