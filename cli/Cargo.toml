@@ -1,6 +1,6 @@
 [package]
 name = "agent-ddp"
-version = "0.1.5"
+version = "0.2.0"
 edition = "2021"
 description = "ddp: see what a Debug iOS/Android app draws, frame by frame"
 license = "MIT"

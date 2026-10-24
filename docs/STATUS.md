@@ -10,6 +10,10 @@ A small library inside a Debug build of an iOS or Android app serves what the ap
 
 0.1.5 on 2026-10-23: npm `agent-ddp`, GitHub release with 5 binaries, JitPack `com.github.bandada-labs:agent-ddp:v0.1.5`, SwiftPM from the repo URL. What is in it: [CHANGELOG.md](../CHANGELOG.md).
 
+## Next release
+
+0.2.0 is ready and waits for the maintainer's yes (a `v0.2.0` tag runs the release). It changes the protocol, so the CLI and the library must be updated together. What is in it: the 0.2.0 section of [CHANGELOG.md](../CHANGELOG.md), which also becomes the GitHub release notes. Checked on 2026-10-24: CI's three jobs locally, every command live on the iOS simulator and the Android emulator, release builds without the library, the npm package installed from a local pack, the JitPack artifact, and the 0.1.5 library and CLI against the new ones.
+
 ## Next
 
 1. The control endpoint in the library (ADR 0008, which replaced the CDP plan of ADR 0007). Seven phases, in order:

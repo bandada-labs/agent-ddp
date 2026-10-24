@@ -1,6 +1,6 @@
 name: release
 
-# Push a tag like v0.1.5: builds ddp for every platform, attaches the binaries to a GitHub release and
+# Push a tag like v0.2.0: builds ddp for every platform, attaches the binaries to a GitHub release and
 # publishes agent-ddp to npm. No token: npm trusts this workflow (Trusted Publishing, OIDC) and signs
 # the provenance of each version.
 on:
@@ -50,7 +50,14 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           grep -q "^version = \"$version\"" cli/Cargo.toml || { echo "cli/Cargo.toml is not at $version"; exit 1; }
           grep -q "\"version\": \"$version\"" npm/package.json || { echo "npm/package.json is not at $version"; exit 1; }
-      - run: gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" bin/ddp-* --title "$GITHUB_REF_NAME" --generate-notes
+      # The release notes are this version's section of CHANGELOG.md; GitHub's generated notes when it has none.
+      - name: GitHub release
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v heading="## $version " 'index($0, heading) == 1 { found = 1; next } found && /^## / { exit } found' CHANGELOG.md > notes.md
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 && exit 0
+          if [ -s notes.md ]; then notes="--notes-file notes.md"; else notes="--generate-notes"; fi
+          gh release create "$GITHUB_REF_NAME" bin/ddp-* --title "$GITHUB_REF_NAME" $notes
         env:
           GH_TOKEN: ${{ github.token }}
       - uses: actions/setup-node@v4
