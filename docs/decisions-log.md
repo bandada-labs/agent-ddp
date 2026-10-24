@@ -83,3 +83,7 @@ Asked: "mi preocupación es porque estamos convirtiendo algo en que no es propio
 
 Proposed: native concepts end to end, agent-browser as a UX guide for the CLI, keep the WebSocket transport and the native cores, drop the fake DOM and the JavaScript DOM plan, replace ADR 0007 with ADR 0008. Answer: "yes go ahead and continue".
 
+### Phases by number, device settings stay in the CLI
+Asked "fase 3 no?" after I named the phase "acting". The phases are now numbered 1 to 7 in STATUS.md. Then "bueno continua, recuerda ir actualizando los archivos .md y todo el historial para que no pierdas el hilo". (Go on, and keep the .md files and the history updated so you don't lose the thread.)
+
+The last open part of phase 3 was device settings. `ddp set` already changes them on the device with `simctl` and `adb`, which is the native path: the app gets the same change a user makes. Nothing was added to the library, and phase 3 is closed.

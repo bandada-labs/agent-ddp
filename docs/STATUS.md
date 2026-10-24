@@ -12,7 +12,14 @@ A small library inside a Debug build of an iOS or Android app serves what the ap
 
 ## Next
 
-1. The control endpoint in the library (ADR 0008, which replaced the CDP plan of ADR 0007). Order: transport, reading, acting, scripts in the app, frames and history over it, then the CLI on top, then v1 goes. Done: transport, `screen.*`, `net.*` with pausing, `log.watch`, `input.*`, `prefs.*`, on both platforms. Next in acting: the device settings an agent needs to test with (appearance, text size, locale), then scripts.
+1. The control endpoint in the library (ADR 0008, which replaced the CDP plan of ADR 0007). Seven phases, in order:
+   1. Transport. Done.
+   2. Reading: `app.info`, `screen.*`, `net.list`/`net.get`/`net.watch`, `log.watch`. Done.
+   3. Acting: `input.*`, `net.*` pausing, `prefs.*`. Done on both platforms. Device settings (appearance, text size, reduce motion, locale) stay in `ddp set`, which changes the real setting through `simctl` and `adb`, so they need nothing in the library.
+   4. Scripts in the app. Current phase. First decision: what a script is.
+   5. Frames and history over the endpoint.
+   6. The CLI on top.
+   7. v1 goes.
 2. A code of conduct, once the maintainer gives a contact address.
 3. iOS on physical devices (today the CLI uses `simctl`).
 4. History on iOS for `UIView.animate` animations, if users need more than their start and end (ADR 0005).
