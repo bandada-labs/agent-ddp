@@ -27,6 +27,10 @@ Coordinates are window coordinates in the platform's unit, the same as in frames
 | `app.run` | `name`, `params` (object) | `value`: what the command returned, any JSON value. Commands are the app's own Swift or Kotlin code (log in a test user, reset state, open a screen) and run off the main thread |
 | `screen.elements` | | `elements`, the same shape as in a `frame` |
 | `screen.capture` | `format` png or jpeg, `quality`, `clip` `[x, y, width, height]` | `data`, base64, in device pixels. Every window of the app, dialogs included. On Android, SurfaceView and TextureView content is not drawn |
+| `screen.frame` | | One `frame` line, as in a recording: `elements` and `nodes` |
+| `screen.watch` | `frames`: number, 0 for no limit | `screen.stream` events: the `header`, `frame` and `end` lines of a recording, one frame per drawn frame. On Android a client that falls 64 frames behind ends the stream |
+| `screen.unwatch` | | The stream ends with its `end` line |
+| `screen.value` | `id`: element name, `path` | `path`, `value`: one property, read-only. iOS: `element.<key path>` or `layer.<key path>` (presentation values, so mid-animation). Android: `<modifier>.<property>` (`border.width`) or `semantics.<Key>` on the Compose node with that test tag or text |
 | `input.touch` | `phase` down, move or up; `x`, `y` | One finger, delivered as the system delivers it: an IOHIDEvent handed to UIKit (private API) on iOS, a `MotionEvent` to the window under the point on Android. Gesture recognizers, SwiftUI and Compose see a real finger. Scroll with down, moves, up |
 | `input.type` | `text` | Types into the focused field as the keyboard does. Nothing happens with no field focused |
 | `input.key` | `key`: `Enter`, `Tab`, `Backspace` | Enter in a single-line field runs its action (Done, Search) |
@@ -39,6 +43,12 @@ Coordinates are window coordinates in the platform's unit, the same as in frames
 | `net.fail` | `id`, `error`: `offline`, `host`, `timeout`, `refused`, `unreachable`, `lost`, `cancelled`, `failed` | The app gets the error its client would throw: a `URLError` on iOS, the OkHttp `IOException` on Android |
 | `net.send` | `url`, and any of `method`, `headers` (object), `body` (text) | `status`, `headers`, `body`, redacted. Sent with the app's own client: the last one that ran through `AgentDDP.send` or `AgentDdpInterceptor` (URLSession.shared or a plain OkHttp client before that), so the app's interceptors add what they add. It shows in `net.list` and can be paused like any request |
 | `net.release` | | Paused requests go on unchanged. The same happens when the client disconnects. One client intercepts at a time: the last `net.intercept` wins |
+| `time.pause`, `time.resume`, `time.status` | | `rate`, `paused`, and `sincePauseMs` while paused. The app's clock: animations, and timelines that read `AgentDDP.elapsedTime()` or `AgentDdpTime` |
+| `time.step` | `frames` (1 if none) | Paused only |
+| `time.rate` | `rate`: factor, 0 or more | |
+| `time.seek` | `ms` from the pause point | Paused only |
+| `history.files` | | `files`: the flight recorder's files, oldest first, the open one included |
+| `history.read` | `file` | `data`: the file's bytes in base64, gzipped when the name ends in `.gz`. See History below |
 | `log.watch`, `log.unwatch` | | The last 100 lines, then each new one, as `log.entry` events: `{t, level, tag, text}`. `t` is ms since 1970, `level` debug, info, warn or error, `tag` the logcat tag or the os_log category. iOS reads os_log, Logger and NSLog once a second (not `print`); Android reads `logcat --pid` |
 | `prefs.files` | | `files`: the preferences files (Android) or suites (iOS) on disk, the app's own included |
 | `prefs.read` | `file`: none for the app's own preferences | `values`: key to text. Sets and arrays are JSON, dates ISO 8601, data base64. Secrets (keys like `token`, and registered values) read as `[redacted]` |

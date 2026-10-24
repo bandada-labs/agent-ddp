@@ -44,6 +44,14 @@ internal object History {
 
     private var scale = 1.0
 
+    /** For `history.files` and `history.read`: the files as they are on disk, the open one included. */
+    fun files(): List<String> = directory.list().orEmpty().filter { it.endsWith(".jsonl") || it.endsWith(".jsonl.gz") }.sorted()
+
+    fun read(name: String): ByteArray {
+        if (name !in files()) throw IllegalArgumentException("No history file '$name'; history.files lists them")
+        return File(directory, name).readBytes()
+    }
+
     fun start(application: Application) {
         scale = application.resources.displayMetrics.density.toDouble()
         directory = File(application.filesDir, "agent-ddp/history").apply { mkdirs() }

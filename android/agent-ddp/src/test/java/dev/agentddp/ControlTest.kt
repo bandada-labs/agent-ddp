@@ -131,6 +131,13 @@ class ControlTest {
         assertEquals("net.send needs OkHttp in the app", answers.poll(2, TimeUnit.SECONDS)!!.getJSONObject("error").getString("message"))
     }
 
+    @Test
+    fun aV1ErrorLineBecomesAnError() {
+        assertEquals("""{"rate":1}""", Control.answer(JSONObject("""{"type":"time","rate":1}""")).toString())
+        val failed = runCatching { Control.answer(JSONObject("""{"type":"error","error":"pause first, then step"}""")) }
+        assertEquals("pause first, then step", failed.exceptionOrNull()!!.message)
+    }
+
     private fun answerTo(message: String): JSONObject {
         var answer = ""
         ControlSession(ControlApp("com.example", "Example")) { answer = it }.receive(message)

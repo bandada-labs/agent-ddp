@@ -121,12 +121,44 @@ final class ControlSession {
     private let send: (String) -> Void
     private var networkWatch: UUID?
     private var appLog: AppLog?
+    // Main thread only.
+    private var screenStream: FrameStream?
 
     private lazy var methods: [String: ([String: Any]) throws -> Any] = [
         "app.info": { [app] _ in Control.info(app) },
         "app.commands": { _ in ["commands": Commands.shared.names()] },
         "screen.elements": { _ in ["elements": onMain { FrameCapture.visibleWindows().flatMap(AccessibilityReader.elements(in:)) }] },
         "screen.capture": { params in try Control.capture(params) },
+        "screen.frame": { _ in onMain { FrameCapture.frame(index: 0, milliseconds: 0) } },
+        // The header, frame and end lines of a recording, as `screen.stream` events.
+        "screen.watch": { [unowned self] params in
+            let frames = params["frames"] as? Int ?? 0
+            onMain {
+                screenStream?.stop()
+                screenStream = FrameStream(frames: frames, send: { [weak self] line in
+                    guard let self else { return false }
+                    event("screen.stream", line)
+                    return true
+                })
+                screenStream?.start()
+            }
+            return [:]
+        },
+        "screen.unwatch": { [unowned self] _ in onMain { screenStream?.stop() }; return [:] },
+        "screen.value": { params in
+            let path = params["path"] as? String ?? ""
+            // v1 answers the key path without its `layer.` or `element.` scope; this one names what was asked.
+            return try Control.answer(onMain { LiveEval.evaluate(name: params["id"] as? String ?? "", path: path) })
+                .merging(["path": path]) { _, asked in asked }
+        },
+        "time.pause": Self.time("pause"),
+        "time.resume": Self.time("resume"),
+        "time.step": Self.time("step", "frames"),
+        "time.rate": Self.time("rate", "rate"),
+        "time.seek": Self.time("seek", "ms"),
+        "time.status": Self.time("status"),
+        "history.files": { _ in ["files": History.shared.files()] },
+        "history.read": { params in ["data": try History.shared.read(params["file"] as? String ?? "").base64EncodedString()] },
         "input.touch": { params in
             let point = CGPoint(x: params["x"] as? Double ?? 0, y: params["y"] as? Double ?? 0)
             switch params["phase"] as? String {
@@ -196,6 +228,7 @@ final class ControlSession {
 
     /// The connection closed: stop feeding it events and let paused requests go on.
     func close() {
+        DispatchQueue.main.async { [self] in screenStream?.stop() }
         stopNetwork()
         Fetch.shared.release(owner: self)
         appLog?.stop()
@@ -204,6 +237,10 @@ final class ControlSession {
     private func stopNetwork() {
         if let networkWatch { NetworkLog.shared.stopWatching(networkWatch) }
         networkWatch = nil
+    }
+
+    private static func time(_ action: String, _ key: String? = nil) -> ([String: Any]) throws -> Any {
+        { params in try Control.answer(onMain { TimeControl.handle(action: action, value: key.flatMap { params[$0] as? Double }) }) }
     }
 
     private static func file(_ params: [String: Any]) -> String? { (params["file"] as? String).flatMap { $0.isEmpty ? nil : $0 } }
@@ -250,6 +287,12 @@ enum Control {
 
     struct Failure: Error, CustomStringConvertible {
         let description: String
+    }
+
+    /// A v1 answer line as a result: its `type` goes, and an error line throws.
+    static func answer(_ line: [String: Any]) throws -> [String: Any] {
+        if line["type"] as? String == "error" { throw Failure(description: line["error"] as? String ?? "Failed") }
+        return line.filter { $0.key != "type" }
     }
 
     static func info(_ app: ControlApp) -> [String: Any] {

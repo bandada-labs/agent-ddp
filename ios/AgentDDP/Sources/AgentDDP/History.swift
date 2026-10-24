@@ -34,6 +34,17 @@ final class History {
     private let writer = DispatchQueue(label: "dev.agentddp.history")
     private var segment: HistorySegment?
 
+    /// For `history.files` and `history.read`: the files as they are on disk, the open one included.
+    func files() -> [String] {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+        return names.filter { $0.hasSuffix(".jsonl") || $0.hasSuffix(".jsonl.gz") }.sorted()
+    }
+
+    func read(_ name: String) throws -> Data {
+        guard files().contains(name) else { throw Control.Failure(description: "No history file '\(name)'; history.files lists them") }
+        return try Data(contentsOf: directory.appendingPathComponent(name))
+    }
+
     /// Main thread, at launch.
     func start(directory: URL) {
         self.directory = directory

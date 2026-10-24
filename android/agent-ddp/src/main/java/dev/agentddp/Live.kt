@@ -140,7 +140,7 @@ private class LiveSession(private val socket: LocalSocket) {
  * modifier inspector (border.width, graphicsLayer.alpha, background.color) or `semantics.<Key>`
  * (semantics.Selected, semantics.StateDescription) on the semantics node with that test tag or text.
  */
-private object LiveEval {
+internal object LiveEval {
     fun evaluate(name: String, path: String): JSONObject {
         val (scope, property) = path.split(".", limit = 2).takeIf { it.size == 2 }
             ?: return error("path is <modifier>.<property> or semantics.<Key>, e.g. border.width")

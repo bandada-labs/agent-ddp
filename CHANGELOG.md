@@ -12,6 +12,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 - `log.watch`: the app's own log lines (os_log on iOS, logcat on Android).
 - `prefs.files`, `prefs.read`, `prefs.write`, `prefs.remove`, `prefs.clear`: UserDefaults and SharedPreferences. A write keeps the type the key holds; secrets read as `[redacted]`.
 - `app.commands`, `app.run`: named actions the app adds in Debug with `AgentDDP.command` (iOS) or `AgentDdpCommands.add` (Android), in its own Swift or Kotlin.
+- `screen.frame`, `screen.watch`, `screen.value`, `time.*`, `history.files`, `history.read`: what the v1 endpoint gives (snapshot, stream, eval, time) and the flight recorder's files, over the control endpoint.
 - `net.send`: a request sent with the app's own client, logged and pausable like the app's requests. On iOS, the closure given to `AgentDDP.send` is now `@escaping`, because `net.send` reuses the last one.
 
 ## 0.1.5 (2026-10-23)

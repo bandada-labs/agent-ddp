@@ -14,6 +14,9 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.security.MessageDigest
 import java.util.Base64
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
 /**
@@ -87,6 +90,8 @@ internal class ControlConnection(
 internal class ControlSession(private val app: ControlApp, private val send: (String) -> Unit) {
     private var networkWatch: java.util.UUID? = null
     private var appLog: AppLog? = null
+    // Main thread only.
+    private var screenStream: FrameStream? = null
 
     private val methods: Map<String, (JSONObject) -> Any> = mapOf(
         "app.info" to { _ -> Control.info(app) },
@@ -94,6 +99,18 @@ internal class ControlSession(private val app: ControlApp, private val send: (St
         "app.run" to AgentDdpCommands::run,
         "screen.elements" to { _ -> JSONObject().put("elements", onMain { FrameCapture.frame(0, 0.0).getJSONArray("elements") }) },
         "screen.capture" to { params -> Control.capture(params) },
+        "screen.frame" to { _ -> onMain { FrameCapture.frame(0, 0.0) } },
+        "screen.watch" to { params -> watchScreen(params.optInt("frames", 0)); JSONObject() },
+        "screen.unwatch" to { _ -> onMain { screenStream?.stop() }; JSONObject() },
+        "screen.value" to { params -> Control.answer(onMain { LiveEval.evaluate(params.getString("id"), params.getString("path")) }) },
+        "time.pause" to time("pause"),
+        "time.resume" to time("resume"),
+        "time.step" to time("step", "frames"),
+        "time.rate" to time("rate", "rate"),
+        "time.seek" to time("seek", "ms"),
+        "time.status" to time("status"),
+        "history.files" to { _ -> JSONObject().put("files", JSONArray(History.files())) },
+        "history.read" to { params -> JSONObject().put("data", Base64.getEncoder().encodeToString(History.read(params.getString("file")))) },
         "input.touch" to { params ->
             val point = PointF(params.optDouble("x", 0.0).toFloat(), params.optDouble("y", 0.0).toFloat())
             when (params.optString("phase")) {
@@ -142,6 +159,7 @@ internal class ControlSession(private val app: ControlApp, private val send: (St
 
     /** The connection closed: stop feeding it events and let paused requests go on. */
     fun close() {
+        runCatching { onMain { screenStream?.stop() } }
         stopNetwork()
         Fetch.release(this)
         appLog?.stop()
@@ -153,6 +171,33 @@ internal class ControlSession(private val app: ControlApp, private val send: (St
     }
 
     private fun JSONObject.file(): String? = optString("file").ifEmpty { null }
+
+    private fun time(action: String, key: String? = null): (JSONObject) -> Any = { params ->
+        Control.answer(onMain { TimeControl.handle(action, key?.let { params.optDouble(it) }?.takeUnless(Double::isNaN)) })
+    }
+
+    /**
+     * `screen.stream` events: the header, frame and end lines of a recording. They go out from a thread of their own,
+     * so the main thread never waits on a slow client; a client that falls [FRAME_BACKLOG] frames behind ends the stream.
+     */
+    private fun watchScreen(frameLimit: Int) {
+        val outbox = ArrayBlockingQueue<JSONObject>(FRAME_BACKLOG)
+        val finished = AtomicBoolean(false)
+        onMain {
+            FrameRecorder.resumedActivity ?: throw IllegalStateException("No activity in the foreground")
+            screenStream?.stop()
+            screenStream = FrameStream(frameLimit, send = outbox::offer, finished = { finished.set(true) }).also { it.start() }
+        }
+        thread(name = "agentddp-screen", isDaemon = true) {
+            while (!finished.get() || outbox.isNotEmpty()) {
+                val line = outbox.poll(200, TimeUnit.MILLISECONDS) ?: continue
+                if (runCatching { event("screen.stream", line) }.isFailure) {
+                    runCatching { onMain { screenStream?.stop() } }
+                    return@thread
+                }
+            }
+        }
+    }
 
     private fun event(method: String, params: JSONObject) = send(JSONObject().put("method", method).put("params", params).toString())
 
@@ -176,11 +221,18 @@ internal class ControlSession(private val app: ControlApp, private val send: (St
     private companion object {
         /** These wait on the app's code or the network, off the reading thread, so a request they send can still be paused and continued. */
         val WAITING = setOf("app.run", "net.send")
+        const val FRAME_BACKLOG = 64
     }
 }
 
 internal object Control {
     const val PROTOCOL = 2
+
+    /** A v1 answer line as a result: its `type` goes, and an error line throws. */
+    fun answer(line: JSONObject): JSONObject {
+        if (line.optString("type") == "error") throw IllegalArgumentException(line.optString("error"))
+        return line.apply { remove("type") }
+    }
 
     fun info(app: ControlApp): JSONObject {
         val density = onMain { FrameRecorder.resumedActivity?.resources?.displayMetrics?.density } ?: 1f

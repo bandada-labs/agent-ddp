@@ -172,7 +172,7 @@ private final class LiveSession {
 /// Read-only property reads for `ddp eval <element> <path>`:
 /// `element.<key path>` on the accessibility element, `layer.<key path>` on the topmost layer that
 /// matches the element's frame (presentation values, so mid-animation).
-private enum LiveEval {
+enum LiveEval {
     static func evaluate(name: String, path: String) -> [String: Any] {
         let parts = path.split(separator: ".", maxSplits: 1).map(String.init)
         guard parts.count == 2, ["element", "layer"].contains(parts[0]) else {
