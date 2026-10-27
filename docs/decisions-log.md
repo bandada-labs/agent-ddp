@@ -132,3 +132,8 @@ Done: the third hard rule in ARCHITECTURE.md and AGENTS.md; `Hooks` in both libr
 Asked about the hooks' instability. Answered that the counts catch a hook that breaks but not one that answers wrong, that every hook was checked on one version only, and that `swiftui.responders` read word 2 of a Swift metadata record without a check, so a layout change could crash the app. Proposed a known-answer probe at start, a guard on that read and a version matrix. Answer: "yes, do it but the first one would take time and resources i'm not sure about it also i need them to report it and let the agent know it and available for the user".
 
 Done: the guard (the attribute must still be a one-argument `WeakAttribute` struct and word 2 must name that argument, else the hook fails with why); every check, `check tappable` and `explore` print the failed hooks, and the take keeps them in `inspect.hooks`. The probe is not built, waiting on the maintainer.
+
+## 2026-10-27
+
+### 0.2.1 published before the two-phone test
+Mimbre's asks were cut to a patch: `ddp compare` and a note on headless simulators. The other asks wait for a later release. Asked whether to wait for a free device slot to run `compare <element> --on ios,android` on a real simulator and emulator. Answer: "ve haciendolo tu lo de publicar el nuevo release". Published with the fake-app tests and a live screen compare on the iOS simulator. The two-phone run happens when a slot is free, and a bug there ships as 0.2.2.
