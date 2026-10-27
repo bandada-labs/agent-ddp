@@ -74,6 +74,9 @@ ddp open ddpsample://item/3      # a deep link (iOS asks "Open in ...?" for a cu
 ddp set appearance dark          # also text-size, reduce-motion on|off, locale es-ES
 ddp logs --grep error            # the app's log lines during the last take, at their time in it
 ddp annotate shot.png            # a screenshot with numbered boxes, label N is @eN
+ddp compare --reference ref.png  # the screen against a reference screenshot: difference per band and a side-by-side PNG
+ddp compare card --on ios,android   # one element's pixels on both phones (sessions named ios and android)
+ddp compare --reference ref.png --ignore clockBar --mask 0,0,1206,162   # leave out what moves and the status bar
 ddp explore                      # tap each control once, record, check all on each, one line per control
 ddp record --on ios,android --for 3s --then "<cmd with {platform}>"   # both platforms at once, then parity
 ```

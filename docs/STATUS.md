@@ -1,12 +1,14 @@
 # Status
 
-Last update: 2026-10-24. Read this after a break, then [DECISIONS.md](DECISIONS.md).
+Last update: 2026-10-27. Read this after a break, then [DECISIONS.md](DECISIONS.md).
 
 ## In one paragraph
 
 A small library inside a Debug build of an iOS or Android app serves what the app draws, frame by frame (ADR 0001). The `ddp` CLI, one Rust binary on npm (ADR 0002, 0003), reads it live or from recordings and prints short text for coding agents (ADR 0006). The protocol between them is versioned (ADR 0004). A flight recorder keeps the last 15 minutes on both platforms (ADR 0005).
 
 ## Released
+
+0.2.1 (CLI only; prepared 2026-10-27, not tagged yet): `ddp compare`, which compares the screen against a reference screenshot, or one element against a reference image or against the same element on the other phone. `--ignore` and `--mask` leave moving parts out. The libraries are the same as in 0.2.0. Also a doc note: a headless simulator draws frames when the app has the library (121 frames in 2 s on iOS 27.0).
 
 0.2.0 on 2026-10-24: the control endpoint (protocol 2), so the CLI and the library must be updated together. npm `agent-ddp`, GitHub release with 5 binaries, JitPack `com.github.bandada-labs:agent-ddp:v0.2.0`, SwiftPM from the repo URL. Checked before the tag: CI's three jobs locally, every command live on the sample apps, release builds without the library, and the hook matrix on iOS 26.5 and 27.0 and API 29, 33 and 35. What is in it: [CHANGELOG.md](../CHANGELOG.md).
 

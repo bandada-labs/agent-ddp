@@ -34,6 +34,9 @@ ddp logs --follow [--for 10s] [--grep <text>]      the last 100 lines, then each
 ddp set appearance dark | text-size large | reduce-motion on | locale es-ES
 ddp open <deep link or URL>
 ddp annotate [out.png]                             screenshot with numbered boxes, label N is @eN
+ddp compare --reference <image> [--out ddp-compare.png]   the screen against a reference screenshot
+ddp compare <element> --reference <image>          one element against a reference image of it
+ddp compare <element> --on ios,android             one element on two phones, pixel by pixel
 ddp explore [--per 2s] [--skip <el> ...]           tap each control once, record, check all on each
 ddp record --on ios,android --for 3s --then "<cmd with {platform}>"   both at once, then parity
 ddp view [out.html] [--file rec]                   a local HTML page of a take, for people
@@ -193,9 +196,33 @@ hook swiftui.responders (internal) failing: no AGGraphGetWeakValue or attachment
 
 `check jank` reports refreshes the app missed, as the libraries count them from the platform's own frame times (`CADisplayLink` on iOS, Choreographer and the display's refresh rate on Android), with their own capture time left out: a refresh counts only when the app's own work took longer than it. History takes are not judged. `check settle` reports elements still changing in the last 500 ms (`NOT SETTLED`: a loop, or a take that ended too early) and positions that shake by 1 pt or less (`JITTER`). It needs a take of 1 s or more.
 
+A simulator booted with `xcrun simctl boot` and no Simulator.app window still draws frames, so `read`, `check jank` and the other live commands work headless. Measured on the iOS 27.0 simulator with the sample app, whose clock is a SwiftUI `TimelineView(.animation)`: 121 frames in 2 s, the clock moved every 16.7 ms, and `check jank` said `no jank: 121 frames, no refresh missed`. The frames are read by the library, so the app must have it.
+
 ### check all, baseline
 
 `check all` runs overlap, corners, jank, settle and a11y on one take, prints only problems and a summary, and exits 1 on any. Live, it records first, then asks the app for its answers (see above). `baseline save <name>` stores the last take (or `--file`) in `ddp-baselines/<name>.jsonl.gz`, next to the code so it can be committed. `check baseline --against <name>` lines the take up with it on the first change and prints `CHANGED <element> from t=...` with the first differences; `--junit <file>` also writes a JUnit report for CI.
+
+### compare
+
+`compare` measures how far two images are apart and writes them side by side with a third panel, red where they differ. It is a measurement, not a check: it reports no problem and exits 0. The agent decides what the numbers mean.
+
+- `compare --reference ref.png` takes the device's own screenshot (status bar included), scales the reference to the screen's width, puts the top edges together and compares the height both have. It works without a session when given `--device`, so the app does not need the library.
+- `compare <element> --reference card.png` and `compare <element> --on ios,android` take the element's pixels from the app's own windows (`screen.pixels`), and scale both images to the smaller width and height. `--on` takes two named sessions, as in `record --on`.
+- The reference is a PNG, or on macOS any image `sips` opens (JPEG, WebP, HEIC).
+- `--ignore <element>...` leaves elements out of the scores, such as a clock or a spinner: on the screen it needs a session to find them, and across two phones each phone's place for it is left out. `--mask x,y,w,h` (whole screen only, repeatable) leaves out a rectangle in screenshot pixels, such as the status bar, whose time never matches a reference. Left-out pixels are dark gray in the picture and count in no score.
+- `difference` is the mean of each pixel's largest channel difference. `pixels that differ` is the share more than 32 of 255 apart, which is the same tolerance the pixel checks use for "the same color". Then the same two numbers per band, top to bottom: 8 bands for the screen, 4 for an element. Resampling a reference to another width moves edges by a pixel, so text and borders show as small red lines even when nothing changed.
+
+```
+$ ddp compare --reference player-mobbin.png
+screen 1206x2622 against player-mobbin.png 1180x2565 (scaled 1.022)
+difference 0.3% (pixels that differ: 0.7%)
+by band, top to bottom (328 px each):
+      0-328     0.1%  differ 0.3%
+   ...
+   1312-1640    0.7%  differ 1.4%
+   ...
+ddp-compare.png: reference | screen | difference (red: differs)
+```
 
 ### check parity
 

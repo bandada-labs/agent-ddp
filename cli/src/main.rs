@@ -1,5 +1,6 @@
 mod args;
 mod checks;
+mod compare;
 mod control;
 mod device;
 mod history;
@@ -59,6 +60,7 @@ fn handler(command: &str) -> fn(&mut Args) -> Result<i32> {
         "history" => history::history,
         "set" => device::settings,
         "annotate" => device::annotate,
+        "compare" => compare::compare,
         "explore" => device::explore,
         "mcp" => tools::mcp,
         "view" => tools::view,

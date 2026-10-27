@@ -482,6 +482,11 @@ class FakeApp:
                             {**e, "points": 9, "point": [50, 25]}
                             for e in self.frame(0)["elements"] if e.get("tap")]
                     result = {"elements": [h for h in hits if params.get("id") in (None, h["id"], h["label"])]}
+                elif method == "screen.pixels":
+                    # 4x2 pixels per rectangle: blue on top, white below. Answered like screen.pixels in both libraries.
+                    pixels = base64.b64encode(bytes([0, 0, 255, 255] * 4 + [255, 255, 255, 255] * 4)).decode()
+                    result = {"scale": 3, "regions": [{"x": 0, "y": 0, "width": 4, "height": 2, "rgba": pixels}
+                                                      for _ in params["rects"]]}
                 elif method == "input.touch":
                     if params["phase"] == "down" and params["x"] < 100 and params["y"] < 50:
                         self.tapped_at = self.stream_index
@@ -573,6 +578,31 @@ with tempfile.TemporaryDirectory() as directory:
     both = ddp_in(directory, "record", "--on", "ios,android", "--for", "300ms",
                   "--then", f'{sys.executable} -c "import sys; print(sys.argv[1:])" {{platform}} {{"k": 1}}')
     assert both.returncode == 0 and "['ios', '{k:', '1}']" in both.stdout and "parity" in both.stdout, both.stdout + both.stderr
+    # compare: the same element on two sessions differs by nothing; a reference all blue differs in the bottom half.
+    across = ddp_in(directory, "compare", "button", "--on", "ios,android", "--out", str(Path(directory, "across.png")))
+    assert across.returncode == 0 and "button on ios 4x2 px against android 4x2 px" in across.stdout and \
+        "difference 0.0% (pixels that differ: 0.0%)" in across.stdout, across.stdout + across.stderr
+    assert Path(directory, "across.png").read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+    import zlib
+    def png(width, height, rgb):
+        raw = b"".join(b"\x00" + bytes(rgb) * width for _ in range(height))
+        chunk = lambda kind, body: struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body))
+        return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)) + \
+            chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
+    Path(directory, "blue.png").write_bytes(png(8, 4, [0, 0, 255]))
+    against = ddp_in(directory, "compare", "button", "--reference", str(Path(directory, "blue.png")),
+                     "--out", str(Path(directory, "against.png")))
+    assert against.returncode == 0 and "difference 50.0% (pixels that differ: 50.0%)" in against.stdout and \
+        "0-1       0.0%  differ 0.0%" in against.stdout and "1-2     100.0%  differ 100.0%" in against.stdout, against.stdout + against.stderr
+    # What is left out counts in no score: the whole element here.
+    ignored = ddp_in(directory, "compare", "button", "--reference", str(Path(directory, "blue.png")), "--ignore", "button",
+                     "--out", str(Path(directory, "ignored.png")))
+    assert "difference 0.0% (pixels that differ: 0.0%)" in ignored.stdout and \
+        "left out: 100.0% of the pixels" in ignored.stdout, ignored.stdout + ignored.stderr
+    masked = ddp_in(directory, "compare", "button", "--on", "ios,android", "--mask", "0,0,10,10")
+    assert masked.returncode == 1 and "--mask is for the whole screen" in masked.stderr, masked.stderr
+    missing = ddp_in(directory, "compare", "button")
+    assert missing.returncode == 1 and "compare needs --reference" in missing.stderr, missing.stderr
     # --then runs without a shell, so "; touch" is an argument to echo, not a second command.
     marker = Path(directory, "injected")
     safe = ddp_in(directory, "read", "--for", "200ms", "--then", f"echo safe ; touch {marker}")

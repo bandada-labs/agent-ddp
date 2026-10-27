@@ -2,6 +2,22 @@
 
 Changes that users or agents will notice. Before 1.0, a minor version may change the protocol or the output; those changes are marked.
 
+## 0.2.1 (2026-10-27)
+
+The CLI can compare pixels: the screen against a reference screenshot, and one element against a reference image or against the same element on the other phone. Only the CLI changed. The libraries are the same as in 0.2.0, so there is nothing to update in the app.
+
+### Added
+
+- `ddp compare --reference <image>`: the device's screenshot against a reference screenshot of another size. The reference is scaled to the screen's width with the top edges together. ddp prints the difference overall and in 8 bands from top to bottom, and writes `ddp-compare.png` with three panels: the reference, the screen, and the difference in red. It needs only `--device`, so the app does not need the library.
+- `ddp compare <element> --reference <image>` and `ddp compare <element> --on ios,android`: one element's pixels from the app's own windows (`screen.pixels`). The second form compares two sessions, for example the same card on iPhone and Android. Both images are scaled to the same size.
+- `--ignore <element>...` and `--mask x,y,w,h` leave a clock, a spinner or the status bar out of the scores.
+- A reference can be any image macOS opens with `sips` (JPEG, WebP, HEIC), not only PNG.
+- `compare` is a measurement, not a check: it reports no problem and always exits 0.
+
+### Docs
+
+- A simulator booted with `xcrun simctl boot` and no Simulator.app window draws frames when the app has the library. Measured on iOS 27.0: 121 frames in 2 s and `check jank` with no missed refresh (docs/agents.md).
+
 ## 0.2.0 (2026-10-24)
 
 The library now serves a control endpoint with names taken from Android and iOS (ADR 0008), and the CLI uses only that. Agents can act on the app, not only read it: touch and type, answer or fail its requests, edit its preferences and run commands the app adds in Debug. `ddp tap` checks first that a touch reaches the element. Every check now reports only what the platform itself answers (its hit test, the pixels of the app's own windows, its frame times), and says `not judged` where it cannot. The engine pieces it reaches outside public API were checked on the iOS 26.5 and 27.0 simulators and on Android API 29, 33 and 35 emulators (docs/hooks.md).

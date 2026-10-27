@@ -171,7 +171,7 @@ impl Screen {
 }
 
 /// Standard base64 with padding, as both libraries write it.
-fn base64(text: &str) -> Option<Vec<u8>> {
+pub fn base64(text: &str) -> Option<Vec<u8>> {
     let value = |c: u8| match c {
         b'A'..=b'Z' => Some(c - b'A'),
         b'a'..=b'z' => Some(c - b'a' + 26),

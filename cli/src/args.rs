@@ -68,6 +68,8 @@ pub struct Args {
     pub key: Option<String>,
     pub follow: bool,
     pub force: bool,
+    pub reference: Option<PathBuf>,
+    pub masks: Vec<String>,
 }
 
 const ABOUT: &str = "ddp: see what a Debug iOS/Android app draws, frame by frame, live or from a recording.
@@ -81,6 +83,7 @@ Start here (for agents): ddp skills get core
   open | set | logs | prefs | run          deep links, device settings, app logs, preferences, app commands
   check overlap|corners|jank|settle|a11y|timeline|parity|baseline|tappable|all
   history                                  the last 15 minutes: what changed, taps, requests; or one moment as a take
+  compare --reference <png> | compare <element> --on ios,android   pixels against a reference or the other phone
   diff | baseline | annotate | view | explore | net | time
   skills | batch | mcp
 
@@ -236,6 +239,16 @@ pub fn parser() -> Command {
             .arg(positional("value", "appearance dark|light; text-size (iOS: large, extra-large, accessibility-large...; \
                                       Android: small|default|large|largest or a factor); reduce-motion on|off; locale es-ES")
                 .required(true))))
+        .subcommand(sub("compare", "how far the screen is from a reference image, or one element from the other phone")
+            .arg(positional("id", "an element: its pixels in the app's windows (without it, the device's whole screen)"))
+            .arg(opt("reference", "a reference image (PNG; on macOS any image sips opens), scaled to the screen's width"))
+            .arg(opt("on", "with an element: two sessions to compare it across, e.g. ios,android"))
+            .arg(opt("device", "without a session: simulator UDID or adb serial"))
+            .arg(opt("platform", "default: guessed from the device id").value_parser(["ios", "android"]))
+            .arg(many("ignore", "elements to leave out of the scores, such as a clock (needs a session)"))
+            .arg(Arg::new("mask").long("mask").num_args(1).action(ArgAction::Append).value_name("X,Y,W,H")
+                .help("the whole screen: a rectangle in screenshot pixels to leave out, such as the status bar; repeat for more"))
+            .arg(opt("out", "where to write the side-by-side PNG").default_value("ddp-compare.png")))
         .subcommand(sub("annotate", "live: a screenshot with numbered boxes, label N is @eN")
             .arg(positional("out", "where to write the PNG").default_value("ddp-annotated.png")))
         .subcommand(sub("explore", "live: tap each control once, record it, run check all on each")
@@ -343,6 +356,8 @@ pub fn parse(argv: &[String]) -> Result<Args, clap::Error> {
         request_id: string(m, "request_id"),
         until: string(m, "until"),
         expect: string(m, "expect").map(PathBuf::from),
+        reference: string(m, "reference").map(PathBuf::from),
+        masks: strings(m, "mask"),
         against: string(m, "against").map(PathBuf::from),
         junit: string(m, "junit").map(PathBuf::from),
         settled: string(m, "settled"),
