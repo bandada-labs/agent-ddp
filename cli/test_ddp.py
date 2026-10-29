@@ -565,6 +565,10 @@ with tempfile.TemporaryDirectory() as directory:
     app.tapped_at = None
     recorded = ddp_in(directory, "read", "--for", "1s", "--then", then_tap)
     assert "toast" in recorded.stdout and recorded.returncode == 0, recorded.stdout + recorded.stderr
+    # A live `record` keeps the platform's answers, so a check on the file later judges instead of saying not judged.
+    assert ddp_in(directory, "record", "--for", "300ms", "--name", "kept").returncode == 0
+    from_file = ddp_in(directory, "check", "overlap", "--file", ".ddp/last.jsonl").stdout
+    assert "not judged" not in from_file and ("no covered text" in from_file or "COVERED" in from_file), from_file
     app.tapped_at = None
     explored = ddp_in(directory, "explore", "--per", "1s")
     assert "locked: not tapped, covered by scrim" in explored.stdout and \

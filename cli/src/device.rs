@@ -3,8 +3,8 @@ use crate::args::Args;
 use crate::checks::{check_parity, RECORDING_CHECKS};
 use crate::control::Control;
 use crate::live::{
-    follow_logs, live_session, open, platform_of, record_live, record_live_inspected, require_session, run_then,
-    snapshot_live, stream_frames, AndroidDevice, IosDevice, OfflineDevice,
+    follow_logs, live_session, open, platform_of, record_live_inspected, require_session, run_then, snapshot_live,
+    stream_frames, AndroidDevice, IosDevice, OfflineDevice,
 };
 use crate::model::{
     self, element_alpha, element_key, load, normalize_label, rect, save_recording, warn_if_empty, Frame,
@@ -25,7 +25,8 @@ pub fn record(args: &mut Args) -> Result<i32> {
     }
     let context = ctx();
     if live_session(args).is_some() {
-        let recording = record_live(args)?;
+        // With the platform's answers at the end, so a check on the file later judges what a live check would.
+        let recording = record_live_inspected(args)?;
         say!(
             "recorded {} frames live -> {}{}",
             recording.frames.len(),

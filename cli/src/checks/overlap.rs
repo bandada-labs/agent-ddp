@@ -15,7 +15,7 @@ pub const COVERED_INK: f64 = 0.9;
 /// Why a check that needs the platform's answers says nothing about a take.
 pub fn not_inspected(recording: &Recording) -> Option<&'static str> {
     if recording.inspect.is_null() {
-        Some("the take has no screen check (a file from before 0.2.0, or history); run it live")
+        Some("the take has no screen check (history, or a file recorded before 0.3.0); run it live, or record it again")
     } else if recording.inspect.get("pixels").is_some() {
         Some("the app did not answer screen.pixels")
     } else {
