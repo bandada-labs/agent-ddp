@@ -715,6 +715,15 @@ with tempfile.TemporaryDirectory() as directory:
     assert double.returncode == 1 and "a double tap needs the library" in double.stderr, double.stderr
     element = ddp_in(directory, "swipe", "button", "0,0", "--device", "emulator-5554")
     assert element.returncode == 1 and "knows no elements" in element.stderr, element.stderr
+    # Host commands refuse what a platform has no public way to do, before running anything.
+    sim, emu = "5A9A96DD-128D-475C-B007-46F50ED266A7", "emulator-5554"
+    for args, said in [(("set", "orientation", "landscape", "--device", sim), "no public way to rotate"),
+                       (("set", "location", "200,10", "--device", sim), "location is LAT,LON"),
+                       (("push", "p.json", "--device", emu, "--app", "x"), "no local way to deliver a push"),
+                       (("job", "7", "--device", sim, "--app", "x"), "only from the debugger"),
+                       (("biometric", "enroll", "--device", emu), "only through Settings")]:
+        refused = ddp_in(directory, *args)
+        assert refused.returncode == 1 and said in refused.stderr, (args, refused.stderr)
     missing = ddp_in(directory, "swipe", "button")
     assert missing.returncode != 0, missing.stdout
     app.tapped_at = None

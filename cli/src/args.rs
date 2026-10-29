@@ -88,6 +88,7 @@ Start here (for agents): ddp skills get core
   record | wait | tap | type | press       take a recording, wait, touch and type
   swipe | drag | double-tap | long-press   gestures with a real finger, then what changed
   open | set | logs | prefs | run | state | events   deep links, device settings, app logs, preferences, app commands, values, events
+  biometric | push | job                   simulated Face ID or fingerprint, a push, a background job
   check overlap|corners|jank|settle|a11y|timeline|parity|baseline|tappable|all
   history | crash                          the last 15 minutes: what changed, taps, requests; the last crash with its stack
   compare --reference <png> | compare <element> --on ios,android   pixels against a reference or the other phone
@@ -286,11 +287,18 @@ pub fn parser() -> Command {
             .arg(opt("name", "at: keep the take under a name"))
             .arg(many("ignore", "list: elements to leave out (the ones that change in most frames already are)"))
             .arg(opt("dir", "read history files from this folder instead of the device"))))
-        .subcommand(device_options(sub("set", "device settings: appearance, text size, reduce motion, locale")
-            .arg(choices("what", &["appearance", "text-size", "reduce-motion", "locale"]).required(true))
+        .subcommand(device_options(sub("set", "device settings: appearance, text size, reduce motion, locale, location, orientation")
+            .arg(choices("what", &["appearance", "text-size", "reduce-motion", "locale", "location", "orientation"]).required(true))
             .arg(positional("value", "appearance dark|light; text-size (iOS: large, extra-large, accessibility-large...; \
-                                      Android: small|default|large|largest or a factor); reduce-motion on|off; locale es-ES")
+                                      Android: small|default|large|largest or a factor); reduce-motion on|off; locale es-ES; \
+                                      location LAT,LON; orientation portrait|landscape (Android)")
                 .required(true))))
+        .subcommand(device_options(sub("biometric", "simulated Face ID / Touch ID or fingerprint: enroll, then match or fail")
+            .arg(choices("action", &["enroll", "match", "fail"]).required(true))))
+        .subcommand(device_options(sub("push", "iOS: deliver a push notification to the app, as APNs would")
+            .arg(positional("path", "the payload JSON file ({\"aps\": {\"alert\": \"Hi\"}})").required(true))))
+        .subcommand(device_options(sub("job", "Android: run one of the app's scheduled jobs now (JobScheduler, WorkManager)")
+            .arg(positional("value", "the job id").required(true))))
         .subcommand(sub("compare", "how far the screen is from a reference image, or one element from the other phone")
             .arg(positional("id", "an element: its pixels in the app's windows (without it, the device's whole screen)"))
             .arg(opt("reference", "a reference image (PNG; on macOS any image sips opens), scaled to the screen's width"))

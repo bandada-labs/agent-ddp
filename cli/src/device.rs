@@ -333,6 +333,12 @@ pub fn settings(args: &mut Args) -> Result<i32> {
         match what.as_str() {
             "appearance" => vec![base(&["ui", &device, "appearance", &value])],
             "text-size" => vec![base(&["ui", &device, "content_size", &value])],
+            "location" => vec![base(&["location", &device, "set", &lat_lon(&value)?.join(",")])],
+            "orientation" => fail!(
+                "the simulator has no public way to rotate from the host",
+                "not_supported",
+                "rotate with Simulator.app (Device > Rotate), or test landscape on Android"
+            ),
             "reduce-motion" => vec![base(&[
                 "spawn",
                 &device,
@@ -372,6 +378,25 @@ pub fn settings(args: &mut Args) -> Result<i32> {
                 };
                 vec![base(&["settings", "put", "system", "font_scale", factor])]
             }
+            // The emulator console takes longitude first.
+            "location" => {
+                let [lat, lon] = lat_lon(&value)?;
+                vec![[adb.as_str(), "-s", &device, "emu", "geo", "fix", &lon, &lat]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect()]
+            }
+            "orientation" => {
+                let rotation = match value.as_str() {
+                    "portrait" => "0",
+                    "landscape" => "1",
+                    _ => fail!("orientation is portrait or landscape", "bad_value", "ddp set orientation landscape"),
+                };
+                vec![
+                    base(&["settings", "put", "system", "accelerometer_rotation", "0"]),
+                    base(&["settings", "put", "system", "user_rotation", rotation]),
+                ]
+            }
             "reduce-motion" => ["animator_duration_scale", "transition_animation_scale", "window_animation_scale"]
                 .iter()
                 .map(|name| base(&["settings", "put", "global", name, scale]))
@@ -391,6 +416,91 @@ pub fn settings(args: &mut Args) -> Result<i32> {
     }
     let relaunch = what == "locale" || (what == "reduce-motion" && platform == "ios");
     say!("{what} {value} on {platform} {device}{}", if relaunch { "; relaunch the app to see it" } else { "" });
+    Ok(0)
+}
+
+/// `LAT,LON` as two numbers in range.
+fn lat_lon(text: &str) -> Result<[String; 2]> {
+    let numbers: Vec<f64> = text.split(',').filter_map(|n| n.trim().parse().ok()).collect();
+    match numbers[..] {
+        [lat, lon] if lat.abs() <= 90.0 && lon.abs() <= 180.0 => Ok([lat.to_string(), lon.to_string()]),
+        _ => fail!(format!("location is LAT,LON, not '{text}'"), "bad_value", "ddp set location 4.711,-74.072"),
+    }
+}
+
+/// Simulated biometrics, the way the simulator's and the emulator's own menus do it. Neither confirms: an action, so
+/// ddp says it sent it and the app's reaction is what to check next.
+pub fn biometric(args: &mut Args) -> Result<i32> {
+    let (platform, device, _) = target(args)?;
+    let action = args.action.clone().unwrap_or_default();
+    let result = if platform == "ios" {
+        // The notifications Simulator.app's Features > Face ID menu posts (private names, used by test tools too).
+        let name = match action.as_str() {
+            "enroll" => "com.apple.BiometricKit.enrollmentChanged",
+            "match" => "com.apple.BiometricKit_Sim.pearl.match",
+            _ => "com.apple.BiometricKit_Sim.pearl.nomatch",
+        };
+        if action == "enroll" {
+            capture("xcrun", &["simctl", "spawn", &device, "notifyutil", "-s", name, "1"]);
+        }
+        capture("xcrun", &["simctl", "spawn", &device, "notifyutil", "-p", name])
+    } else {
+        // The emulator console's finger touch: a fingerprint id enrolled in Settings matches, another one fails.
+        let finger = match action.as_str() {
+            "enroll" => fail!(
+                "Android enrolls a fingerprint only through Settings",
+                "not_supported",
+                "add one in Settings > Security > Fingerprint, touching with: ddp biometric match"
+            ),
+            "match" => "1",
+            _ => "99",
+        };
+        capture(&adb_path()?, &["-s", &device, "emu", "finger", "touch", finger])
+    };
+    if result.code != 0 {
+        fail!(format!("could not send it: {}", result.stderr.trim()), "command_failed");
+    }
+    say!("biometric {action} sent to {platform} {device}; check what the app shows next");
+    Ok(0)
+}
+
+/// iOS: a push notification delivered to the app as if APNs sent it (`simctl push`).
+pub fn push(args: &mut Args) -> Result<i32> {
+    let (platform, device, app) = target(args)?;
+    let Some(app) = app else { fail!("no app", "missing_option", "pass --app, or ddp connect first") };
+    if platform != "ios" {
+        fail!(
+            "Android has no local way to deliver a push as FCM would",
+            "not_supported",
+            "send it from your FCM test console, or run the app's handler as an app command (ddp run)"
+        );
+    }
+    let path = args.path.clone().unwrap_or_default();
+    let result = capture("xcrun", &["simctl", "push", &device, &app, &path]);
+    if result.code != 0 {
+        fail!(format!("simctl push failed: {}", result.stderr.trim()), "command_failed");
+    }
+    say!("pushed {path} to {app} on {device}");
+    Ok(0)
+}
+
+/// Android: one of the app's scheduled jobs, run now (`cmd jobscheduler run -f`). WorkManager runs on JobScheduler.
+pub fn job(args: &mut Args) -> Result<i32> {
+    let (platform, device, app) = target(args)?;
+    let Some(app) = app else { fail!("no app", "missing_option", "pass --app, or ddp connect first") };
+    if platform == "ios" {
+        fail!(
+            "iOS runs a BGTaskScheduler task early only from the debugger",
+            "not_supported",
+            "pause in Xcode and run e -l objc -- (void)[[BGTaskScheduler sharedScheduler] _simulateLaunchForTaskWithIdentifier:@\"ID\"]"
+        );
+    }
+    let id = args.value.clone().unwrap_or_default();
+    let result = capture(&adb_path()?, &["-s", &device, "shell", "cmd", "jobscheduler", "run", "-f", &app, &id]);
+    if result.code != 0 || result.stdout.contains("Unknown") || result.stdout.contains("not found") {
+        fail!(format!("could not run job {id}: {}", (result.stdout + &result.stderr).trim()), "command_failed");
+    }
+    say!("ran job {id} of {app} on {device}");
     Ok(0)
 }
 
