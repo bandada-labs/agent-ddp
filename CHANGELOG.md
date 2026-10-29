@@ -4,6 +4,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 
 ## Unreleased
 
+- `ios/build-swiftc.sh`: builds the iOS library as a static library and module with plain `swiftc`, for apps built without an Xcode project or SwiftPM. CI builds it, and the iOS sample app, on Xcode 15.4, the oldest Xcode supported.
 - `ddp compare --on ios,android --structure`: what the two phones draw by label, not pixels: labels only one phone has, and the same label drawn as another kind. Platform idiom no longer hides a missing tab or chip.
 - `ddp storage`: the app's files (list, read, remove), its SQLite databases with one read-only query, and its Keychain items or Keystore aliases by name, never their data. Text is redacted like network bodies. New protocol methods `storage.files`, `storage.read`, `storage.remove`, `storage.query`, `storage.keys`. `ddp launch --reset` clears the app's data first.
 - `ddp perf [--for 5s]`: refreshes the main thread missed and the worst gap, from the platform's vsync callbacks, plus draw time per frame on Android (FrameMetrics), without a recording. New protocol method `perf.metrics`. History pauses while it measures.

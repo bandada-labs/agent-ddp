@@ -33,7 +33,12 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
+      # macos-14 has Xcode 15.4 (Swift 5.10), the oldest one the README supports: a newer Xcode accepts what it does not.
       - run: xcodebuild -scheme AgentDDP -destination 'generic/platform=iOS Simulator' build
+      - name: The sample app, as an app adding the package by path builds it
+        run: xcodebuild -project samples/ios/DDPSample.xcodeproj -scheme DDPSample -destination 'generic/platform=iOS Simulator' build
+      - name: Plain swiftc, for apps without an Xcode project or SwiftPM
+        run: ios/build-swiftc.sh simulator && ios/build-swiftc.sh device
       - name: Unit tests on the first available iPhone simulator
         run: |
           udid=$(xcrun simctl list devices available -j | python3 -c "import json,sys; print(next(d['udid'] for r in json.load(sys.stdin)['devices'].values() for d in r if d['name'].startswith('iPhone')))")
