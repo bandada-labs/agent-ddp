@@ -259,7 +259,7 @@ pub fn gesture(args: &mut Args) -> Result<i32> {
     let frame = before.frames.last().unwrap();
     let from = place(frame, &from_text)?;
     let to = match (&gesture[..], &args.value) {
-        ("swipe" | "drag", Some(text)) => Some(place(frame, text)?),
+        ("swipe" | "drag", Some(text)) => Some(place(frame, &crate::queries::resolve_ref(text)?)?),
         ("swipe" | "drag", None) => {
             fail!(format!("{gesture} needs where to: FROM TO"), "missing_option", format!("ddp {gesture} list 0,400"))
         }

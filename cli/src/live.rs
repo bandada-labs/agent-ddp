@@ -771,7 +771,11 @@ pub fn app_state(args: &mut Args) -> Result<i32> {
         "get" => {
             let name = name()?;
             let values = control.call("state.get", json!({"names": [name]}))?;
-            say!("{name} = {}", py::str(&values["values"][&name]));
+            if ctx().json {
+                say!("{}", py::dumps(&values["values"][&name]));
+            } else {
+                say!("{name} = {}", py::str(&values["values"][&name]));
+            }
             0
         }
         "set" => {
@@ -787,7 +791,14 @@ pub fn app_state(args: &mut Args) -> Result<i32> {
         _ => {
             let listed = control.call("state.list", json!({}))?;
             let entries = listed["values"].as_array().cloned().unwrap_or_default();
-            if entries.is_empty() {
+            if ctx().json {
+                let values = control.call("state.get", json!({}))?;
+                let rows: Vec<Value> = entries
+                    .iter()
+                    .map(|entry| json!({"name": entry["name"], "writable": entry["writable"], "value": values["values"][py::str(&entry["name"])]}))
+                    .collect();
+                say!("{}", py::dumps(&Value::Array(rows)));
+            } else if entries.is_empty() {
                 say!("no values: the app adds them in Debug with AgentDDP.state (iOS) or AgentDdpState.add (Android)");
                 say!("next: ddp skills get app");
             } else {
@@ -918,6 +929,18 @@ pub fn storage(args: &mut Args) -> Result<i32> {
             Ok(path.clone())
         }
     };
+    if ctx().json && args.action.as_deref() != Some("rm") {
+        let action = args.action.clone().unwrap_or_else(|| "files".into());
+        let params = match action.as_str() {
+            "read" => json!({"path": needs_path()?}),
+            "query" => json!({"path": needs_path()?, "sql": args.value.clone().unwrap_or_default()}),
+            "keys" => json!({}),
+            _ => json!({"path": path}),
+        };
+        say!("{}", py::dumps(&control.call(&format!("storage.{action}"), params)?));
+        control.close();
+        return Ok(0);
+    }
     match args.action.as_deref().unwrap_or("files") {
         "read" => {
             let answer = control.call("storage.read", json!({"path": needs_path()?}))?;
@@ -996,6 +1019,10 @@ pub fn storage(args: &mut Args) -> Result<i32> {
 pub fn media(_args: &mut Args) -> Result<i32> {
     let session = require_session()?;
     let answer = open(&session)?.call("media.list", json!({}))?;
+    if ctx().json {
+        say!("{}", py::dumps(&answer));
+        return Ok(0);
+    }
     let time = |value: &Value| if value.is_null() { "?".to_string() } else { format!("{}s", py::str(value)) };
     let players = answer["players"].as_array().cloned().unwrap_or_default();
     for player in &players {
@@ -1027,6 +1054,10 @@ pub fn perf(args: &mut Args) -> Result<i32> {
     let mut control = open(&session)?;
     let answer = control.call("perf.metrics", json!({"ms": ms}))?;
     control.close();
+    if ctx().json {
+        say!("{}", py::dumps(&answer));
+        return Ok(0);
+    }
     let refreshes = answer["refreshes"].as_u64().unwrap_or(0);
     let mut line = format!(
         "{}s: the main thread missed {} of {refreshes} refreshes ({} ms each), worst gap {} ms",
@@ -1064,6 +1095,10 @@ pub fn app_events(args: &mut Args) -> Result<i32> {
     if !args.follow {
         let listed = control.call("events.list", json!({}))?;
         control.close();
+        if ctx().json {
+            say!("{}", py::dumps(&listed["events"]));
+            return Ok(0);
+        }
         let events = listed["events"].as_array().cloned().unwrap_or_default();
         if events.is_empty() {
             say!("no events: the app sends them in Debug with AgentDDP.event (iOS) or AgentDdpEvents.send (Android)");

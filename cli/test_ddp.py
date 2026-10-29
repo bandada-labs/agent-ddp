@@ -374,6 +374,9 @@ with tempfile.TemporaryDirectory() as directory:
     ]) + "\n"
     answers = [json.loads(line) for line in ddp_in(directory, "mcp", stdin=calls).stdout.splitlines()]
     assert any(tool["name"] == "ddp_tree" for tool in answers[1]["result"]["tools"])
+    every = [json.loads(line) for line in ddp_in(directory, "mcp", "--tools", "all", stdin=calls).stdout.splitlines()]
+    names = {tool["name"] for tool in every[1]["result"]["tools"]}
+    assert {"ddp_launch", "ddp_state", "ddp_events", "ddp_storage", "ddp_perf", "ddp_crash", "ddp_swipe", "ddp_compare"} <= names, names
     assert "@e1 tiny" in answers[2]["result"]["content"][0]["text"] and not answers[2]["result"]["isError"]
 
 # Live commands against a fake app: a WebSocket server that speaks the control endpoint's JSON-RPC.
@@ -693,6 +696,10 @@ with tempfile.TemporaryDirectory() as directory:
     assert swiped.returncode == 0 and phases[0] == "down" and phases[-1] == "up" and phases.count("move") == 12, swiped.stdout + str(phases)
     assert app.touches[-2][1:3] == (90, 40) and "swipe 10,10 (10, 10) -> (90, 40)" in swiped.stdout, swiped.stdout
     app.touches = []
+    ddp_in(directory, "tree", "-i")
+    refs = ddp_in(directory, "swipe", "@e1", "@e2", "--for", "60ms")
+    assert refs.returncode == 0 and "-> (10, 110)" in refs.stdout, refs.stdout + refs.stderr
+    app.touches = []
     ddp_in(directory, "double-tap", "button")
     assert [t[0] for t in app.touches] == ["down", "up", "down", "up"] and app.touches[0][1:3] == (50, 25), app.touches
     app.touches = []
@@ -735,6 +742,12 @@ with tempfile.TemporaryDirectory() as directory:
     assert ddp_in(directory, "storage", "read").returncode == 1
     media = ddp_in(directory, "media").stdout
     assert media == "AVPlayerLayer playing at 12.5s of 60s rate 1 [0, 0, 390, 220]\nnow playing: title=Song position=12.5\n", media
+    # The same answers as JSON, for a script or an MCP client.
+    assert json.loads(ddp_in(directory, "perf", "--for", "200ms", "--json").stdout)["missed"] == 3
+    assert json.loads(ddp_in(directory, "state", "--json").stdout)[0] == {"name": "mode", "writable": True, "value": "demo"}
+    assert json.loads(ddp_in(directory, "events", "--json").stdout)[1]["name"] == "sync"
+    assert json.loads(ddp_in(directory, "storage", "--json").stdout)["entries"][1]["bytes"] == 22
+    assert json.loads(ddp_in(directory, "media", "--json").stdout)["players"][0]["state"] == "playing"
     perf = ddp_in(directory, "perf", "--for", "1s")
     assert perf.returncode == 0 and perf.stdout == "1.0s: the main thread missed 3 of 59 refreshes (16.67 ms each), worst gap 66.7 ms; " \
         "20 frames drawn, the app's work per frame mean 6.1 ms, p95 12.4 ms, 1 over a refresh\n", perf.stdout + perf.stderr
