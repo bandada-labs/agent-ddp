@@ -644,6 +644,14 @@ pub fn push(args: &mut Args) -> Result<i32> {
     }
     let path = args.path.clone().unwrap_or_default();
     let result = capture("xcrun", &["simctl", "push", &device, &app, &path]);
+    // The simulator refuses a push to an app that never got notification permission.
+    if result.stderr.contains("not authorized") {
+        fail!(
+            format!("{app} has no notification permission, so iOS refused the push"),
+            "not_authorized",
+            "the app asks with UNUserNotificationCenter requestAuthorization; a .provisional request needs no tap"
+        );
+    }
     if result.code != 0 {
         fail!(format!("simctl push failed: {}", result.stderr.trim()), "command_failed");
     }

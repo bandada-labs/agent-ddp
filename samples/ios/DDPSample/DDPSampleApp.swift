@@ -4,6 +4,7 @@ import OSLog
 import Security
 import SQLite3
 import SwiftUI
+import UserNotifications
 
 @main
 struct DDPSampleApp: App {
@@ -16,24 +17,33 @@ struct DDPSampleApp: App {
         guard !CommandLine.arguments.contains("-noDDP") else { return }
         AgentDDP.start()
         AgentDDP.redact(values: [SampleNetwork.devSecret])
+        // For `ddp push`: provisional permission is granted without a dialog that would cover the screen.
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .provisional]) { _, _ in }
         AgentDDP.command("load") { _ in
             let answer = await SampleNetwork.load()
             let loads = await MainActor.run { SampleState.loads += 1; return SampleState.loads }
             AgentDDP.event("loaded", ["loads": loads, "answer": answer])
             return answer
         }
-        // For `ddp audits`: two widths that cannot both hold, which UIKit reports in the log.
+        // For `ddp audits`: two widths that cannot both hold. UIKit logs the conflict on iOS 27 only when the app runs
+        // with -_UIConstraintBasedLayoutLogUnsatisfiable YES; the answer is the width the engine kept.
         AgentDDP.command("warn") { _ in
-            await MainActor.run {
-                guard let window = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first else { return }
+            await MainActor.run { () -> String in
+                guard let window = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).flatMap(\.windows).first else { return "no window" }
                 let view = UIView()
                 view.translatesAutoresizingMaskIntoConstraints = false
                 window.addSubview(view)
-                NSLayoutConstraint.activate([view.widthAnchor.constraint(equalToConstant: 10), view.widthAnchor.constraint(equalToConstant: 20)])
+                NSLayoutConstraint.activate([
+                    view.leadingAnchor.constraint(equalTo: window.leadingAnchor),
+                    view.topAnchor.constraint(equalTo: window.topAnchor),
+                    view.heightAnchor.constraint(equalToConstant: 10),
+                    view.widthAnchor.constraint(equalToConstant: 10),
+                    view.widthAnchor.constraint(equalToConstant: 20),
+                ])
                 window.layoutIfNeeded()
-                view.removeFromSuperview()
+                defer { view.removeFromSuperview() }
+                return "width \(view.frame.width)"
             }
-            return nil
         }
         // For `ddp storage`: a database, a text file and a Keychain item to read.
         AgentDDP.command("seed") { _ in SampleState.seed() }
