@@ -145,3 +145,8 @@ Triage of the 0.3.0 tickets raised three questions. Answers: "1. ok 2. ok 3. its
 1. History on Android ran the layout walk every frame, and with a looping animation an idle debug app used 30-110% CPU and hit an input ANR. Asked whether skipping frames where nothing changed is fine, keeping the 15 minutes of ADR 0005, instead of pausing History when no recording is open. Yes.
 2. `compare` always exits 0 since 0.2.1. Asked whether an opt-in `--max <pct>` that exits non-zero is fine, since the caller sets the bar and ddp reports no problem of its own. Yes.
 3. A structure compare across phones was asked to work without the library. Asked whether the accessibility tree is enough for that. Yes.
+
+### Generic app state and events; a protocol, not a language
+A user asked for engine-specific commands (`ddp engine get total_spent`, a rule log). Proposed generic ones instead: the app registers named values and sends events, for any app. Answer: "B, peeero quiero que tambien el agente pueda configurar el ddp es posible? habria que documentarlo." (B, but the agent should be able to configure it too; document it.) So the agent adds the registration lines with a guide in the CLI, ddp lists what the app registered, and a value can be set when the app gives a setter.
+
+Proposed one library call for launch values on both platforms. Asked whether that means ddp translates for each platform. Answer: "lo que no quiero es que nos volvamos como flexiblesearch un lenguaje que compila a multiples paltaformas, ese seria el deber del agente" (We must not become like FlexibleSearch, a language that compiles to several platforms; that is the agent's job.) So no wrapper: the app reads the platform's own API, and ddp only reports what the platform delivered.

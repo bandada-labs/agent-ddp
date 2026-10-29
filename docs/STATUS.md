@@ -1,6 +1,6 @@
 # Status
 
-Last update: 2026-10-27. Read this after a break, then [DECISIONS.md](DECISIONS.md).
+Last update: 2026-10-29. Read this after a break, then [DECISIONS.md](DECISIONS.md).
 
 ## In one paragraph
 
@@ -16,6 +16,7 @@ A small library inside a Debug build of an iOS or Android app serves what the ap
 
 ## Next
 
+0. 0.3.0, not released. Built: History stays cheap on an idle screen that keeps redrawing; `ddp record` keeps the platform's answers, so checks on the file judge; `compare --screen`, `--max`, `--max-band`; `ddp launch` with `--env`. Planned, as protocol domains on both platforms: app state and app events (generic, registered by the app in Debug), exceptions with stack, `perf.metrics`, gestures on `input.touch`, `media.*`, `storage.*`, a structure compare from two sessions' element trees, shapes inside a SwiftUI Canvas, Compose `drawWithCache`. The list with its state is in the issue tracker, label `release-0.3.0`.
 1. The control endpoint in the library (ADR 0008, which replaced the CDP plan of ADR 0007). Seven phases, in order:
    1. Transport. Done.
    2. Reading: `app.info`, `screen.*`, `net.list`/`net.get`/`net.watch`, `log.watch`. Done.
