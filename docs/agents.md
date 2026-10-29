@@ -51,6 +51,7 @@ ddp job <id>                                       Android: run one of the app's
 ddp back | background [--for 2s]                   go back; leave the app for a while and come back
 ddp audits [--since 5m]                            runtime warnings the platform wrote in the app's log
 ddp memory [summary|leaks|heap]                    the app's memory now, its leaks (iOS), a heap dump
+ddp profile [--for 3s]                             the functions the app spends its time in
 ddp open <deep link or URL>
 ddp annotate [out.png]                             screenshot with numbered boxes, label N is @eN
 ddp compare --reference <image> [--out ddp-compare.png]   the screen against a reference screenshot
@@ -254,6 +255,10 @@ Without the library, `--device <adb serial>` uses Android's own `input` command 
 ### memory
 
 `memory` reads the app's process with each platform's own tools. iOS: a simulator app is a macOS process, so `footprint` gives its footprint and biggest categories, `memory leaks` runs `leaks` (exit 1 when it finds one, with the first few), `memory heap` runs `heap` and lists the classes by bytes. Android: `dumpsys meminfo` gives the App Summary (Java heap, native heap, graphics, total PSS); `memory heap` runs `am dumpheap` and saves the `.hprof` in `.ddp/` for Android Studio. Android has no leak detector of its own, so `memory leaks` points to LeakCanary.
+
+### profile
+
+`profile --for 3s` samples the app with the platform's own sampler and prints the top functions by their own samples, with their library: `sample` on the simulator process, `simpleperf record --app` on Android (Android 10 and later, a debuggable build). On iOS, threads asleep in a system call are idle time: they are counted on one line, not listed. A measurement: it exits 0.
 
 ### audits
 

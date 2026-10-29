@@ -76,6 +76,114 @@ fn android_meminfo(device: &str, app: &str) -> Result<i32> {
     Ok(0)
 }
 
+/// Where the app spends its time for `--for`, from the platform's own sampler: `sample` on the simulator process,
+/// `simpleperf` on Android. The top functions by their own samples. A measurement: it exits 0.
+pub fn profile(args: &mut Args) -> Result<i32> {
+    let (platform, device, app) = target(args)?;
+    let Some(app) = app else { fail!("no app", "missing_option", "pass --app, or ddp connect first") };
+    let seconds = (state::parse_ms(args.duration.as_deref().unwrap_or("3s"))? / 1000.0).ceil().max(1.0) as u64;
+    let lines = if platform == "ios" {
+        let pid = ios_pid(&device, &app)?;
+        let output = capture("sample", &[&pid, &seconds.to_string()]).stdout;
+        sample_lines(&output)
+            .ok_or_else(|| state::failure("sample gave no answer for the app", "command_failed", Some("ddp doctor")))?
+    } else {
+        let adb = adb_path()?;
+        let remote = "/data/local/tmp/ddp.perf";
+        let recorded = capture(
+            &adb,
+            &[
+                "-s",
+                &device,
+                "shell",
+                "simpleperf",
+                "record",
+                "--app",
+                &app,
+                "--duration",
+                &seconds.to_string(),
+                "-o",
+                remote,
+            ],
+        );
+        if recorded.code != 0 {
+            fail!(
+                format!("simpleperf failed: {}", recorded.stderr.trim()),
+                "command_failed",
+                "simpleperf ships with Android 10 and later; the app must be debuggable"
+            );
+        }
+        let report = capture(
+            &adb,
+            &[
+                "-s",
+                &device,
+                "shell",
+                "simpleperf",
+                "report",
+                "-i",
+                remote,
+                "--sort",
+                "symbol,dso",
+                "--percent-limit",
+                "1",
+            ],
+        );
+        simpleperf_lines(&report.stdout)
+            .ok_or_else(|| state::failure("simpleperf gave no report", "command_failed", Some("ddp doctor")))?
+    };
+    say!("{seconds}s on {platform} {device}, the functions the app was in, by their own samples:");
+    lines.iter().for_each(|line| say!("{line}"));
+    Ok(0)
+}
+
+/// `sample`'s "Sort by top of stack": function, library, samples. Kernel waits (a thread asleep in a system call)
+/// are idle time, so they are counted apart rather than listed.
+fn sample_lines(output: &str) -> Option<Vec<String>> {
+    let rows: Vec<(String, String, u64)> = output
+        .lines()
+        .skip_while(|line| !line.starts_with("Sort by top of stack"))
+        .skip(1)
+        .take_while(|line| !line.trim().is_empty())
+        .filter_map(|line| {
+            let (name, rest) = line.trim().split_once("  (in ")?;
+            let (library, count) = rest.split_once(')')?;
+            Some((name.trim().to_string(), library.to_string(), count.trim().parse().ok()?))
+        })
+        .collect();
+    if rows.is_empty() {
+        return None;
+    }
+    let (waiting, working): (Vec<_>, Vec<_>) =
+        rows.into_iter().partition(|(_, library, _)| library == "libsystem_kernel.dylib");
+    let total: u64 = working.iter().map(|(_, _, count)| count).sum::<u64>().max(1);
+    let mut lines: Vec<String> = working
+        .iter()
+        .take(ROWS)
+        .map(|(name, library, count)| format!("  {:>5.1}%  {name}  ({library})", *count as f64 * 100.0 / total as f64))
+        .collect();
+    let idle: u64 = waiting.iter().map(|(_, _, count)| count).sum();
+    if idle > 0 {
+        lines.push(format!("  ({idle} samples of threads waiting in the kernel left out)"));
+    }
+    if working.is_empty() {
+        lines.insert(0, "  only threads waiting: the app was idle".into());
+    }
+    Some(lines)
+}
+
+/// `simpleperf report`: "Overhead  Symbol  Shared Object" rows, the first ones.
+fn simpleperf_lines(output: &str) -> Option<Vec<String>> {
+    let rows: Vec<String> = output
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.split_whitespace().next().is_some_and(|first| first.ends_with('%')))
+        .take(ROWS)
+        .map(|line| format!("  {}", line.split_whitespace().collect::<Vec<_>>().join(" ")))
+        .collect();
+    (!rows.is_empty()).then_some(rows)
+}
+
 /// `footprint <pid>`: its total, then the biggest categories of its table.
 fn footprint_lines(output: &str) -> Option<Vec<String>> {
     let mut lines = output.lines().map(str::trim);
@@ -202,6 +310,26 @@ mod tests {
         let bytes: Vec<u64> =
             lines[1..].iter().map(|l| l.split_whitespace().next().unwrap().parse().unwrap()).collect();
         assert!(bytes.windows(2).all(|w| w[0] >= w[1]) && !bytes.is_empty(), "{lines:?}");
+    }
+
+    #[test]
+    fn a_profile_leaves_kernel_waits_out_and_says_so() {
+        let lines = sample_lines(include_str!("testdata/sample.txt")).unwrap();
+        assert!(lines.iter().any(|l| l.contains("waiting in the kernel left out")), "{lines:?}");
+        let made = "Sort by top of stack, same collapsed (when >= 5):\n        layoutSubviews  (in UIKitCore)        30\n        __psynch_cvwait  (in libsystem_kernel.dylib)        900\n        render  (in DDPSample.debug.dylib)        10\n\n";
+        assert_eq!(
+            sample_lines(made).unwrap(),
+            vec![
+                "   75.0%  layoutSubviews  (UIKitCore)",
+                "   25.0%  render  (DDPSample.debug.dylib)",
+                "  (900 samples of threads waiting in the kernel left out)"
+            ]
+        );
+        let report = "Cmdline: /system/bin/simpleperf record\nOverhead  Symbol  Shared Object\n31.20%  art::Thread  libart.so\n5.01%   dev.agentddp.Capture.walkLayout  base.apk\n";
+        assert_eq!(
+            simpleperf_lines(report).unwrap(),
+            vec!["  31.20% art::Thread libart.so", "  5.01% dev.agentddp.Capture.walkLayout base.apk"]
+        );
     }
 
     #[test]

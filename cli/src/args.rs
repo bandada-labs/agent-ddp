@@ -293,6 +293,8 @@ pub fn parser() -> Command {
                                       Android: small|default|large|largest or a factor); reduce-motion on|off; locale es-ES; \
                                       location LAT,LON; orientation portrait|landscape (Android)")
                 .required(true))))
+        .subcommand(device_options(sub("profile", "where the app spends its time, from the platform's sampler (sample, simpleperf)")
+            .arg(opt("for", "how long to sample (default 3s)").id("duration"))))
         .subcommand(device_options(sub("memory", "the app's memory now, its leaks (iOS) or a heap dump, with the platform's tools")
             .arg(choices("action", &["summary", "leaks", "heap"]).default_value("summary"))))
         .subcommand(device_options(sub("audits", "runtime warnings the platform wrote in the app's log (SwiftUI, Auto Layout, StrictMode)")

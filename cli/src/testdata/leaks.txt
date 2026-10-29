@@ -10,10 +10,6 @@ Platform:        macOS
 Parent Process:  2.1.312 [11281]
 Target Type:     live task
 
-Date/Time:       2026-10-29 17:45:30.991 -0500
-Launch Time:     2026-10-29 17:40:08.922 -0500
-OS Version:      macOS 27.0.1 (26A434)
-Report Version:  7
 Analysis Tool:   /usr/bin/leaks
 
 Physical footprint:         2400K

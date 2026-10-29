@@ -4,6 +4,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 
 ## Unreleased
 
+- `ddp profile [--for 3s]`: the functions the app spends its time in, from `sample` on the simulator or `simpleperf` on Android, top entries only, kernel waits counted apart.
 - `ddp memory [summary|leaks|heap]`: the app's memory with the platform's tools: `footprint`, `leaks` and `heap` on the simulator process; `dumpsys meminfo` and `am dumpheap` (an `.hprof` in `.ddp/`) on Android.
 - `ddp audits [--since 5m]`: the runtime warnings the platform wrote in the app's log (SwiftUI and AttributeGraph issues, Auto Layout conflicts, Main Thread Checker; StrictMode, skipped frames, leaked windows), exit 1 when there is one. The samples get a `warn` command.
 - `ddp back` (the Back key, or iOS's edge swipe) and `ddp background --for 2s` (leave the app and come back). History records `background` and `foreground` from the platform's notifications. `app.info` adds `screen`.
