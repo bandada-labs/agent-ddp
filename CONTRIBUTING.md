@@ -66,7 +66,7 @@ Docs and guides are read by agents and by people whose first language is not Eng
 
 ## Releases
 
-Maintainers release by pushing a `vX.Y.Z` tag. The release workflow builds the CLI for macOS, Linux and Windows, creates the GitHub release and publishes `agent-ddp` to npm with provenance. JitPack and SwiftPM pick up the same tag. Before tagging, bump the version in `cli/Cargo.toml`, `npm/package.json` and the install lines in `README.md` and `docs/`, and move "Unreleased" in the changelog under the new version.
+Maintainers release by pushing a `vX.Y.Z` tag. The release workflow builds the CLI for macOS, Linux and Windows, creates the GitHub release and publishes `agent-ddp` to npm with provenance. JitPack and SwiftPM pick up the same tag. Before tagging, bump the version in `cli/Cargo.toml`, `npm/package.json` and the install lines in `README.md` and `docs/`, and move "Unreleased" in the changelog under the new version. `python3 samples/release_check.py before X.Y.Z` checks the versions and the changelog; after the tag, `python3 samples/release_check.py after X.Y.Z` checks the GitHub release has its 5 binaries, npm serves the version, a clean install prints it and JitPack builds the Android library.
 
 Before tagging, also run the hook matrix on every OS version in [docs/hooks.md](docs/hooks.md), one simulator or emulator at a time, and update its "Checked on" column. It builds the sample app, starts it fresh, and needs `ddp doctor` to show no failing hook and the checks to report every trap in the sample and nothing else:
 
