@@ -293,6 +293,9 @@ pub fn parser() -> Command {
                                       Android: small|default|large|largest or a factor); reduce-motion on|off; locale es-ES; \
                                       location LAT,LON; orientation portrait|landscape (Android)")
                 .required(true))))
+        .subcommand(device_options(sub("back", "go back: the Back key on Android, the edge swipe on iOS")))
+        .subcommand(device_options(sub("background", "send the app to the background for a while, then bring it back")
+            .arg(opt("for", "how long in the background (default 2s)").id("duration"))))
         .subcommand(device_options(sub("biometric", "simulated Face ID / Touch ID or fingerprint: enroll, then match or fail")
             .arg(choices("action", &["enroll", "match", "fail"]).required(true))))
         .subcommand(device_options(sub("push", "iOS: deliver a push notification to the app, as APNs would")

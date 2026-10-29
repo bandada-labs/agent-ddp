@@ -332,8 +332,9 @@ enum Control {
     }
 
     static func info(_ app: ControlApp) -> [String: Any] {
-        ["protocol": FrameCapture.protocolVersion, "platform": "ios", "app": app.bundleIdentifier, "name": app.name,
-         "unit": "pt", "scale": onMain { UIScreen.main.scale }]
+        let screen = onMain { UIScreen.main.bounds.size }
+        return ["protocol": FrameCapture.protocolVersion, "platform": "ios", "app": app.bundleIdentifier, "name": app.name,
+                "unit": "pt", "scale": onMain { UIScreen.main.scale }, "screen": [screen.width, screen.height]]
     }
 
     /// Every window of the app as one image in pixels, like a frame capture. `clip` is `[x, y, width, height]` in points.

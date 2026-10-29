@@ -53,6 +53,9 @@ internal object FrameRecorder {
     var resumedActivity: Activity? = null
         private set
     private var stream: FrameStream? = null
+    // Main thread only: activities started now, and whether the first start (the launch itself) has passed.
+    private var started = 0
+    private var seenForeground = false
     private var writer: java.io.Writer? = null
 
     fun start(application: Application) {
@@ -66,8 +69,15 @@ internal object FrameRecorder {
                 if (resumedActivity === activity) resumedActivity = null
             }
             override fun onActivityCreated(activity: Activity, state: Bundle?) {}
-            override fun onActivityStarted(activity: Activity) {}
-            override fun onActivityStopped(activity: Activity) {}
+            // The app is in the foreground while one of its activities is started: the count, not each activity,
+            // so moving between screens is not a trip to the background.
+            override fun onActivityStarted(activity: Activity) {
+                if (started++ == 0 && seenForeground) History.event("foreground")
+                seenForeground = true
+            }
+            override fun onActivityStopped(activity: Activity) {
+                if (--started == 0 && !activity.isChangingConfigurations) History.event("background")
+            }
             override fun onActivitySaveInstanceState(activity: Activity, state: Bundle) {}
             override fun onActivityDestroyed(activity: Activity) {}
         })

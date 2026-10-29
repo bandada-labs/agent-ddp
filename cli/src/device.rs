@@ -419,6 +419,85 @@ pub fn settings(args: &mut Args) -> Result<i32> {
     Ok(0)
 }
 
+/// Back: Android's Back key; on iOS the edge swipe UIKit turns into "back", with the library's real finger.
+pub fn back(args: &mut Args) -> Result<i32> {
+    let (platform, device, _) = target(args)?;
+    if platform == "ios" {
+        let session = require_session()?;
+        let mut control = open(&session)?;
+        let info = control.call("app.info", json!({}))?;
+        let (width, height) = (f(&info["screen"][0]), f(&info["screen"][1]));
+        if width <= 0.0 {
+            fail!(
+                "this library does not say the screen size",
+                "library_too_old",
+                "update the library to the same version as ddp"
+            );
+        }
+        // From the very edge, like a thumb: UIKit's screen-edge recognizer starts only there.
+        let (from, to) = ((1.0, height / 2.0), (width * 0.7, height / 2.0));
+        control.call("input.touch", json!({"phase": "down", "x": from.0, "y": from.1}))?;
+        for step in 1..=10 {
+            std::thread::sleep(Duration::from_millis(25));
+            let x = from.0 + (to.0 - from.0) * step as f64 / 10.0;
+            control.call("input.touch", json!({"phase": "move", "x": x, "y": from.1}))?;
+        }
+        control.call("input.touch", json!({"phase": "up", "x": to.0, "y": to.1}))?;
+        control.close();
+        say!("back: an edge swipe on {device}; a screen without a back gesture does not move");
+        return Ok(0);
+    }
+    let result = adb(&device, &["shell", "input", "keyevent", "KEYCODE_BACK"])?;
+    if result.code != 0 {
+        fail!(format!("adb input failed: {}", result.stderr.trim()), "command_failed");
+    }
+    say!("back: the Back key on {device}");
+    Ok(0)
+}
+
+/// The app to the background for `--for`, then back, as a person switching apps does. The libraries put
+/// `background` and `foreground` in History from the platform's own notifications.
+pub fn background(args: &mut Args) -> Result<i32> {
+    let (platform, device, app) = target(args)?;
+    let Some(app) = app else { fail!("no app", "missing_option", "pass --app, or ddp connect first") };
+    let ms = args.duration.as_deref().map(parse_ms).transpose()?.unwrap_or(2000.0);
+    let ios = platform == "ios";
+    // iOS: opening another app sends this one to the background; launching it again without terminating brings it back.
+    let away = if ios {
+        capture("xcrun", &["simctl", "launch", &device, "com.apple.Preferences"])
+    } else {
+        adb(&device, &["shell", "input", "keyevent", "KEYCODE_HOME"])?
+    };
+    if away.code != 0 {
+        fail!(format!("could not leave the app: {}", away.stderr.trim()), "command_failed");
+    }
+    std::thread::sleep(Duration::from_millis(ms as u64));
+    let returned = if ios {
+        capture("xcrun", &["simctl", "launch", &device, &app])
+    } else {
+        let component = crate::live::launcher_activity(&device, &app)?;
+        adb(
+            &device,
+            &[
+                "shell",
+                "am",
+                "start",
+                "-a",
+                "android.intent.action.MAIN",
+                "-c",
+                "android.intent.category.LAUNCHER",
+                "-n",
+                &component,
+            ],
+        )?
+    };
+    if returned.code != 0 {
+        fail!(format!("could not bring {app} back: {}", returned.stderr.trim()), "command_failed");
+    }
+    say!("{app} was in the background for {}ms and is back; ddp history shows what it did", ms as u64);
+    Ok(0)
+}
+
 /// `LAT,LON` as two numbers in range.
 fn lat_lon(text: &str) -> Result<[String; 2]> {
     let numbers: Vec<f64> = text.split(',').filter_map(|n| n.trim().parse().ok()).collect();

@@ -48,6 +48,7 @@ ddp set appearance dark | text-size large | reduce-motion on | locale es-ES | lo
 ddp biometric enroll | match | fail                Face ID on the simulator, a fingerprint on the emulator
 ddp push <payload.json>                            iOS: a push as APNs would deliver it
 ddp job <id>                                       Android: run one of the app's scheduled jobs now
+ddp back | background [--for 2s]                   go back; leave the app for a while and come back
 ddp open <deep link or URL>
 ddp annotate [out.png]                             screenshot with numbered boxes, label N is @eN
 ddp compare --reference <image> [--out ddp-compare.png]   the screen against a reference screenshot
@@ -245,6 +246,8 @@ Without the library, `--device <adb serial>` uses Android's own `input` command 
 `biometric enroll|match|fail` does what the simulator's and emulator's own menus do: Face ID enrollment and a matching or failing face on iOS, a finger touch on the emulator (`match` touches finger 1, the one enrolled first in Settings; `fail` touches one not enrolled). Android enrolls only through Settings. Neither platform confirms, so ddp says it sent it: check what the app shows next.
 
 `push payload.json` delivers a push to the app on the simulator as APNs would (`simctl push`). Android has no local way to deliver an FCM push, so ddp refuses and points to running the app's handler as an app command. `job <id>` runs one of the app's scheduled jobs now on Android (`cmd jobscheduler run -f`, WorkManager included); iOS runs a background task early only from the debugger, so ddp refuses and gives the debugger line.
+
+`back` is Android's Back key, or on iOS the edge swipe UIKit turns into back (a real finger from the screen's very edge; a screen with no back gesture does not move). `background --for 2s` leaves the app the way a person does (Home on Android, another app on iOS) and brings it back; the libraries write `background` and `foreground` into History from the platform's own notifications, so `ddp history` shows what the app did meanwhile.
 
 ### launch
 

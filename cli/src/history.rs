@@ -333,6 +333,8 @@ fn event_text(event: &Value, frame: Option<&Frame>) -> String {
         ),
         "screen" => format!("screen {}", py::str(&event["name"])),
         "launch" => "app started".into(),
+        "background" => "app went to the background".into(),
+        "foreground" => "app came back to the foreground".into(),
         "app" => format!("event {}", crate::live::event_line(event)),
         other => other.into(),
     }

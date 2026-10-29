@@ -296,7 +296,7 @@ fn reset_data(platform: &str, device: &str, app: &str) -> Result<()> {
 }
 
 /// The app's launcher activity, as the package manager resolves it (`monkey` does not start every app).
-fn launcher_activity(device: &str, app: &str) -> Result<String> {
+pub fn launcher_activity(device: &str, app: &str) -> Result<String> {
     let resolved = capture(
         &adb_path()?,
         &[

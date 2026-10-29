@@ -69,6 +69,8 @@ fn handler(command: &str) -> fn(&mut Args) -> Result<i32> {
         "history" => history::history,
         "set" => device::settings,
         "biometric" => device::biometric,
+        "back" => device::back,
+        "background" => device::background,
         "push" => device::push,
         "job" => device::job,
         "annotate" => device::annotate,

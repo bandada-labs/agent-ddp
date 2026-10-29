@@ -285,8 +285,10 @@ internal object Control {
 
     fun info(app: ControlApp): JSONObject {
         val density = onMain { FrameRecorder.resumedActivity?.resources?.displayMetrics?.density } ?: 1f
+        // The activity window's size, the space frames are in.
+        val window = onMain { FrameRecorder.resumedActivity?.window?.decorView?.let { listOf(it.width, it.height) } }
         return JSONObject().put("protocol", FrameCapture.PROTOCOL).put("platform", "android").put("app", app.packageName).put("name", app.name)
-            .put("unit", "px").put("scale", density.toDouble())
+            .put("unit", "px").put("scale", density.toDouble()).apply { window?.let { put("screen", JSONArray(it)) } }
     }
 
     /**

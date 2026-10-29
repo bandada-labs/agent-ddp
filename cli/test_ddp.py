@@ -477,7 +477,7 @@ class FakeApp:
                 method, params = message["method"], message.get("params", {})
                 result = {}
                 if method == "app.info":
-                    result = {"protocol": 2, "platform": "ios", "app": "fake", "name": "Fake", "unit": "pt", "scale": 3}
+                    result = {"protocol": 2, "platform": "ios", "app": "fake", "name": "Fake", "unit": "pt", "scale": 3, "screen": [390, 844]}
                 elif method == "screen.frame":
                     result = self.frame(0)
                     if self.tapped_clock is not None and clock.monotonic() - self.tapped_clock > 0.05:
@@ -724,6 +724,10 @@ with tempfile.TemporaryDirectory() as directory:
                        (("biometric", "enroll", "--device", emu), "only through Settings")]:
         refused = ddp_in(directory, *args)
         assert refused.returncode == 1 and said in refused.stderr, (args, refused.stderr)
+    # Back on iOS is UIKit's edge swipe: from the very edge, across the middle of the screen.
+    app.touches = []
+    back = ddp_in(directory, "back")
+    assert back.returncode == 0 and app.touches[0][0:3] == ("down", 1, 422) and app.touches[-1][0:3] == ("up", 273, 422), back.stdout + str(app.touches[:2])
     missing = ddp_in(directory, "swipe", "button")
     assert missing.returncode != 0, missing.stdout
     app.tapped_at = None

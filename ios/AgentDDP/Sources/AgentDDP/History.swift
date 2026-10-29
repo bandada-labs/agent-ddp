@@ -54,6 +54,14 @@ final class History {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         writer.async { self.prune(now: Self.wallMs()) }
         event("launch")
+        // UIKit's own word for it, so `ddp history` shows a trip to the background and back.
+        let center = NotificationCenter.default
+        center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.event("background")
+        }
+        center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.event("foreground")
+        }
         // Order after Core Animation's commit observer (2_000_000), so the turn's changes are already in the layers.
         // ponytail: animations Core Animation runs on its own (UIView.animate) do not wake the app, so only their
         // start and end are kept. Poll while layers have animationKeys if that bites.

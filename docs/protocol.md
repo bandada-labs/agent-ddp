@@ -22,7 +22,7 @@ Coordinates are window coordinates in the platform's unit, the same as in frames
 
 | Method | Params | Result or events |
 | --- | --- | --- |
-| `app.info` | | `protocol` (2), `platform`, `app` (bundle id or package), `name`, `unit`, `scale` |
+| `app.info` | | `protocol` (2), `platform`, `app` (bundle id or package), `name`, `unit`, `scale`, `screen` (`[width, height]` in the frames' unit: the screen on iOS, the activity window on Android) |
 | `app.commands` | | `commands`: the names the app added with `AgentDDP.command` (iOS) or `AgentDdpCommands.add` (Android) |
 | `app.run` | `name`, `params` (object) | `value`: what the command returned, any JSON value. Commands are the app's own Swift or Kotlin code (log in a test user, reset state, open a screen) and run off the main thread |
 | `app.launch` | `names` (array) | `received`: the names the app was started with, as the platform gave them: environment variables on iOS, extras of the running activity's intent on Android. Never the values. `ddp launch --env` asks it |
