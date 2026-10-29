@@ -602,7 +602,7 @@ fn paint(rows: &mut [Vec<u8>], x0: f64, y0: f64, x1: f64, y1: f64, color: [u8; 3
 pub fn screenshot_png(session: &Value) -> Result<Vec<u8>> {
     let device = py::str(&session["device"]);
     if session["platform"] == "ios" {
-        let path = ctx().dir.join("screen.png");
+        let path = state::scratch_file("screen.png");
         state::run(&["xcrun", "simctl", "io", &device, "screenshot", "--type=png", &path.display().to_string()])?;
         return std::fs::read(&path).map_err(|e| failure(e.to_string(), "file_not_found", None));
     }

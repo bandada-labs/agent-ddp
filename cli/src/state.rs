@@ -312,6 +312,14 @@ pub fn read_json(path: &Path) -> Option<serde_json::Value> {
     std::fs::read_to_string(path).ok().and_then(|text| serde_json::from_str(&text).ok())
 }
 
+/// A path in the state folder for another tool (simctl, sips) to write, with the folder made first: a fresh working
+/// folder has no `.ddp` yet, and those tools do not create it.
+pub fn scratch_file(name: &str) -> PathBuf {
+    let dir = ctx().dir;
+    let _ = std::fs::create_dir_all(&dir);
+    dir.join(name)
+}
+
 pub fn write_file(path: &Path, content: impl AsRef<[u8]>) -> Result<()> {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);

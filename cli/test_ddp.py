@@ -603,6 +603,28 @@ with tempfile.TemporaryDirectory() as directory:
     assert masked.returncode == 1 and "--mask is for the whole screen" in masked.stderr, masked.stderr
     missing = ddp_in(directory, "compare", "button")
     assert missing.returncode == 1 and "compare needs --reference" in missing.stderr, missing.stderr
+    # A bar only when the caller sets one: 50% differ passes --max 60 and fails --max 10 and --max-band 90.
+    reference = str(Path(directory, "blue.png"))
+    within = ddp_in(directory, "compare", "button", "--reference", reference, "--max", "60%")
+    assert within.returncode == 0 and "within the bar" in within.stdout, within.stdout + within.stderr
+    over = ddp_in(directory, "compare", "button", "--reference", reference, "--max", "10", "--max-band", "90")
+    assert over.returncode == 1 and "over --max: 50.0% of the pixels differ, the bar is 10.0%" in over.stdout and \
+        "over --max-band: band 1-2 differs 100.0%, the bar is 90.0%" in over.stdout, over.stdout + over.stderr
+    wrong = ddp_in(directory, "compare", "button", "--reference", reference, "--max", "lots")
+    assert wrong.returncode == 1 and "--max takes a percentage" in wrong.stderr, wrong.stderr
+    # Two saved screenshots, devices off, from a folder that has no .ddp yet.
+    with tempfile.TemporaryDirectory() as fresh:
+        Path(fresh, "a.png").write_bytes(png(8, 4, [0, 0, 255]))
+        Path(fresh, "b.png").write_bytes(png(16, 8, [0, 0, 255]))
+        Path(fresh, "red.png").write_bytes(png(8, 4, [255, 0, 0]))
+        saved = ddp_in(fresh, "compare", "--reference", "a.png", "--screen", "b.png", "--max", "1")
+        assert saved.returncode == 0 and "b.png 16x8 against a.png 8x4 (scaled 2.0)" in saved.stdout and \
+            "difference 0.0%" in saved.stdout and "within the bar" in saved.stdout, saved.stdout + saved.stderr
+        assert Path(fresh, "ddp-compare.png").exists()
+        red = ddp_in(fresh, "compare", "--reference", "a.png", "--screen", "red.png", "--max", "1")
+        assert red.returncode == 1 and "over --max: 100.0%" in red.stdout, red.stdout + red.stderr
+        live_only = ddp_in(fresh, "compare", "--reference", "a.png", "--screen", "b.png", "--ignore", "clock")
+        assert live_only.returncode == 1 and "--ignore needs the live screen" in live_only.stderr, live_only.stderr
     # --then runs without a shell, so "; touch" is an argument to echo, not a second command.
     marker = Path(directory, "injected")
     safe = ddp_in(directory, "read", "--for", "200ms", "--then", f"echo safe ; touch {marker}")

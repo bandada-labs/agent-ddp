@@ -70,6 +70,9 @@ pub struct Args {
     pub force: bool,
     pub reference: Option<PathBuf>,
     pub masks: Vec<String>,
+    pub screen: Option<PathBuf>,
+    pub max: Option<String>,
+    pub max_band: Option<String>,
 }
 
 const ABOUT: &str = "ddp: see what a Debug iOS/Android app draws, frame by frame, live or from a recording.
@@ -248,6 +251,9 @@ pub fn parser() -> Command {
             .arg(many("ignore", "elements to leave out of the scores, such as a clock (needs a session)"))
             .arg(Arg::new("mask").long("mask").num_args(1).action(ArgAction::Append).value_name("X,Y,W,H")
                 .help("the whole screen: a rectangle in screenshot pixels to leave out, such as the status bar; repeat for more"))
+            .arg(opt("screen", "the whole screen: a saved screenshot instead of the device's, to compare offline"))
+            .arg(opt("max", "exit 1 when more than this share of pixels differ overall (5 or 5%)"))
+            .arg(opt("max-band", "exit 1 when more than this share of pixels differ in any band (20 or 20%)"))
             .arg(opt("out", "where to write the side-by-side PNG").default_value("ddp-compare.png")))
         .subcommand(sub("annotate", "live: a screenshot with numbered boxes, label N is @eN")
             .arg(positional("out", "where to write the PNG").default_value("ddp-annotated.png")))
@@ -358,6 +364,9 @@ pub fn parse(argv: &[String]) -> Result<Args, clap::Error> {
         expect: string(m, "expect").map(PathBuf::from),
         reference: string(m, "reference").map(PathBuf::from),
         masks: strings(m, "mask"),
+        screen: string(m, "screen").map(PathBuf::from),
+        max: string(m, "max"),
+        max_band: string(m, "max-band"),
         against: string(m, "against").map(PathBuf::from),
         junit: string(m, "junit").map(PathBuf::from),
         settled: string(m, "settled"),

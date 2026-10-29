@@ -1,5 +1,6 @@
 //! `ddp compare`: how far what the app shows is from a reference image, or from the same element on the other phone.
-//! A measurement for the agent to judge, never a problem report, so it exits 0 whatever the difference.
+//! A measurement for the agent to judge, never a problem report, so it exits 0 whatever the difference. Only a bar
+//! the caller sets (`--max`, `--max-band`) makes it exit 1, and the bar is theirs, not a judgment of ddp's.
 //!
 //! Where the pixels come from: the whole screen is the device's own screenshot (status bar included, like a reference
 //! screenshot); an element is the app's own windows as composited (`screen.pixels`), cut to the element's frame.
@@ -22,7 +23,15 @@ const MAX_PICTURE_WIDTH: usize = 1800;
 
 pub fn compare(args: &mut Args) -> Result<i32> {
     let out = PathBuf::from(&args.out);
-    match (&args.id, &args.reference, &args.on) {
+    let bar = Bar { overall: share(args.max.as_deref(), "max")?, band: share(args.max_band.as_deref(), "max-band")? };
+    let difference = match (&args.id, &args.reference, &args.on) {
+        _ if args.screen.is_some() && args.id.is_some() => {
+            fail!(
+                "--screen is a whole screenshot, not an element",
+                "bad_value",
+                "ddp compare --reference a.png --screen b.png"
+            )
+        }
         (None, Some(reference), _) => screen_against(args, reference, &out),
         _ if !args.masks.is_empty() => {
             fail!(
@@ -38,14 +47,80 @@ pub fn compare(args: &mut Args) -> Result<i32> {
             "missing_option",
             "ddp compare --reference ref.png, or ddp compare card --on ios,android"
         ),
+    }?;
+    Ok(bar.judge(&difference))
+}
+
+/// `5`, `5%` or `2.5%` as a share of 0..1.
+fn share(text: Option<&str>, option: &str) -> Result<Option<f64>> {
+    let Some(text) = text else { return Ok(None) };
+    match text.trim().trim_end_matches('%').parse::<f64>() {
+        Ok(percent) if (0.0..=100.0).contains(&percent) => Ok(Some(percent / 100.0)),
+        _ => fail!(
+            format!("--{option} takes a percentage from 0 to 100, not '{text}'"),
+            "bad_value",
+            format!("ddp compare --reference ref.png --{option} 5%")
+        ),
+    }
+}
+
+/// The caller's pass bar: the most pixels that may differ, overall and in any one band.
+struct Bar {
+    overall: Option<f64>,
+    band: Option<f64>,
+}
+
+impl Bar {
+    /// Prints which part is over the bar; 1 when one is, so a run over many screens can count passes.
+    fn judge(&self, difference: &Difference) -> i32 {
+        if self.overall.is_none() && self.band.is_none() {
+            return 0;
+        }
+        let mut over = Vec::new();
+        if let Some(bar) = self.overall.filter(|bar| difference.share_off > *bar) {
+            over.push(format!(
+                "over --max: {} of the pixels differ, the bar is {}",
+                tenths(difference.share_off),
+                tenths(bar)
+            ));
+        }
+        if let Some(bar) = self.band {
+            for band in difference.bands.iter().filter(|band| band.share_off > bar) {
+                over.push(format!(
+                    "over --max-band: band {}-{} differs {}, the bar is {}",
+                    band.top,
+                    band.bottom,
+                    tenths(band.share_off),
+                    tenths(bar)
+                ));
+            }
+        }
+        if over.is_empty() {
+            say!("within the bar");
+            return 0;
+        }
+        over.iter().for_each(|line| say!("{line}"));
+        1
     }
 }
 
 /// The device's screen against a reference screenshot of another size: the reference is scaled to the screen's
 /// width, top edges together, and only the height both have is compared.
-fn screen_against(args: &Args, reference_path: &Path, out: &Path) -> Result<i32> {
-    let (platform, device, _) = target(args)?;
-    let screen = Image::from_png(&screenshot_png(&json!({"platform": platform, "device": device}))?)?;
+fn screen_against(args: &Args, reference_path: &Path, out: &Path) -> Result<Difference> {
+    let screen = match &args.screen {
+        Some(saved) if !args.ignore.is_empty() => {
+            fail!(
+                format!("--ignore needs the live screen, and {} is a saved one", saved.display()),
+                "bad_value",
+                "with --screen, leave parts out with --mask X,Y,W,H"
+            )
+        }
+        Some(saved) => read_image(saved)?,
+        None => {
+            let (platform, device, _) = target(args)?;
+            Image::from_png(&screenshot_png(&json!({"platform": platform, "device": device}))?)?
+        }
+    };
     let reference = read_image(reference_path)?;
     let factor = screen.width as f64 / reference.width as f64;
     let scaled = reference.resized(screen.width, (reference.height as f64 * factor).round() as usize);
@@ -55,8 +130,9 @@ fn screen_against(args: &Args, reference_path: &Path, out: &Path) -> Result<i32>
     if !args.ignore.is_empty() {
         mask.extend(on_screen(&args.ignore)?);
     }
+    let name = args.screen.as_ref().map_or("screen".to_string(), |saved| saved.display().to_string());
     say!(
-        "screen {}x{} against {} {}x{} (scaled {})",
+        "{name} {}x{} against {} {}x{} (scaled {})",
         screen.width,
         screen.height,
         reference_path.display(),
@@ -64,7 +140,7 @@ fn screen_against(args: &Args, reference_path: &Path, out: &Path) -> Result<i32>
         reference.height,
         py::float(py::round_f(factor, 3))
     );
-    report(&scaled, &screen, SCREEN_BANDS, ["reference", "screen"], &mask, out)
+    report(&scaled, &screen, SCREEN_BANDS, ["reference", &name], &mask, out)
 }
 
 /// Where the elements are on the device's screenshot: points times the scale on iOS, pixels from the activity
@@ -106,7 +182,7 @@ fn pixel_rect(text: &str) -> Result<[f64; 4]> {
 }
 
 /// One element of the app against a reference image of it, both at the smaller of the two sizes.
-fn element_against(key: &str, reference_path: &Path, ignore: &[String], out: &Path) -> Result<i32> {
+fn element_against(key: &str, reference_path: &Path, ignore: &[String], out: &Path) -> Result<Difference> {
     let session = crate::live::require_session()?;
     let piece = element_pixels(&session, key, ignore)?;
     let element = &piece.image;
@@ -124,7 +200,7 @@ fn element_against(key: &str, reference_path: &Path, ignore: &[String], out: &Pa
 }
 
 /// One element on two sessions (two phones), both at the smaller of the two sizes.
-fn element_across(key: &str, on: &str, ignore: &[String], out: &Path) -> Result<i32> {
+fn element_across(key: &str, on: &str, ignore: &[String], out: &Path) -> Result<Difference> {
     let names: Vec<&str> = on.split(',').map(str::trim).collect();
     let [first, second] = names[..] else {
         fail!("--on takes two sessions, e.g. ios,android", "bad_value", "ddp compare card --on ios,android");
@@ -209,7 +285,7 @@ fn read_image(path: &Path) -> Result<Image> {
     if let Ok(image) = Image::from_png(&data) {
         return Ok(image);
     }
-    let converted = state::ctx().dir.join("reference.png");
+    let converted = state::scratch_file("reference.png");
     let result = state::capture(
         "sips",
         &["-s", "format", "png", &path.display().to_string(), "--out", &converted.display().to_string()],
@@ -226,7 +302,7 @@ fn read_image(path: &Path) -> Result<Image> {
 }
 
 /// Prints the difference overall and per band, and writes the two images side by side with the difference.
-fn report(a: &Image, b: &Image, bands: usize, names: [&str; 2], mask: &[[f64; 4]], out: &Path) -> Result<i32> {
+fn report(a: &Image, b: &Image, bands: usize, names: [&str; 2], mask: &[[f64; 4]], out: &Path) -> Result<Difference> {
     let difference = Difference::of(a, b, bands, mask);
     say!("difference {} (pixels that differ: {})", tenths(difference.mean), tenths(difference.share_off));
     if !mask.is_empty() {
@@ -239,7 +315,7 @@ fn report(a: &Image, b: &Image, bands: usize, names: [&str; 2], mask: &[[f64; 4]
     let picture = Image::side_by_side(&[a, b, &difference.image]).fit(MAX_PICTURE_WIDTH);
     write_file(out, png_write(picture.width, picture.height, &picture.rows()))?;
     say!("{}: {} | {} | difference (red: differs)", out.display(), names[0], names[1]);
-    Ok(0)
+    Ok(difference)
 }
 
 fn tenths(share: f64) -> String {

@@ -2,6 +2,12 @@
 
 Changes that users or agents will notice. Before 1.0, a minor version may change the protocol or the output; those changes are marked.
 
+## Unreleased
+
+- `ddp compare --reference a.png --screen b.png`: two saved screenshots, so both phones can be captured first and compared later with the devices off.
+- `ddp compare --max <pct>` and `--max-band <pct>`: a pass bar the caller sets on the share of pixels that differ, overall and in any one band. Over it, `compare` exits 1. Without a bar it still exits 0.
+- Fixed: `ddp compare --device` on iOS failed in a folder without `.ddp` ("The folder screen.png doesn't exist"). Reading a reference that is not a PNG had the same problem.
+
 ## 0.2.1 (2026-10-27)
 
 The CLI can compare pixels: the screen against a reference screenshot, and one element against a reference image or against the same element on the other phone. Only the CLI changed. The libraries are the same as in 0.2.0, so there is nothing to update in the app.
