@@ -216,6 +216,19 @@ final class ControlSession {
             return [:]
         },
         "net.release": { [unowned self] _ in Fetch.shared.release(owner: self); return [:] },
+        // The shared cookie store URLSession uses: names, domains and expiry, never the values.
+        "net.cookies": { _ in
+            ["cookies": (HTTPCookieStorage.shared.cookies ?? []).map { cookie -> [String: Any] in
+                ["name": cookie.name, "domain": cookie.domain, "path": cookie.path, "secure": cookie.isSecure,
+                 "expires": cookie.expiresDate.map { ISO8601DateFormatter().string(from: $0) } ?? NSNull()]
+            }]
+        },
+        "net.clearCookies": { _ in
+            let storage = HTTPCookieStorage.shared
+            let count = storage.cookies?.count ?? 0
+            storage.cookies?.forEach(storage.deleteCookie)
+            return ["removed": count]
+        },
         "net.continue": { params in try Fetch.shared.proceed(params); return [:] },
         "net.respond": { params in try Fetch.shared.respond(params); return [:] },
         "net.fail": { params in try Fetch.shared.fail(params); return [:] },

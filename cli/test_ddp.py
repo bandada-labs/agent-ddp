@@ -530,6 +530,8 @@ class FakeApp:
                     result = {"columns": ["name", "token"], "rows": [["first", "[redacted]"]], "more": True}
                 elif method == "storage.keys":
                     result = {"keys": [], "unread": "the Keychain refused: the app has no Keychain entitlement (an unsigned build)"}
+                elif method == "net.cookies":
+                    result = {"cookies": [{"name": "session", "domain": "api.example.com", "path": "/", "secure": True, "expires": None}]}
                 elif method == "media.list":
                     result = {"players": [{"source": "AVPlayerLayer", "state": "playing", "rate": 1, "position": 12.5,
                                            "duration": 60, "frame": [0, 0, 390, 220]}],
@@ -753,6 +755,7 @@ with tempfile.TemporaryDirectory() as directory:
     keys = ddp_in(directory, "storage", "keys").stdout
     assert keys.startswith("not all read: the Keychain refused") and "no keys" not in keys, keys
     assert ddp_in(directory, "storage", "read").returncode == 1
+    assert ddp_in(directory, "net", "cookies").stdout == "api.example.com session/ (expires session secure)\n"
     media = ddp_in(directory, "media").stdout
     assert media == "AVPlayerLayer playing at 12.5s of 60s rate 1 [0, 0, 390, 220]\nnow playing: title=Song position=12.5\n", media
     # The same answers as JSON, for a script or an MCP client.

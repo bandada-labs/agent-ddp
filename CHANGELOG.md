@@ -4,6 +4,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 
 ## Unreleased
 
+- `ddp net cookies` and `ddp net clear-cookies`: the app's cookies by name, domain and expiry (never the values) from `HTTPCookieStorage.shared` or the default `java.net.CookieManager`, and clearing them. Offline and slow networks stay `ddp net fail` and `ddp net mock`.
 - `ddp profile [--for 3s]`: the functions the app spends its time in, from `sample` on the simulator or `simpleperf` on Android, top entries only, kernel waits counted apart.
 - `ddp memory [summary|leaks|heap]`: the app's memory with the platform's tools: `footprint`, `leaks` and `heap` on the simulator process; `dumpsys meminfo` and `am dumpheap` (an `.hprof` in `.ddp/`) on Android.
 - `ddp audits [--since 5m]`: the runtime warnings the platform wrote in the app's log (SwiftUI and AttributeGraph issues, Auto Layout conflicts, Main Thread Checker; StrictMode, skipped frames, leaked windows), exit 1 when there is one. The samples get a `warn` command.

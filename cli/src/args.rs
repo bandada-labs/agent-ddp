@@ -191,7 +191,7 @@ pub fn parser() -> Command {
             .arg(positional("path", "iOS: element.<key path> or layer.<key path>; \
                                      Android: <modifier>.<property> (border.width) or semantics.<Key>").required(true)))
         .subcommand(sub("net", "live: the app's requests (redacted): see them, send one, or answer them yourself")
-            .arg(choices("action", &["list", "get", "watch", "send", "mock", "fail"]).required(true))
+            .arg(choices("action", &["list", "get", "watch", "send", "mock", "fail", "cookies", "clear-cookies"]).required(true))
             .arg(positional("request_id", "get: request id from `ddp net list`; send: URL; mock, fail: URL pattern with *"))
             .arg(opt("until", "watch: stop when true, e.g. 'status>=400' or 'url~/api'"))
             .arg(opt("method", "send: GET, POST..."))

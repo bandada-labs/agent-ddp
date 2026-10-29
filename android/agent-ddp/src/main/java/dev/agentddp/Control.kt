@@ -179,6 +179,22 @@ internal class ControlSession(private val app: ControlApp, private val send: (St
             JSONObject()
         },
         "net.release" to { _ -> Fetch.release(this); JSONObject() },
+        // The default java.net cookie store, when the app set one (OkHttp's JavaNetCookieJar uses it): names and
+        // domains, never the values. A client with its own CookieJar keeps its cookies to itself.
+        "net.cookies" to { _ ->
+            val store = (java.net.CookieHandler.getDefault() as? java.net.CookieManager)?.cookieStore
+            JSONObject().put("cookies", JSONArray(store?.cookies.orEmpty().map { cookie ->
+                JSONObject().put("name", cookie.name).put("domain", cookie.domain ?: JSONObject.NULL).put("path", cookie.path ?: JSONObject.NULL)
+                    .put("secure", cookie.secure).put("expires", if (cookie.maxAge < 0) JSONObject.NULL else cookie.maxAge)
+            })).apply { if (store == null) put("unread", "the app set no java.net CookieManager; its HTTP client keeps its own cookies") }
+        },
+        "net.clearCookies" to { _ ->
+            val store = (java.net.CookieHandler.getDefault() as? java.net.CookieManager)?.cookieStore
+                ?: throw IllegalStateException("The app set no java.net CookieManager; its HTTP client keeps its own cookies")
+            val count = store.cookies.size
+            store.removeAll()
+            JSONObject().put("removed", count)
+        },
         "net.continue" to Fetch::proceed,
         "net.respond" to Fetch::respond,
         "net.fail" to Fetch::fail,

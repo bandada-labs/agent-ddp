@@ -607,6 +607,34 @@ pub fn net(args: &mut Args) -> Result<i32> {
     let session = require_session()?;
     let mut control = open(&session)?;
     match args.action.as_deref() {
+        Some("cookies") => {
+            let answer = control.call("net.cookies", json!({}))?;
+            if ctx().json {
+                say!("{}", py::dumps(&answer));
+            } else {
+                let cookies = answer["cookies"].as_array().cloned().unwrap_or_default();
+                for cookie in &cookies {
+                    let expires =
+                        if cookie["expires"].is_null() { "session".to_string() } else { py::str(&cookie["expires"]) };
+                    let secure = if cookie["secure"] == true { " secure" } else { "" };
+                    say!(
+                        "{} {}{} (expires {expires}{secure})",
+                        py::str(&cookie["domain"]),
+                        py::str(&cookie["name"]),
+                        py::str(&cookie["path"])
+                    );
+                }
+                match answer["unread"].as_str() {
+                    Some(why) => say!("not read: {why}"),
+                    None if cookies.is_empty() => say!("no cookies"),
+                    None => {}
+                }
+            }
+        }
+        Some("clear-cookies") => {
+            let answer = control.call("net.clearCookies", json!({}))?;
+            say!("removed {} cookies", py::str(&answer["removed"]));
+        }
         Some("get") => {
             let Some(id) = &args.request_id else {
                 fail!("net get needs a request id", "missing_option", "ddp net list");
