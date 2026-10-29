@@ -57,6 +57,7 @@ fn handler(command: &str) -> fn(&mut Args) -> Result<i32> {
         "prefs" => live::prefs,
         "run" => live::run_command,
         "state" => live::app_state,
+        "events" => live::app_events,
         "wait" => device::wait,
         "logs" => device::logs,
         "history" => history::history,

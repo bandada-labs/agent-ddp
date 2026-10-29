@@ -516,6 +516,14 @@ class FakeApp:
                         continue
                     self.mode = params["value"]
                     result = {"value": self.mode}
+                elif method in ("events.list", "events.watch"):
+                    events = [{"t": 1729700000000, "name": "rule", "fields": {"event": "save:expenses", "spent": 120}},
+                              {"t": 1729700000500, "name": "sync", "fields": {"ok": True}}]
+                    if method == "events.list":
+                        result = {"events": events}
+                    else:
+                        for entry in events:
+                            send({"method": "events.entry", "params": entry})
                 elif method == "app.commands":
                     result = {"commands": ["load"]}
                 elif method == "app.run":
@@ -665,6 +673,12 @@ with tempfile.TemporaryDirectory() as directory:
     assert met.returncode == 0 and "until met at" in met.stdout and "->" in met.stdout, met.stdout + met.stderr
     unmet = ddp_in(directory, "state", "watch", "mode", "--until", "=never", "--for", "300ms")
     assert unmet.returncode == 1 and "until not met in 300ms: mode=never" in unmet.stdout, unmet.stdout + unmet.stderr
+    # App events: the kept ones, a filter, and a follow that ends with --for.
+    events = ddp_in(directory, "events").stdout
+    assert "rule event=save:expenses spent=120" in events and "sync ok=true" in events, events
+    assert "sync" not in ddp_in(directory, "events", "--grep", "expenses").stdout
+    followed = ddp_in(directory, "events", "--follow", "--for", "300ms")
+    assert followed.returncode == 0 and "rule event=save:expenses" in followed.stdout, followed.stdout + followed.stderr
     assert ddp_in(directory, "run").stdout == "load\n" and ddp_in(directory, "run", "load").stdout == '"loaded 200"\n'
     mocked = ddp_in(directory, "net", "mock", "*items*", "--status", "503", "--for", "5s", "--limit", "1",
                     "--then", f"{DDP[0]} run load")

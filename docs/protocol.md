@@ -27,6 +27,8 @@ Coordinates are window coordinates in the platform's unit, the same as in frames
 | `app.run` | `name`, `params` (object) | `value`: what the command returned, any JSON value. Commands are the app's own Swift or Kotlin code (log in a test user, reset state, open a screen) and run off the main thread |
 | `state.list` | | `values`: `[{name, writable}]`, the values the app added with `AgentDDP.state` (iOS) or `AgentDdpState.add` (Android); `writable` when it gave a setter |
 | `state.get` | `names` (array, optional: all) | `values`: `{name: value}`, any JSON value, read on the main thread. An unknown name or a value that is not JSON is an error |
+| `events.list` | | `events`: the last 200 the app sent with `AgentDDP.event` (iOS) or `AgentDdpEvents.send` (Android), oldest first: `{t, name, fields}`, `t` in ms since 1970. Each is also written to History as an `event` line with `kind: "app"`, `name` and `fields` |
+| `events.watch` | | Sends the kept events, then each new one, as `events.entry` events with the same fields. `events.unwatch` stops it |
 | `state.set` | `name`, `value` (any JSON) | `value`: what the getter reads back after the setter ran on the main thread. A value without a setter is an error |
 | `screen.elements` | | `elements`, the same shape as in a `frame` |
 | `screen.capture` | `format` png or jpeg, `quality`, `clip` `[x, y, width, height]` | `data`, base64, in device pixels. Every window of the app, dialogs included. On Android, SurfaceView and TextureView content is not drawn |

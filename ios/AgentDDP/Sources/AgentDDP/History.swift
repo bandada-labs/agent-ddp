@@ -70,7 +70,11 @@ final class History {
     /// `wall`: when it happened, ms since 1970; a touch is stamped when it went down, before what it caused.
     func event(_ kind: String, _ fields: [String: Any] = [:], wall: Double = History.wallMs()) {
         let line = fields.merging(["type": "event", "kind": kind]) { _, new in new }
-        writer.async { self.segment(at: wall).write(line, wall: wall) }
+        writer.async {
+            // An app event can come before start(): there is no history yet to keep it in.
+            guard self.directory != nil else { return }
+            self.segment(at: wall).write(line, wall: wall)
+        }
     }
 
     private func onTurnEnded() {

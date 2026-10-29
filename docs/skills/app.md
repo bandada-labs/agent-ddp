@@ -1,14 +1,14 @@
 ---
-name: state
-description: Show ddp the app's own values (a total, a mode, a value of the app's engine), then read, watch and set them.
+name: app
+description: Show ddp the app's own values and events (a total, a mode, a rule that fired), then read, watch and set them.
 ---
 
-# The app's own values
+# The app's own values and events
 
-ddp sees what the app draws. What the app knows (a cart total, the logged-in user, a value its engine computed) it
-sees only when the app shows it. You add one line per value in the app's Debug code, in the app's own language, then
-read it with `ddp state`. Nothing is shared between the platforms: write the Swift line in the iOS app and the
-Kotlin line in the Android app.
+ddp sees what the app draws. What the app knows (a cart total, the logged-in user, a value its engine computed) and
+what happens inside it (a rule that fired, a sync that ended) it sees only when the app tells it. You add the lines in
+the app's Debug code, in the app's own language, then read them with `ddp state` and `ddp events`. Nothing is shared
+between the platforms: write the Swift line in the iOS app and the Kotlin line in the Android app.
 
 ## 1. Add the values (Debug only)
 
@@ -53,3 +53,23 @@ ddp state watch mode --until '=done' --for 30s
 ```
 
 Put the app in a state without the UI (`state set`), then check what it draws with `ddp tree` or `ddp check all`.
+
+## Events
+
+Send one where it happens, from any thread:
+
+```swift
+AgentDDP.event("rule", ["event": "save:expenses", "condition": "spent > budget", "then": "notify"])
+```
+
+```kotlin
+AgentDdpEvents.send("rule", mapOf("event" to "save:expenses", "condition" to "spent > budget", "then" to "notify"))
+```
+
+```bash
+ddp events                         # the last ones the app kept (up to 200)
+ddp events --follow --for 10s      # the kept ones, then each new one
+ddp history                        # events next to frames and taps, for the last 15 minutes, even after a crash
+```
+
+Fields are JSON values. The app decides what an event is and what it carries; ddp only shows them.

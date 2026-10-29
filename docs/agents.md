@@ -10,6 +10,7 @@ Works only in Debug builds. Release builds contain none of it.
 ddp connect <sim UDID | adb serial> --app <bundle or application id>
 ddp launch <device> --app <id> [--env KEY=VALUE ...]   start the app fresh with values for it, then connect
 ddp state [list] | get <name> | set <name> <value> | watch <name> [--until '>100'] [--for 10s]   the app's own values
+ddp events [--follow] [--for 10s] [--grep <text>]   events the app sent in Debug, also in ddp history
 ddp doctor [<device> --app <id>]                  what is wrong between the device and a frame, with the fix, and every engine hook's state
 ddp tree [-i] [-c] [--within <el>] [-d N]         what is on screen now, per element, with @refs
 ddp find text <part of a label> | id <id>          elements by name, with @refs
@@ -182,7 +183,9 @@ OUTSIDE trapOutside: outside its parent (UIView bounds), no point of it takes a 
 
 ### state
 
-`state` reads values the app added in its Debug code, in its own language: `AgentDDP.state(name, get:, set:)` on iOS, `AgentDdpState.add(name, get, set)` on Android. ddp knows nothing about the app's model or engine; the app decides what to show. `ddp state` lists every value with `(writable)` when the app gave a setter. `set` sends the value as JSON when it parses (`500`, `true`, `{"a": 1}`), else as text, and prints what the getter reads back. `watch` reads every 50 ms and prints each change; with `--until` it exits 0 when it holds and 1 when `--for` (default 10s) ends first. A bare `--until '>100'` is about the watched value; `'total>100 and mode=done'` names values. `ddp skills get state` is the guide for adding the lines.
+`state` reads values the app added in its Debug code, in its own language: `AgentDDP.state(name, get:, set:)` on iOS, `AgentDdpState.add(name, get, set)` on Android. ddp knows nothing about the app's model or engine; the app decides what to show. `ddp state` lists every value with `(writable)` when the app gave a setter. `set` sends the value as JSON when it parses (`500`, `true`, `{"a": 1}`), else as text, and prints what the getter reads back. `watch` reads every 50 ms and prints each change; with `--until` it exits 0 when it holds and 1 when `--for` (default 10s) ends first. A bare `--until '>100'` is about the watched value; `'total>100 and mode=done'` names values. `ddp skills get app` is the guide for adding the lines.
+
+`events` shows events the app sent in its Debug code: `AgentDDP.event(name, fields)` on iOS, `AgentDdpEvents.send(name, fields)` on Android, from any thread. The library keeps the last 200; `--follow` prints them, then each new one. Each event also goes into History, so `ddp history` prints `event <name> key=value ...` next to frames and taps, after a crash too.
 
 ### launch
 

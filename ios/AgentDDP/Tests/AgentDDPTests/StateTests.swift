@@ -25,3 +25,28 @@ final class StateTests: XCTestCase {
         }
     }
 }
+
+final class EventsTests: XCTestCase {
+    func testAWatcherGetsTheKeptEventsThenEachNewOne() {
+        let events = AppEvents()
+        for index in 0..<205 { events.send("tick", ["n": index]) }
+        let kept = events.list()["events"] as? [[String: Any]] ?? []
+        XCTAssertEqual(kept.count, 200)
+        XCTAssertEqual((kept.first?["fields"] as? [String: Any])?["n"] as? Int, 5)
+
+        var seen: [String] = []
+        let id = events.watch { seen.append($0["name"] as? String ?? "") }
+        events.send("rule", ["when": Date()])
+        events.stop(id)
+        events.send("after", [:])
+        XCTAssertEqual(seen.count, 201)
+        XCTAssertEqual(seen.last, "rule")
+    }
+
+    func testAFieldThatIsNotJSONGoesAsItsDescription() {
+        let events = AppEvents()
+        events.send("rule", ["when": Date(timeIntervalSince1970: 0)])
+        let fields = (events.list()["events"] as? [[String: Any]])?.last?["fields"] as? [String: Any]
+        XCTAssertTrue(fields?["when"] is String)
+    }
+}

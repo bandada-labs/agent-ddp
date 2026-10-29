@@ -81,7 +81,10 @@ internal object History {
 
     /** [wall]: when it happened; a touch is stamped when it went down, before what it caused. */
     fun event(kind: String, fields: JSONObject = JSONObject(), wall: Long = System.currentTimeMillis()) {
-        writer.execute { segmentAt(wall).write(fields.put("type", "event").put("kind", kind), wall) }
+        writer.execute {
+            // An app event can come before start(): there is no history yet to keep it in.
+            if (::directory.isInitialized) segmentAt(wall).write(fields.put("type", "event").put("kind", kind), wall)
+        }
     }
 
     private fun onDraw() {

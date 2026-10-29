@@ -84,7 +84,7 @@ Start here (for agents): ddp skills get core
   connect | launch | disconnect | doctor   attach to a running Debug app, or start it fresh; check the setup
   tree | find | get | read | watch | eval  what is drawn, now or over a take (@refs from tree and find)
   record | wait | tap | type | press       take a recording, wait, touch and type
-  open | set | logs | prefs | run | state  deep links, device settings, app logs, preferences, app commands, app values
+  open | set | logs | prefs | run | state | events   deep links, device settings, app logs, preferences, app commands, values, events
   check overlap|corners|jank|settle|a11y|timeline|parity|baseline|tappable|all
   history                                  the last 15 minutes: what changed, taps, requests; or one moment as a take
   compare --reference <png> | compare <element> --on ios,android   pixels against a reference or the other phone
@@ -241,6 +241,11 @@ pub fn parser() -> Command {
             .arg(opt("for", "--follow: stop after this long").id("duration"))
             .arg(opt("grep", "only lines holding this text"))
             .arg(opt("limit", "at most this many lines").value_parser(clap::value_parser!(usize)).default_value("50")))))
+        .subcommand(sub("events", "live: events the app sent in Debug (a rule that fired, a sync that ended)")
+            .arg(flag("follow", "the kept ones, then each new one"))
+            .arg(opt("for", "--follow: stop after this long").id("duration"))
+            .arg(opt("grep", "only events whose name or fields hold this text"))
+            .arg(opt("limit", "without --follow: the last this many").value_parser(clap::value_parser!(usize)).default_value("50")))
         .subcommand(device_options(sub("history", "the last 15 minutes from the app's flight recorder")
             .arg(choices("action", &["list", "at"]).default_value("list"))
             .arg(positional("time", "at: a time from the list, e.g. 14:31:02.5"))

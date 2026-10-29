@@ -96,6 +96,7 @@ internal class ControlConnection(
 internal class ControlSession(private val app: ControlApp, private val send: (String) -> Unit) {
     private var networkWatch: java.util.UUID? = null
     private var appLog: AppLog? = null
+    private var stopEvents: (() -> Unit)? = null
     // Main thread only.
     private var screenStream: FrameStream? = null
 
@@ -177,6 +178,13 @@ internal class ControlSession(private val app: ControlApp, private val send: (St
             JSONObject()
         },
         "log.unwatch" to { _ -> appLog?.stop(); appLog = null; JSONObject() },
+        "events.list" to { _ -> AgentDdpEvents.list() },
+        "events.watch" to { _ ->
+            stopEvents?.invoke()
+            stopEvents = AgentDdpEvents.watch { entry -> runCatching { event("events.entry", entry) } }
+            JSONObject()
+        },
+        "events.unwatch" to { _ -> stopEvents?.invoke(); stopEvents = null; JSONObject() },
         "prefs.files" to { _ -> JSONObject().put("files", JSONArray(Preferences.files())) },
         "prefs.read" to { params -> JSONObject().put("values", JSONObject(Preferences.read(params.file()).toMap())) },
         "prefs.write" to { params -> Preferences.write(params.file(), params.getString("key"), params.getString("value")); JSONObject() },
@@ -190,6 +198,7 @@ internal class ControlSession(private val app: ControlApp, private val send: (St
         stopNetwork()
         Fetch.release(this)
         appLog?.stop()
+        stopEvents?.invoke()
     }
 
     private fun stopNetwork() {

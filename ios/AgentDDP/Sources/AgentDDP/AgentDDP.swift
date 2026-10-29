@@ -58,6 +58,15 @@ public enum AgentDDP {
         #endif
     }
 
+    /// Sends agents an event (`events.watch`, `ddp events`, `ddp history`): a rule that fired, a sync that ended, a
+    /// level that started. The app decides what an event is. `fields` are JSON values; anything else goes as its
+    /// description. Any thread may call it. Outside Debug it does nothing.
+    public static func event(_ name: String, _ fields: [String: Any] = [:]) {
+        #if DEBUG && canImport(UIKit)
+        AppEvents.shared.send(name, fields)
+        #endif
+    }
+
     #if DEBUG && canImport(UIKit)
     static func logged(_ request: URLRequest,
                        using send: (URLRequest) async throws -> (Data, URLResponse)) async throws -> (Data, URLResponse) {

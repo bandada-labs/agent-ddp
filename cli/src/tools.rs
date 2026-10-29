@@ -165,9 +165,9 @@ pub fn mcp(args: &mut Args) -> Result<i32> {
 /// The guides, built in so they always match this version.
 const SKILLS: [(&str, &str); 4] = [
     ("core", include_str!("../../docs/skills/core.md")),
+    ("app", include_str!("../../docs/skills/app.md")),
     ("explore", include_str!("../../docs/skills/explore.md")),
     ("reviewer", include_str!("../../docs/skills/reviewer.md")),
-    ("state", include_str!("../../docs/skills/state.md")),
 ];
 const REFERENCE: &str = include_str!("../../docs/agents.md");
 
@@ -353,7 +353,7 @@ fn doctor_checks(platform: &str, device: &str, app: &str) -> Result<Vec<Step>> {
     ));
     if let Some(names) = values {
         // Information, never a failure: an app may add no values at all.
-        let listed = if names.is_empty() { "none (ddp skills get state)".to_string() } else { names.join(", ") };
+        let listed = if names.is_empty() { "none (ddp skills get app)".to_string() } else { names.join(", ") };
         steps.push((true, format!("app values: {listed}"), String::new()));
     }
     steps.extend(hooks);

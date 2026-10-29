@@ -13,7 +13,8 @@ struct DDPSampleApp: App {
         AgentDDP.redact(values: [SampleNetwork.devSecret])
         AgentDDP.command("load") { _ in
             let answer = await SampleNetwork.load()
-            await MainActor.run { SampleState.loads += 1 }
+            let loads = await MainActor.run { SampleState.loads += 1; return SampleState.loads }
+            AgentDDP.event("loaded", ["loads": loads, "answer": answer])
             return answer
         }
         AgentDDP.state("mode", get: { SampleState.mode }, set: { SampleState.mode = $0 as? String ?? SampleState.mode })

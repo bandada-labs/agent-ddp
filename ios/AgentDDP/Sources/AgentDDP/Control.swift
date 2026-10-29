@@ -121,6 +121,7 @@ final class ControlSession {
     private let send: (String) -> Void
     private var networkWatch: UUID?
     private var appLog: AppLog?
+    private var eventsWatch: UUID?
     // Main thread only.
     private var screenStream: FrameStream?
 
@@ -214,6 +215,17 @@ final class ControlSession {
             return [:]
         },
         "log.unwatch": { [unowned self] _ in appLog?.stop(); appLog = nil; return [:] },
+        "events.list": { _ in AppEvents.shared.list() },
+        "events.watch": { [unowned self] _ in
+            if let eventsWatch { AppEvents.shared.stop(eventsWatch) }
+            eventsWatch = AppEvents.shared.watch { [weak self] entry in self?.event("events.entry", entry) }
+            return [:]
+        },
+        "events.unwatch": { [unowned self] _ in
+            if let eventsWatch { AppEvents.shared.stop(eventsWatch) }
+            eventsWatch = nil
+            return [:]
+        },
         "prefs.files": { _ in ["files": Preferences.files()] },
         "prefs.read": { params in ["values": try Preferences.read(Self.file(params))] },
         "prefs.write": { params in
@@ -245,6 +257,7 @@ final class ControlSession {
         stopNetwork()
         Fetch.shared.release(owner: self)
         appLog?.stop()
+        if let eventsWatch { AppEvents.shared.stop(eventsWatch) }
     }
 
     private func stopNetwork() {

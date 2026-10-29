@@ -739,7 +739,7 @@ pub fn app_state(args: &mut Args) -> Result<i32> {
             let entries = listed["values"].as_array().cloned().unwrap_or_default();
             if entries.is_empty() {
                 say!("no values: the app adds them in Debug with AgentDDP.state (iOS) or AgentDdpState.add (Android)");
-                say!("next: ddp skills get state");
+                say!("next: ddp skills get app");
             } else {
                 let values = control.call("state.get", json!({}))?;
                 for entry in entries {
@@ -841,6 +841,52 @@ pub fn follow_logs(args: &Args) -> Result<i32> {
     }
     control.close();
     Ok(0)
+}
+
+/// Events the app sent in Debug (`AgentDDP.event`, `AgentDdpEvents.send`): the last ones, or each as it comes.
+pub fn app_events(args: &mut Args) -> Result<i32> {
+    let session = require_session()?;
+    let grep = args.grep.as_deref().map(str::to_lowercase);
+    let shown = |entry: &Value| {
+        let text = event_line(entry);
+        if grep.as_ref().is_none_or(|grep| text.to_lowercase().contains(grep)) {
+            let time = state::local_time("%H:%M:%S", f(&entry["t"]) / 1000.0);
+            say!("{time} {text}");
+        }
+    };
+    let mut control = open(&session)?;
+    if !args.follow {
+        let listed = control.call("events.list", json!({}))?;
+        control.close();
+        let events = listed["events"].as_array().cloned().unwrap_or_default();
+        if events.is_empty() {
+            say!("no events: the app sends them in Debug with AgentDDP.event (iOS) or AgentDdpEvents.send (Android)");
+        }
+        let limit = args.limit.unwrap_or(50);
+        events.iter().skip(events.len().saturating_sub(limit)).for_each(shown);
+        return Ok(0);
+    }
+    let deadline =
+        args.duration.as_deref().map(parse_ms).transpose()?.map(|ms| Instant::now() + Duration::from_millis(ms as u64));
+    control.call("events.watch", json!({}))?;
+    while let Some(event) = control.next_event(deadline)? {
+        if event["method"] == "events.entry" {
+            shown(&event["params"]);
+        }
+    }
+    control.close();
+    Ok(0)
+}
+
+/// `name key=value ...`, fields in the order the app gave them.
+pub fn event_line(entry: &Value) -> String {
+    let fields: Vec<String> = entry["fields"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .map(|(key, value)| format!("{key}={}", if value.is_string() { py::str(value) } else { py::dumps(value) }))
+        .collect();
+    std::iter::once(py::str(&entry["name"])).chain(fields).collect::<Vec<_>>().join(" ")
 }
 
 pub fn time_control(args: &mut Args) -> Result<i32> {
