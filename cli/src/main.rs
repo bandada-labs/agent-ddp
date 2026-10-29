@@ -58,6 +58,7 @@ fn handler(command: &str) -> fn(&mut Args) -> Result<i32> {
         "prefs" => live::prefs,
         "run" => live::run_command,
         "state" => live::app_state,
+        "storage" => live::storage,
         "events" => live::app_events,
         "perf" => live::perf,
         "swipe" | "drag" | "double-tap" | "long-press" => hit::gesture,

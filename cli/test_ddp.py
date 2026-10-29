@@ -518,6 +518,15 @@ class FakeApp:
                         continue
                     self.mode = params["value"]
                     result = {"value": self.mode}
+                elif method == "storage.files":
+                    result = {"path": params.get("path", ""), "entries": [{"name": "Documents", "folder": True},
+                                                                         {"name": "note.txt", "folder": False, "bytes": 22}]}
+                elif method == "storage.read":
+                    result = {"bytes": 22, "truncated": False, "text": "hello from the sample"}
+                elif method == "storage.query":
+                    result = {"columns": ["name", "token"], "rows": [["first", "[redacted]"]], "more": True}
+                elif method == "storage.keys":
+                    result = {"keys": [], "unread": "the Keychain refused: the app has no Keychain entitlement (an unsigned build)"}
                 elif method == "perf.metrics":
                     result = {"ms": params["ms"], "refreshMs": 16.67, "refreshes": 59, "missed": 3, "worstGapMs": 66.7,
                               "drawn": 20, "drawMeanMs": 6.1, "drawP95Ms": 12.4, "drawnOverRefresh": 1}
@@ -706,6 +715,13 @@ with tempfile.TemporaryDirectory() as directory:
     assert met.returncode == 0 and "until met at" in met.stdout and "->" in met.stdout, met.stdout + met.stderr
     unmet = ddp_in(directory, "state", "watch", "mode", "--until", "=never", "--for", "300ms")
     assert unmet.returncode == 1 and "until not met in 300ms: mode=never" in unmet.stdout, unmet.stdout + unmet.stderr
+    assert ddp_in(directory, "storage").stdout == "Documents/\nnote.txt  22 bytes\n"
+    assert ddp_in(directory, "storage", "read", "note.txt").stdout == "hello from the sample\n"
+    queried = ddp_in(directory, "storage", "query", "a.sqlite", "SELECT * FROM items").stdout
+    assert queried == "name | token\nfirst | [redacted]\n... more rows: add LIMIT/OFFSET to see them\n", queried
+    keys = ddp_in(directory, "storage", "keys").stdout
+    assert keys.startswith("not all read: the Keychain refused") and "no keys" not in keys, keys
+    assert ddp_in(directory, "storage", "read").returncode == 1
     perf = ddp_in(directory, "perf", "--for", "1s")
     assert perf.returncode == 0 and perf.stdout == "1.0s: the main thread missed 3 of 59 refreshes (16.67 ms each), worst gap 66.7 ms; " \
         "20 frames drawn, draw time mean 6.1 ms, p95 12.4 ms, 1 over a refresh\n", perf.stdout + perf.stderr

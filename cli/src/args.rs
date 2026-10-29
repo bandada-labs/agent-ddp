@@ -68,6 +68,7 @@ pub struct Args {
     pub key: Option<String>,
     pub follow: bool,
     pub force: bool,
+    pub reset: bool,
     pub reference: Option<PathBuf>,
     pub masks: Vec<String>,
     pub screen: Option<PathBuf>,
@@ -166,6 +167,7 @@ pub fn parser() -> Command {
             .arg(positional("device", "simulator UDID or adb serial").required(true))
             .arg(opt("app", "bundle id / application id").required(true))
             .arg(opt("platform", "default: guessed from the device id").value_parser(["ios", "android"]))
+            .arg(flag("reset", "clear the app's data first (its files and preferences), like a fresh install"))
             .arg(Arg::new("env").long("env").num_args(1).action(ArgAction::Append).value_name("KEY=VALUE")
                 .help("a value for the app: iOS environment variable, Android launch intent string extra; repeat for more")))
         .subcommand(sub("disconnect", "forget the live session"))
@@ -240,6 +242,10 @@ pub fn parser() -> Command {
             .arg(positional("key", "set, rm: the key"))
             .arg(positional("value", "set: the value as text; the key keeps its type"))
             .arg(opt("in", "a suite (iOS) or preferences file (Android); default the app's own").id("name")))
+        .subcommand(sub("storage", "live: the app's files, its SQLite databases read-only, its Keychain/Keystore names")
+            .arg(choices("action", &["files", "read", "rm", "query", "keys"]).default_value("files"))
+            .arg(positional("key", "files: a folder (default the app's home); read, rm: a file; query: a database file"))
+            .arg(positional("value", "query: one SQL statement, run read-only")))
         .subcommand(sub("state", "live: values the app added in Debug; read, watch, and set the writable ones")
             .arg(choices("action", &["list", "get", "set", "watch"]).default_value("list"))
             .arg(positional("key", "get, set, watch: the value's name"))
@@ -445,5 +451,6 @@ pub fn parse(argv: &[String]) -> Result<Args, clap::Error> {
         key: string(m, "key"),
         follow: boolean(m, "follow"),
         force: boolean(m, "force"),
+        reset: boolean(m, "reset"),
     })
 }

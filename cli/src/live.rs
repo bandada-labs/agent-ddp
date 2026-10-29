@@ -205,6 +205,9 @@ pub fn launch(args: &mut Args) -> Result<i32> {
             )),
         })
         .collect::<Result<Vec<_>>>()?;
+    if args.reset {
+        reset_data(&platform, &device, &app)?;
+    }
     let started = if platform == "ios" {
         let mut command = Command::new("xcrun");
         command.args(["simctl", "launch", "--terminate-running-process", &device, &app]);
@@ -253,6 +256,41 @@ pub fn launch(args: &mut Args) -> Result<i32> {
         }
     }
     keep_session(&session, &snapshot)
+}
+
+/// The app's data as after a fresh install, with the app stopped: Android's own `pm clear`; on iOS the simulator's data
+/// container emptied. The iOS Keychain lives outside the container and stays.
+fn reset_data(platform: &str, device: &str, app: &str) -> Result<()> {
+    if platform != "ios" {
+        let cleared = capture(&adb_path()?, &["-s", device, "shell", "pm", "clear", app]);
+        if !cleared.stdout.contains("Success") {
+            fail!(
+                format!("could not clear {app}: {}", cleared.stdout.trim()),
+                "reset_failed",
+                format!("ddp doctor {device} --app {app}")
+            );
+        }
+        say!("cleared {app}'s data");
+        return Ok(());
+    }
+    capture("xcrun", &["simctl", "terminate", device, app]);
+    let container = PathBuf::from(model::app_container(device, app)?);
+    // It empties a folder: only ever an app's data container on this simulator, whatever the cache says.
+    let path = container.display().to_string();
+    if !path.contains(&format!("/Devices/{device}/data/Containers/Data/Application/")) {
+        fail!(
+            format!("{path} is not {app}'s data container on {device}"),
+            "reset_failed",
+            format!("xcrun simctl get_app_container {device} {app} data")
+        );
+    }
+    for entry in std::fs::read_dir(&container).map_err(|e| failure(e.to_string(), "reset_failed", None))?.flatten() {
+        let path = entry.path();
+        let removed = if path.is_dir() { std::fs::remove_dir_all(&path) } else { std::fs::remove_file(&path) };
+        removed.map_err(|e| failure(format!("could not remove {}: {e}", path.display()), "reset_failed", None))?;
+    }
+    say!("cleared {app}'s data container (the Keychain stays)");
+    Ok(())
 }
 
 /// The app's launcher activity, as the package manager resolves it (`monkey` does not start every app).
@@ -848,6 +886,82 @@ pub fn follow_logs(args: &Args) -> Result<i32> {
         }
         let time = state::local_time("%H:%M:%S", f(&entry["t"]) / 1000.0);
         say!("{time} {} {} {text}", py::str(&entry["level"]), py::str(&entry["tag"]));
+    }
+    control.close();
+    Ok(0)
+}
+
+/// The app's files, SQLite databases (read-only) and Keychain/Keystore names.
+pub fn storage(args: &mut Args) -> Result<i32> {
+    let session = require_session()?;
+    let mut control = open(&session)?;
+    let path = args.key.clone().unwrap_or_default();
+    let needs_path = || {
+        if path.is_empty() {
+            Err(failure("which file?", "missing_option", Some("ddp storage files")))
+        } else {
+            Ok(path.clone())
+        }
+    };
+    match args.action.as_deref().unwrap_or("files") {
+        "read" => {
+            let answer = control.call("storage.read", json!({"path": needs_path()?}))?;
+            match answer["text"].as_str() {
+                Some(text) => {
+                    say!("{text}");
+                    if answer["truncated"] == true {
+                        say!("... (the first 256 KB of {} bytes)", py::str(&answer["bytes"]));
+                    }
+                }
+                None => say!("{path}: {} bytes, not text", py::str(&answer["bytes"])),
+            }
+        }
+        "rm" => {
+            control.call("storage.remove", json!({"path": needs_path()?}))?;
+            say!("removed {path}");
+        }
+        "query" => {
+            let sql = args.value.clone().unwrap_or_default();
+            let answer = control.call("storage.query", json!({"path": needs_path()?, "sql": sql}))?;
+            let columns: Vec<String> = answer["columns"].as_array().into_iter().flatten().map(py::str).collect();
+            say!("{}", columns.join(" | "));
+            for row in answer["rows"].as_array().into_iter().flatten() {
+                let cells: Vec<String> = row.as_array().into_iter().flatten().map(py::str).collect();
+                say!("{}", cells.join(" | "));
+            }
+            if answer["more"] == true {
+                say!("... more rows: add LIMIT/OFFSET to see them");
+            }
+        }
+        "keys" => {
+            let answer = control.call("storage.keys", json!({}))?;
+            let keys = answer["keys"].as_array().cloned().unwrap_or_default();
+            if let Some(unread) = answer["unread"].as_str() {
+                say!("not all read: {unread}");
+            } else if keys.is_empty() {
+                say!("no keys");
+            }
+            for key in keys {
+                let service = key
+                    .get("service")
+                    .map(py::str)
+                    .filter(|s| !s.is_empty())
+                    .map(|s| format!("{s} / "))
+                    .unwrap_or_default();
+                say!("{} {service}{}", py::str(&key["store"]), py::str(&key["name"]));
+            }
+        }
+        _ => {
+            let answer = control.call("storage.files", json!({"path": path}))?;
+            for entry in answer["entries"].as_array().into_iter().flatten() {
+                let name = py::str(&entry["name"]);
+                if entry["folder"] == true {
+                    say!("{name}/");
+                } else {
+                    say!("{name}  {} bytes", py::str(&entry["bytes"]));
+                }
+            }
+        }
     }
     control.close();
     Ok(0)

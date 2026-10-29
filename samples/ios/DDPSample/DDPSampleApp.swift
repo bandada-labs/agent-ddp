@@ -1,5 +1,7 @@
 import AgentDDP
 import OSLog
+import Security
+import SQLite3
 import SwiftUI
 
 @main
@@ -17,6 +19,8 @@ struct DDPSampleApp: App {
             AgentDDP.event("loaded", ["loads": loads, "answer": answer])
             return answer
         }
+        // For `ddp storage`: a database, a text file and a Keychain item to read.
+        AgentDDP.command("seed") { _ in SampleState.seed() }
         // For `ddp perf`: the main thread busy for 200 ms, about 11 refreshes missed at 60 Hz.
         AgentDDP.command("jank") { _ in
             await MainActor.run { Thread.sleep(forTimeInterval: 0.2) }
@@ -44,6 +48,21 @@ enum SampleState {
     static var loads = 0
 
     static func crash(_ why: String) -> Never { fatalError(why) }
+
+    static func seed() -> String {
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        try? "hello from the sample\n".write(to: documents.appendingPathComponent("note.txt"), atomically: true, encoding: .utf8)
+        var database: OpaquePointer?
+        sqlite3_open(documents.appendingPathComponent("sample.sqlite").path, &database)
+        sqlite3_exec(database, "CREATE TABLE IF NOT EXISTS items(name TEXT, token TEXT); DELETE FROM items; " +
+                     "INSERT INTO items VALUES ('first', 'abc123'), ('second', 'def456');", nil, nil, nil)
+        sqlite3_close(database)
+        let item: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "dev.agentddp.sample",
+                                   kSecAttrAccount as String: "demo-user", kSecValueData as String: Data("not shown".utf8)]
+        SecItemDelete(item as CFDictionary)
+        let added = SecItemAdd(item as CFDictionary, nil)
+        return added == errSecSuccess ? "seeded" : "seeded, but the Keychain said \(added)"
+    }
 }
 
 /// A still screen with a view that redraws every frame without changing anything ddp reads, like a looping Lottie.

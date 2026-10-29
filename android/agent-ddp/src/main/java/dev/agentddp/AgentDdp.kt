@@ -31,6 +31,7 @@ class AgentDdpStarter : ContentProvider() {
         val application = context!!.applicationContext as Application
         FrameRecorder.start(application)
         History.start(application)
+        Storage.start(application)
         ControlServer.start(application)
         return true
     }

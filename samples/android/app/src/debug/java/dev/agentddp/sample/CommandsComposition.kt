@@ -4,6 +4,12 @@ import dev.agentddp.AgentDdpCommands
 import dev.agentddp.AgentDdpEvents
 import dev.agentddp.AgentDdpState
 import android.os.Handler
+import android.content.Context
+import android.database.sqlite.SQLiteDatabase
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import javax.crypto.KeyGenerator
+import java.io.File
 import android.os.Looper
 
 /** The sample's own values for `ddp state`: a mode an agent can set, and how many loads ran. */
@@ -13,7 +19,20 @@ object SampleState {
 }
 
 /** Debug: what an agent can ask the sample to do (`app.commands`, `app.run`) and read (`state.*`). */
-fun addSampleCommands() {
+fun addSampleCommands(context: Context) {
+    // For `ddp storage`: a database, a text file and a Keystore key to read.
+    AgentDdpCommands.add("seed") {
+        File(context.filesDir, "note.txt").writeText("hello from the sample\n")
+        SQLiteDatabase.openOrCreateDatabase(context.getDatabasePath("sample.db").apply { parentFile?.mkdirs() }, null).use { db ->
+            db.execSQL("CREATE TABLE IF NOT EXISTS items(name TEXT, token TEXT)")
+            db.execSQL("DELETE FROM items")
+            db.execSQL("INSERT INTO items VALUES ('first', 'abc123'), ('second', 'def456')")
+        }
+        KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").apply {
+            init(KeyGenParameterSpec.Builder("demo-key", KeyProperties.PURPOSE_ENCRYPT).build())
+        }.generateKey()
+        "seeded"
+    }
     AgentDdpCommands.add("load") {
         SampleNetwork.load().also { answer ->
             SampleState.loads++

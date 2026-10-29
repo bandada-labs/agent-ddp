@@ -112,6 +112,11 @@ internal class ControlSession(private val app: ControlApp, private val send: (St
             JSONObject().put("received", JSONArray(names.filter { it in extras }))
         },
         "perf.metrics" to Perf::measure,
+        "storage.files" to Storage::files,
+        "storage.read" to Storage::read,
+        "storage.remove" to Storage::remove,
+        "storage.query" to Storage::query,
+        "storage.keys" to { _ -> Storage.keys() },
         "state.list" to { _ -> AgentDdpState.list() },
         "state.get" to AgentDdpState::get,
         "state.set" to AgentDdpState::set,
