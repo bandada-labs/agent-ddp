@@ -11,10 +11,17 @@ import kotlin.math.ceil
 
 /**
  * `perf.metrics`: how the app runs for a while, from the platform's own clocks. Refreshes the main thread missed come
- * from Choreographer's vsync times, as on iOS from CADisplayLink's, so both platforms count the same thing. Draw
- * time per drawn frame comes from FrameMetrics. History captures nothing meanwhile, so its cost is not counted.
+ * from Choreographer's vsync times, as on iOS from CADisplayLink's, so both platforms count the same thing. The work
+ * per drawn frame comes from FrameMetrics: input, animation, layout, draw, sync and commands, the app's own share.
+ * Not TOTAL_DURATION, which adds the wait for the GPU and the buffer queue: a pipelined frame can take longer than a
+ * refresh with nothing missed (every frame on an emulator, which draws in software). History captures nothing
+ * meanwhile, so its cost is not counted.
  */
 internal object Perf {
+    private val WORK = listOf(FrameMetrics.INPUT_HANDLING_DURATION, FrameMetrics.ANIMATION_DURATION,
+        FrameMetrics.LAYOUT_MEASURE_DURATION, FrameMetrics.DRAW_DURATION, FrameMetrics.SYNC_DURATION,
+        FrameMetrics.COMMAND_ISSUE_DURATION)
+
     fun measure(params: JSONObject): JSONObject {
         val ms = params.optLong("ms", 5000).coerceIn(100, 60_000)
         val window = onMain { FrameRecorder.resumedActivity?.window } ?: throw IllegalStateException("No activity in front")
@@ -28,7 +35,8 @@ internal object Perf {
         val draws = mutableListOf<Double>()
         val metricsThread = HandlerThread("agentddp-perf").apply { start() }
         val metrics = Window.OnFrameMetricsAvailableListener { _, frame, _ ->
-            synchronized(draws) { draws += frame.getMetric(FrameMetrics.TOTAL_DURATION) / 1e6 }
+            val work = WORK.sumOf { frame.getMetric(it) } / 1e6
+            synchronized(draws) { draws += work }
         }
         var running = true
         val tick = object : Choreographer.FrameCallback {

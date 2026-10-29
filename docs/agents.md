@@ -205,11 +205,11 @@ OUTSIDE trapOutside: outside its parent (UIView bounds), no point of it takes a 
 
 ### perf
 
-`perf` measures for `--for` (default 5s) whatever is on screen, from the platform's own clocks, without a recording. Both platforms count the refreshes the main thread missed from their vsync callbacks (Choreographer, CADisplayLink): a gap of two refresh periods is one missed. Android adds the draw time of each frame it drew (FrameMetrics: mean, p95, how many took longer than a refresh); iOS gives an app no draw time, so it says not measured. A still screen draws nothing on Android: `no frame drawn` is not a problem. History captures nothing during the measure, so ddp's own cost is not in it. A measurement: it exits 0.
+`perf` measures for `--for` (default 5s) whatever is on screen, from the platform's own clocks, without a recording. Both platforms count the refreshes the main thread missed from their vsync callbacks (Choreographer, CADisplayLink): a gap of two refresh periods is one missed. Android adds the app's work for each frame it drew (FrameMetrics: input, animation, layout, draw, sync and commands; mean, p95, how many took longer than a refresh). It leaves out the wait for the GPU and the buffer queue, so a pipelined frame, or an emulator drawing in software, is not counted as slow. iOS gives an app no such time, so it says not measured. A still screen draws nothing on Android: `no frame drawn` is not a problem. History captures nothing during the measure, so ddp's own cost is not in it. A measurement: it exits 0.
 
 ```
 $ ddp perf --for 3s
-3.0s: the main thread missed 12 of 178 refreshes (16.67 ms each), worst gap 217.07 ms; draw time not measured (iOS gives an app none)
+3.0s: the main thread missed 12 of 178 refreshes (16.67 ms each), worst gap 217.07 ms; work per frame not measured (iOS gives an app none)
 ```
 
 ### crash

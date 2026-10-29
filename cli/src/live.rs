@@ -983,10 +983,10 @@ pub fn perf(args: &mut Args) -> Result<i32> {
         py::str(&answer["worstGapMs"])
     );
     match answer["drawn"].as_u64() {
-        None => line.push_str("; draw time not measured (iOS gives an app none)"),
+        None => line.push_str("; work per frame not measured (iOS gives an app none)"),
         Some(0) => line.push_str("; no frame drawn (nothing changed on screen)"),
         Some(drawn) => line.push_str(&format!(
-            "; {drawn} frames drawn, draw time mean {} ms, p95 {} ms, {} over a refresh",
+            "; {drawn} frames drawn, the app's work per frame mean {} ms, p95 {} ms, {} over a refresh",
             py::str(&answer["drawMeanMs"]),
             py::str(&answer["drawP95Ms"]),
             py::str(&answer["drawnOverRefresh"])

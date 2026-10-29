@@ -727,7 +727,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert ddp_in(directory, "storage", "read").returncode == 1
     perf = ddp_in(directory, "perf", "--for", "1s")
     assert perf.returncode == 0 and perf.stdout == "1.0s: the main thread missed 3 of 59 refreshes (16.67 ms each), worst gap 66.7 ms; " \
-        "20 frames drawn, draw time mean 6.1 ms, p95 12.4 ms, 1 over a refresh\n", perf.stdout + perf.stderr
+        "20 frames drawn, the app's work per frame mean 6.1 ms, p95 12.4 ms, 1 over a refresh\n", perf.stdout + perf.stderr
     # App events: the kept ones, a filter, and a follow that ends with --for.
     events = ddp_in(directory, "events").stdout
     assert "rule event=save:expenses spent=120" in events and "sync ok=true" in events, events
