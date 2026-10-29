@@ -50,7 +50,11 @@ final class AppLog {
             seenAtLastDate = []
         }
         seenAtLastDate.insert(key(entry))
-        send(Self.logEntry(level: entry.level, category: entry.category, message: entry.composedMessage, date: entry.date))
+        var line = Self.logEntry(level: entry.level, category: entry.category, message: entry.composedMessage, date: entry.date)
+        // Where the line came from: its subsystem and the library that wrote it, for `ddp logs --follow --source`.
+        if !entry.subsystem.isEmpty { line["subsystem"] = entry.subsystem }
+        if !entry.sender.isEmpty { line["sender"] = entry.sender }
+        send(line)
     }
 
     /// Lines the library makes the system write: its own control connections (Network.framework), the accessibility

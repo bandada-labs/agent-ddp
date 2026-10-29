@@ -67,6 +67,7 @@ pub struct Args {
     pub error: Option<String>,
     pub key: Option<String>,
     pub follow: bool,
+    pub source: bool,
     pub force: bool,
     pub reset: bool,
     pub structure: bool,
@@ -266,6 +267,7 @@ pub fn parser() -> Command {
             .arg(many("ignore", "--settled: elements that never stop (a spinner, a clock) and should not count")))
         .subcommand(file(device_options(sub("logs", "the app's log lines during the last take, at their time in it")
             .arg(flag("follow", "live: the last 100 lines, then each new one"))
+            .arg(flag("source", "--follow: where each line came from (iOS: subsystem and library)"))
             .arg(opt("for", "--follow: stop after this long").id("duration"))
             .arg(opt("grep", "only lines holding this text"))
             .arg(opt("limit", "at most this many lines").value_parser(clap::value_parser!(usize)).default_value("50")))))
@@ -471,6 +473,7 @@ pub fn parse(argv: &[String]) -> Result<Args, clap::Error> {
         error: string(m, "error"),
         key: string(m, "key"),
         follow: boolean(m, "follow"),
+        source: boolean(m, "source"),
         force: boolean(m, "force"),
         reset: boolean(m, "reset"),
         structure: boolean(m, "structure"),

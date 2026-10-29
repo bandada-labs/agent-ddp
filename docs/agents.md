@@ -44,7 +44,7 @@ ddp prefs [list | set <key> <value> | rm <key> | clear | files] [--in <suite or 
 ddp run [<command> ['<params JSON>']]              run a command the app added in Debug; no name lists them
 ddp wait id <id> | text <label> | --settled 300ms [--ignore <el>] [--timeout 10s]
 ddp logs [--grep <text>]                           app log lines during the last take, at their time in it
-ddp logs --follow [--for 10s] [--grep <text>]      the last 100 lines, then each new one
+ddp logs --follow [--for 10s] [--grep <text>] [--source]   the last 100 lines, then each new one; --source: subsystem and library (iOS)
 ddp set appearance dark | text-size large | reduce-motion on | locale es-ES | location 4.71,-74.07 | orientation landscape
 ddp biometric enroll | match | fail                Face ID on the simulator, a fingerprint on the emulator
 ddp push <payload.json>                            iOS: a push as APNs would deliver it

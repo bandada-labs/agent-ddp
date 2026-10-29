@@ -939,7 +939,18 @@ pub fn follow_logs(args: &Args) -> Result<i32> {
             continue;
         }
         let time = state::local_time("%H:%M:%S", f(&entry["t"]) / 1000.0);
-        say!("{time} {} {} {text}", py::str(&entry["level"]), py::str(&entry["tag"]));
+        let source = if args.source {
+            let parts: Vec<String> =
+                ["subsystem", "sender"].iter().filter_map(|key| entry.get(*key).map(py::str)).collect();
+            if parts.is_empty() {
+                String::new()
+            } else {
+                format!(" [{}]", parts.join(" "))
+            }
+        } else {
+            String::new()
+        };
+        say!("{time} {} {}{source} {text}", py::str(&entry["level"]), py::str(&entry["tag"]));
     }
     control.close();
     Ok(0)
