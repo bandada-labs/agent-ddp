@@ -25,6 +25,7 @@ Coordinates are window coordinates in the platform's unit, the same as in frames
 | `app.info` | | `protocol` (2), `platform`, `app` (bundle id or package), `name`, `unit`, `scale` |
 | `app.commands` | | `commands`: the names the app added with `AgentDDP.command` (iOS) or `AgentDdpCommands.add` (Android) |
 | `app.run` | `name`, `params` (object) | `value`: what the command returned, any JSON value. Commands are the app's own Swift or Kotlin code (log in a test user, reset state, open a screen) and run off the main thread |
+| `app.launch` | `names` (array) | `received`: the names the app was started with, as the platform gave them: environment variables on iOS, extras of the running activity's intent on Android. Never the values. `ddp launch --env` asks it |
 | `state.list` | | `values`: `[{name, writable}]`, the values the app added with `AgentDDP.state` (iOS) or `AgentDdpState.add` (Android); `writable` when it gave a setter |
 | `state.get` | `names` (array, optional: all) | `values`: `{name: value}`, any JSON value, read on the main thread. An unknown name or a value that is not JSON is an error |
 | `events.list` | | `events`: the last 200 the app sent with `AgentDDP.event` (iOS) or `AgentDdpEvents.send` (Android), oldest first: `{t, name, fields}`, `t` in ms since 1970. Each is also written to History as an `event` line with `kind: "app"`, `name` and `fields` |

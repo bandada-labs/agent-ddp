@@ -104,6 +104,13 @@ internal class ControlSession(private val app: ControlApp, private val send: (St
         "app.info" to { _ -> Control.info(app) },
         "app.commands" to { _ -> JSONObject().put("commands", JSONArray(AgentDdpCommands.names())) },
         "app.run" to AgentDdpCommands::run,
+        // Which of these names the app was started with, as the platform gave them: the running activity's intent extras
+        // (ddp launch --env). Never the values.
+        "app.launch" to { params ->
+            val names = params.optJSONArray("names")?.let { array -> List(array.length()) { array.getString(it) } }.orEmpty()
+            val extras = onMain { FrameRecorder.resumedActivity?.intent?.extras?.keySet().orEmpty() }
+            JSONObject().put("received", JSONArray(names.filter { it in extras }))
+        },
         "state.list" to { _ -> AgentDdpState.list() },
         "state.get" to AgentDdpState::get,
         "state.set" to AgentDdpState::set,

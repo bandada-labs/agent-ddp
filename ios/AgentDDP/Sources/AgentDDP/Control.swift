@@ -128,6 +128,11 @@ final class ControlSession {
     private lazy var methods: [String: ([String: Any]) throws -> Any] = [
         "app.info": { [app] _ in Control.info(app) },
         "app.commands": { _ in ["commands": Commands.shared.names()] },
+        // Which of these names the app was started with, as the platform gave them (ddp launch --env). Never the values.
+        "app.launch": { params in
+            let environment = ProcessInfo.processInfo.environment
+            return ["received": (params["names"] as? [String] ?? []).filter { environment[$0] != nil }]
+        },
         "state.list": { _ in AppState.shared.list() },
         "state.get": { try AppState.shared.get($0) },
         "state.set": { try AppState.shared.set($0) },

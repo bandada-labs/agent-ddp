@@ -237,11 +237,21 @@ pub fn launch(args: &mut Args) -> Result<i32> {
             Err(_) => std::thread::sleep(Duration::from_millis(250)),
         }
     };
-    let given = values.iter().map(|(key, _)| key.as_str()).collect::<Vec<_>>().join(", ");
-    say!(
-        "launched {app} on {platform} {device}{}",
-        if given.is_empty() { String::new() } else { format!(" with {given}") }
-    );
+    say!("launched {app} on {platform} {device}");
+    if !values.is_empty() {
+        let names: Vec<&str> = values.iter().map(|(key, _)| key.as_str()).collect();
+        // The platform's answer, not ddp's: what the app process was given. A library before app.launch says nothing.
+        if let Ok(answer) = open(&session).and_then(|mut control| control.call("app.launch", json!({"names": names}))) {
+            let received: Vec<String> = answer["received"].as_array().into_iter().flatten().map(py::str).collect();
+            let missing: Vec<&str> = names.iter().copied().filter(|name| !received.iter().any(|r| r == name)).collect();
+            if !received.is_empty() {
+                say!("app received {}", received.join(", "));
+            }
+            if !missing.is_empty() {
+                warn!("ddp: warning: the app did not receive {}", missing.join(", "));
+            }
+        }
+    }
     keep_session(&session, &snapshot)
 }
 
