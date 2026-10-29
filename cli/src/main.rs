@@ -70,6 +70,7 @@ fn handler(command: &str) -> fn(&mut Args) -> Result<i32> {
         "set" => device::settings,
         "biometric" => device::biometric,
         "back" => device::back,
+        "audits" => device::audits,
         "background" => device::background,
         "push" => device::push,
         "job" => device::job,

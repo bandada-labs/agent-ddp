@@ -109,7 +109,7 @@ const MCP_PROFILES: [(&str, &[&str]); 3] = [
             "background",
         ],
     ),
-    ("checks", &["check", "baseline", "diff", "compare"]),
+    ("checks", &["check", "baseline", "diff", "compare", "audits"]),
 ];
 
 /// A Model Context Protocol server on stdin/stdout: each ddp command is a tool taking the command's

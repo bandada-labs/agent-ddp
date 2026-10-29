@@ -39,6 +39,14 @@ fun addSampleCommands(context: Context) {
             AgentDdpEvents.send("loaded", mapOf("loads" to SampleState.loads, "answer" to answer))
         }
     }
+    // For `ddp audits`: StrictMode on, logging only, then a disk read on the main thread it reports.
+    AgentDdpCommands.add("warn") {
+        Handler(Looper.getMainLooper()).post {
+            android.os.StrictMode.setThreadPolicy(android.os.StrictMode.ThreadPolicy.Builder().detectDiskReads().penaltyLog().build())
+            File(context.filesDir, "note.txt").exists().also { File(context.filesDir, "probe").readBytesOrNull() }
+        }
+        null
+    }
     // For `ddp perf`: the main thread busy for 200 ms, about 11 refreshes missed at 60 Hz.
     AgentDdpCommands.add("jank") {
         Handler(Looper.getMainLooper()).post { Thread.sleep(200) }
@@ -52,3 +60,5 @@ fun addSampleCommands(context: Context) {
     AgentDdpState.add("mode", get = { SampleState.mode }, set = { SampleState.mode = it as? String ?: SampleState.mode })
     AgentDdpState.add("loads", get = { SampleState.loads })
 }
+
+private fun File.readBytesOrNull(): ByteArray? = runCatching { readBytes() }.getOrNull()

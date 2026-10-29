@@ -4,6 +4,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 
 ## Unreleased
 
+- `ddp audits [--since 5m]`: the runtime warnings the platform wrote in the app's log (SwiftUI and AttributeGraph issues, Auto Layout conflicts, Main Thread Checker; StrictMode, skipped frames, leaked windows), exit 1 when there is one. The samples get a `warn` command.
 - `ddp back` (the Back key, or iOS's edge swipe) and `ddp background --for 2s` (leave the app and come back). History records `background` and `foreground` from the platform's notifications. `app.info` adds `screen`.
 - Device actions with each platform's own tool: `ddp set location` and `set orientation` (Android), `ddp biometric enroll|match|fail`, `ddp push` (iOS, `simctl push`) and `ddp job` (Android, JobScheduler). What a platform cannot do from the host is refused with the reason.
 - The new commands work like the old ones for agents: `--json` on `state`, `events`, `storage`, `perf` and `media`; `@eN` refs for both places of `swipe` and `drag`; and the MCP server offers them (`launch` and `swipe` in `core`, the rest in `live`, `compare` in `checks`).

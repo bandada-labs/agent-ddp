@@ -293,6 +293,8 @@ pub fn parser() -> Command {
                                       Android: small|default|large|largest or a factor); reduce-motion on|off; locale es-ES; \
                                       location LAT,LON; orientation portrait|landscape (Android)")
                 .required(true))))
+        .subcommand(device_options(sub("audits", "runtime warnings the platform wrote in the app's log (SwiftUI, Auto Layout, StrictMode)")
+            .arg(opt("since", "how far back (default 5m)").default_value("5m"))))
         .subcommand(device_options(sub("back", "go back: the Back key on Android, the edge swipe on iOS")))
         .subcommand(device_options(sub("background", "send the app to the background for a while, then bring it back")
             .arg(opt("for", "how long in the background (default 2s)").id("duration"))))

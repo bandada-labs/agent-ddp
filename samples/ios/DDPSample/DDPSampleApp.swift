@@ -22,6 +22,19 @@ struct DDPSampleApp: App {
             AgentDDP.event("loaded", ["loads": loads, "answer": answer])
             return answer
         }
+        // For `ddp audits`: two widths that cannot both hold, which UIKit reports in the log.
+        AgentDDP.command("warn") { _ in
+            await MainActor.run {
+                guard let window = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first else { return }
+                let view = UIView()
+                view.translatesAutoresizingMaskIntoConstraints = false
+                window.addSubview(view)
+                NSLayoutConstraint.activate([view.widthAnchor.constraint(equalToConstant: 10), view.widthAnchor.constraint(equalToConstant: 20)])
+                window.layoutIfNeeded()
+                view.removeFromSuperview()
+            }
+            return nil
+        }
         // For `ddp storage`: a database, a text file and a Keychain item to read.
         AgentDDP.command("seed") { _ in SampleState.seed() }
         // For `ddp perf`: the main thread busy for 200 ms, about 11 refreshes missed at 60 Hz.

@@ -261,13 +261,7 @@ pub fn logs(args: &mut Args) -> Result<i32> {
     };
     let mut lines: Vec<(f64, String)> = Vec::new();
     if platform == "ios" {
-        let info = state::run(&["xcrun", "simctl", "appinfo", &device, &app])?;
-        let executable = info
-            .lines()
-            .find(|l| l.contains("CFBundleExecutable"))
-            .and_then(|l| l.split_once('='))
-            .map(|(_, v)| v.trim().trim_matches(|c| c == '"' || c == ';').to_string())
-            .unwrap_or_else(|| app.rsplit('.').next().unwrap_or(&app).to_string());
+        let executable = ios_executable(&device, &app)?;
         let start_text = state::local_time("%Y-%m-%d %H:%M:%S", started / 1000.0 - 1.0);
         let output = state::run(&[
             "xcrun",
@@ -496,6 +490,100 @@ pub fn background(args: &mut Args) -> Result<i32> {
     }
     say!("{app} was in the background for {}ms and is back; ddp history shows what it did", ms as u64);
     Ok(0)
+}
+
+/// The app's executable name on the simulator, which its log lines carry as the process.
+fn ios_executable(device: &str, app: &str) -> Result<String> {
+    let info = state::run(&["xcrun", "simctl", "appinfo", device, app])?;
+    Ok(info
+        .lines()
+        .find(|l| l.contains("CFBundleExecutable"))
+        .and_then(|l| l.split_once('='))
+        .map(|(_, v)| v.trim().trim_matches(|c| c == '"' || c == ';').to_string())
+        .unwrap_or_else(|| app.rsplit('.').next().unwrap_or(app).to_string()))
+}
+
+/// What the platform itself warns about in the app's log: its words, not ddp's judgment, so a line here is a warning
+/// the platform gave. iOS: SwiftUI and AttributeGraph runtime issues, Auto Layout conflicts, Main Thread Checker.
+/// Android: StrictMode violations, skipped frames, leaked windows.
+const IOS_AUDITS: [&str; 6] = [
+    "Publishing changes from within view updates",
+    "Modifying state during view update",
+    "AttributeGraph: cycle detected",
+    "Unable to simultaneously satisfy constraints",
+    "Main Thread Checker",
+    "was mutated while being enumerated",
+];
+const ANDROID_AUDITS: [&str; 4] =
+    ["StrictMode policy violation", "Skipped ", "has leaked window", "A resource failed to call"];
+
+pub fn audits(args: &mut Args) -> Result<i32> {
+    let (platform, device, app) = target(args)?;
+    let Some(app) = app else { fail!("no app", "missing_option", "pass --app, or ddp connect first") };
+    let since = args.since.clone();
+    crate::state::parse_ms(&since)?;
+    let found: Vec<String> = if platform == "ios" {
+        let executable = ios_executable(&device, &app)?;
+        let matches: Vec<String> = IOS_AUDITS.iter().map(|text| format!("eventMessage CONTAINS \"{text}\"")).collect();
+        let predicate = format!("process == \"{executable}\" AND ({})", matches.join(" OR "));
+        let output = state::run(&[
+            "xcrun",
+            "simctl",
+            "spawn",
+            &device,
+            "log",
+            "show",
+            "--style",
+            "compact",
+            "--last",
+            &since,
+            "--predicate",
+            &predicate,
+        ])?;
+        output
+            .lines()
+            .filter(|line| IOS_AUDITS.iter().any(|text| line.contains(text)))
+            .map(|line| line.trim().to_string())
+            .collect()
+    } else {
+        let pid = adb(&device, &["shell", "pidof", &app])?.stdout.trim().to_string();
+        if pid.is_empty() {
+            fail!(format!("{app} is not running"), "not_running", format!("ddp launch {device} --app {app}"));
+        }
+        let seconds = crate::state::parse_ms(&since)? / 1000.0;
+        let output = adb(
+            &device,
+            &[
+                "logcat",
+                "-d",
+                "-v",
+                "epoch",
+                &format!("--pid={pid}"),
+                "-T",
+                &format!("{:.0}", state::now_ms() / 1000.0 - seconds),
+            ],
+        )?
+        .stdout;
+        // Skipped frames is Choreographer's line; elsewhere "Skipped" can be anything.
+        output
+            .lines()
+            .filter(|line| {
+                ANDROID_AUDITS.iter().any(|text| line.contains(text))
+                    && (!line.contains("Skipped ") || line.contains("Choreographer"))
+            })
+            .map(|line| line.trim().to_string())
+            .collect()
+    };
+    if found.is_empty() {
+        say!("no runtime warning from the platform in the last {since}");
+        return Ok(0);
+    }
+    let shown = 30;
+    found.iter().take(shown).for_each(|line| say!("WARNING {line}"));
+    if found.len() > shown {
+        say!("... {} more", found.len() - shown);
+    }
+    Ok(1)
 }
 
 /// `LAT,LON` as two numbers in range.
