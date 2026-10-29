@@ -268,8 +268,7 @@ fn doctor_checks(platform: &str, device: &str, app: &str) -> Result<Vec<Step>> {
         steps.push((
             endpoint.is_some(),
             "control endpoint written by AgentDDP.start()".into(),
-            "launch the app (xcrun simctl launch); it must be a Debug build that calls AgentDDP.start() at launch"
-                .into(),
+            format!("ddp launch {device} --app {app} (a Debug build that calls AgentDDP.start() at launch)"),
         ));
         let Some(endpoint) = endpoint else {
             if older_library("ios", device, app) {
@@ -308,7 +307,7 @@ fn doctor_checks(platform: &str, device: &str, app: &str) -> Result<Vec<Step>> {
             "add debugImplementation(project(\":agent-ddp\")) and reinstall".into(),
         ));
         let running = capture(&adb, &["-s", device, "shell", "pidof", app]).stdout.trim().to_string();
-        steps.push((!running.is_empty(), "app running".into(), format!("adb -s {device} shell monkey -p {app} 1")));
+        steps.push((!running.is_empty(), "app running".into(), format!("ddp launch {device} --app {app}")));
         if running.is_empty() {
             return Ok(steps);
         }

@@ -178,10 +178,109 @@ pub fn connect(args: &mut Args) -> Result<i32> {
     let device = args.device.clone().unwrap_or_default();
     let app = args.app.clone().unwrap_or_default();
     let platform = platform_of(args.platform.as_deref(), &device);
+    let (session, snapshot) = attach(&platform, &device, &app)?;
+    keep_session(&session, &snapshot)
+}
+
+/// `ddp launch`: the app started fresh (a running copy is stopped first), with values for it, then connected.
+/// iOS gets them as environment variables, Android as string extras of the launch intent: Android has no
+/// per-launch environment for an app.
+pub fn launch(args: &mut Args) -> Result<i32> {
+    let device = args.device.clone().unwrap_or_default();
+    let app = args.app.clone().unwrap_or_default();
+    let platform = platform_of(args.platform.as_deref(), &device);
+    let values = args
+        .env
+        .iter()
+        .map(|pair| match pair.split_once('=') {
+            Some((key, value)) if !key.is_empty() => Ok((key.to_string(), value.to_string())),
+            _ => Err(failure(
+                format!("--env takes KEY=VALUE, not '{pair}'"),
+                "bad_value",
+                Some("--env API_URL=http://10.0.2.2:8080"),
+            )),
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let started = if platform == "ios" {
+        let mut command = Command::new("xcrun");
+        command.args(["simctl", "launch", "--terminate-running-process", &device, &app]);
+        command.envs(values.iter().map(|(key, value)| (format!("SIMCTL_CHILD_{key}"), value)));
+        command.output()
+    } else {
+        let component = launcher_activity(&device, &app)?;
+        let mut command = vec!["-s".to_string(), device.clone(), "shell".into(), "am start -S -W -n".into(), component];
+        for (key, value) in &values {
+            // adb shell joins its arguments into one line for the device's shell.
+            command.extend(["--es".into(), shell_quoted(key), shell_quoted(value)]);
+        }
+        Command::new(adb_path()?).args(&command).output()
+    }
+    .map_err(|e| failure(e.to_string(), "command_failed", None))?;
+    let said = String::from_utf8_lossy(&started.stdout).into_owned() + &String::from_utf8_lossy(&started.stderr);
+    if !started.status.success() || said.contains("Error") {
+        fail!(
+            format!("could not launch {app}: {}", said.trim()),
+            "launch_failed",
+            format!("ddp doctor {device} --app {app}")
+        );
+    }
+    // The old run's endpoint may still be on disk: wait until the new run's answers.
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let (session, snapshot) = loop {
+        match attach(&platform, &device, &app) {
+            Ok(attached) => break attached,
+            Err(failure) if Instant::now() >= deadline => return Err(failure),
+            Err(_) => std::thread::sleep(Duration::from_millis(250)),
+        }
+    };
+    let given = values.iter().map(|(key, _)| key.as_str()).collect::<Vec<_>>().join(", ");
+    say!(
+        "launched {app} on {platform} {device}{}",
+        if given.is_empty() { String::new() } else { format!(" with {given}") }
+    );
+    keep_session(&session, &snapshot)
+}
+
+/// The app's launcher activity, as the package manager resolves it (`monkey` does not start every app).
+fn launcher_activity(device: &str, app: &str) -> Result<String> {
+    let resolved = capture(
+        &adb_path()?,
+        &[
+            "-s",
+            device,
+            "shell",
+            "cmd",
+            "package",
+            "resolve-activity",
+            "--brief",
+            "-a",
+            "android.intent.action.MAIN",
+            "-c",
+            "android.intent.category.LAUNCHER",
+            app,
+        ],
+    );
+    match resolved.stdout.lines().map(str::trim).rfind(|line| line.contains('/')) {
+        Some(component) if resolved.code == 0 => Ok(component.to_string()),
+        _ => fail!(
+            format!("{app} has no launcher activity on {device}"),
+            "not_installed",
+            format!("ddp doctor {device} --app {app}")
+        ),
+    }
+}
+
+/// One argument for a POSIX shell, in single quotes.
+fn shell_quoted(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "'\\''"))
+}
+
+/// The session for the app's control endpoint, and what is on screen, when it answers.
+fn attach(platform: &str, device: &str, app: &str) -> Result<(Value, Vec<Value>)> {
     let session = if platform == "ios" {
-        let endpoint_file = Path::new(&model::app_container(&device, &app)?).join(IOS_DIR).join("control.json");
+        let endpoint_file = Path::new(&model::app_container(device, app)?).join(IOS_DIR).join("control.json");
         let Some(endpoint) = read_json(&endpoint_file) else {
-            if older_library(&platform, &device, &app) {
+            if older_library(platform, device, app) {
                 return Err(library_too_old());
             }
             fail!(
@@ -192,7 +291,7 @@ pub fn connect(args: &mut Args) -> Result<i32> {
         };
         json!({"platform": "ios", "app": app, "device": device, "port": endpoint["port"]})
     } else {
-        let forwarded = capture(&adb_path()?, &["-s", &device, "forward", "tcp:0", &android_socket(&app)]);
+        let forwarded = capture(&adb_path()?, &["-s", device, "forward", "tcp:0", &android_socket(app)]);
         if forwarded.code != 0 {
             fail!(
                 format!("adb forward failed: {}", forwarded.stderr.trim()),
@@ -205,10 +304,22 @@ pub fn connect(args: &mut Args) -> Result<i32> {
     };
     let snapshot = match snapshot_messages(&session) {
         Ok(snapshot) => snapshot,
-        Err(_) if older_library(&platform, &device, &app) => return Err(library_too_old()),
-        Err(failure) => return Err(failure),
+        Err(failure) => {
+            if platform == "android" {
+                // A retry from `launch` forwards again: leave no forward behind for the run that did not answer.
+                let port = py::str(&session["port"]);
+                capture(&adb_path()?, &["-s", device, "forward", "--remove", &format!("tcp:{port}")]);
+            }
+            return Err(if older_library(platform, device, app) { library_too_old() } else { failure });
+        }
     };
-    write_file(&ctx().session_file, py::dumps(&session))?;
+    Ok((session, snapshot))
+}
+
+fn keep_session(session: &Value, snapshot: &[Value]) -> Result<i32> {
+    write_file(&ctx().session_file, py::dumps(session))?;
+    let (app, platform, device) =
+        (py::str(&session["app"]), py::str(&session["platform"]), py::str(&session["device"]));
     let frame = snapshot.iter().find(|m| m["type"] == "frame").cloned().unwrap_or(json!({"elements": [], "nodes": []}));
     let count = |field: &str| frame[field].as_array().map(Vec::len).unwrap_or(0);
     say!(
@@ -705,4 +816,15 @@ pub fn net_line(request: &Value) -> String {
         py::str(&request["responseBytes"]),
         py::str(&request["url"])
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shell_quoted;
+
+    #[test]
+    fn a_value_reaches_the_device_shell_as_one_argument() {
+        assert_eq!(shell_quoted("http://10.0.2.2:8080/a b"), "'http://10.0.2.2:8080/a b'");
+        assert_eq!(shell_quoted("it's; rm -rf /"), "'it'\\''s; rm -rf /'");
+    }
 }

@@ -12,6 +12,7 @@ ddp shows what a Debug iOS or Android app draws, frame by frame: per element its
 ```
 ddp doctor <sim UDID | adb serial> --app <id>   # once: device, app, library, endpoint, elements
 ddp connect <sim UDID | adb serial> --app <id>  # attach; every command below now runs live
+ddp launch <device> --app <id> --env MODE=demo   # start it fresh with values for it (iOS env, Android intent extras), then connect
 ddp tree -i                                      # what is on screen: elements with @refs, no paint nodes
 ddp watch @e3 --until 'border>3' --then "agent-device press id=start"
 ddp read --for 3s --then "agent-device press id=start"   # record a take, summary per element

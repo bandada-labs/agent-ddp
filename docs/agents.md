@@ -8,6 +8,7 @@ Works only in Debug builds. Release builds contain none of it.
 
 ```
 ddp connect <sim UDID | adb serial> --app <bundle or application id>
+ddp launch <device> --app <id> [--env KEY=VALUE ...]   start the app fresh with values for it, then connect
 ddp doctor [<device> --app <id>]                  what is wrong between the device and a frame, with the fix, and every engine hook's state
 ddp tree [-i] [-c] [--within <el>] [-d N]         what is on screen now, per element, with @refs
 ddp find text <part of a label> | id <id>          elements by name, with @refs
@@ -177,6 +178,10 @@ OUTSIDE trapOutside: outside its parent (UIView bounds), no point of it takes a 
 ```
 
 `PARTLY` is a control whose center is blocked while other points take a touch; `tap` uses one of those. `explore` skips the controls a touch does not reach and says why.
+
+### launch
+
+`launch` stops the app if it runs, starts it again and connects, so the next command runs live on the new run. `--env KEY=VALUE` (repeatable) puts the app in a state at start, such as a backend URL or a demo mode. iOS gets each value as an environment variable (`ProcessInfo.processInfo.environment["KEY"]`, sent as `SIMCTL_CHILD_KEY`). Android has no per-launch environment for an app, so each value is a string extra of the launch intent (`intent.getStringExtra("KEY")`). On Android it starts the launcher activity the package manager resolves (`am start -S -W -n`), not `monkey`, which does not start every app. To run app commands after it, chain them: `ddp launch $UDID --app ID --env MODE=demo && ddp run like`.
 
 ### doctor and engine hooks
 

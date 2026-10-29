@@ -73,6 +73,7 @@ pub struct Args {
     pub screen: Option<PathBuf>,
     pub max: Option<String>,
     pub max_band: Option<String>,
+    pub env: Vec<String>,
 }
 
 const ABOUT: &str = "ddp: see what a Debug iOS/Android app draws, frame by frame, live or from a recording.
@@ -80,7 +81,7 @@ const ABOUT: &str = "ddp: see what a Debug iOS/Android app draws, frame by frame
 Start here (for agents): ddp skills get core
   The guides ship with the CLI, so they always match this version. `ddp doctor` when something fails.
 
-  connect | disconnect | doctor            attach to a running Debug app; check the setup
+  connect | launch | disconnect | doctor   attach to a running Debug app, or start it fresh; check the setup
   tree | find | get | read | watch | eval  what is drawn, now or over a take (@refs from tree and find)
   record | wait | tap | type | press       take a recording, wait, touch and type
   open | set | logs | prefs | run          deep links, device settings, app logs, preferences, app commands
@@ -160,6 +161,12 @@ pub fn parser() -> Command {
             .arg(positional("device", "simulator UDID or adb serial").required(true))
             .arg(opt("app", "bundle id / application id").required(true))
             .arg(opt("platform", "default: guessed from the device id").value_parser(["ios", "android"])))
+        .subcommand(sub("launch", "start the app fresh, with values for it, then connect (live mode)")
+            .arg(positional("device", "simulator UDID or adb serial").required(true))
+            .arg(opt("app", "bundle id / application id").required(true))
+            .arg(opt("platform", "default: guessed from the device id").value_parser(["ios", "android"]))
+            .arg(Arg::new("env").long("env").num_args(1).action(ArgAction::Append).value_name("KEY=VALUE")
+                .help("a value for the app: iOS environment variable, Android launch intent string extra; repeat for more")))
         .subcommand(sub("disconnect", "forget the live session"))
         .subcommand(file(window(sub("record", "record frames (live, or offline by notification/broadcast)")
             .arg(opt("platform", "offline only").value_parser(["ios", "android"]))
@@ -367,6 +374,7 @@ pub fn parse(argv: &[String]) -> Result<Args, clap::Error> {
         screen: string(m, "screen").map(PathBuf::from),
         max: string(m, "max"),
         max_band: string(m, "max-band"),
+        env: strings(m, "env"),
         against: string(m, "against").map(PathBuf::from),
         junit: string(m, "junit").map(PathBuf::from),
         settled: string(m, "settled"),

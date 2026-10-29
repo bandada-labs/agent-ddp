@@ -42,6 +42,7 @@ fn handler(command: &str) -> fn(&mut Args) -> Result<i32> {
         "doctor" => tools::doctor,
         "batch" => tools::batch,
         "connect" => live::connect,
+        "launch" => live::launch,
         "disconnect" => live::disconnect,
         "record" => device::record,
         "watch" => live::watch,

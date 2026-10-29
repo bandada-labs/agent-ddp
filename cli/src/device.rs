@@ -293,7 +293,7 @@ pub fn logs(args: &mut Args) -> Result<i32> {
     } else {
         let pid = adb(&device, &["shell", "pidof", &app])?.stdout.trim().to_string();
         if pid.is_empty() {
-            fail!(format!("{app} is not running"), "not_running", format!("adb -s {device} shell monkey -p {app} 1"));
+            fail!(format!("{app} is not running"), "not_running", format!("ddp launch {device} --app {app}"));
         }
         let output = adb(&device, &["logcat", "-d", "-v", "epoch", &format!("--pid={pid}")])?.stdout;
         for line in output.lines() {

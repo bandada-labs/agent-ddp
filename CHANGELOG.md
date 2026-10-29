@@ -4,6 +4,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 
 ## Unreleased
 
+- `ddp launch <device> --app <id> [--env KEY=VALUE ...]`: starts the app fresh with values for it and connects. iOS gets environment variables, Android string extras of the launch intent. `doctor` and `logs` point to it when the app is not running, instead of a `monkey` line that did not start every app.
 - `ddp compare --reference a.png --screen b.png`: two saved screenshots, so both phones can be captured first and compared later with the devices off.
 - `ddp compare --max <pct>` and `--max-band <pct>`: a pass bar the caller sets on the share of pixels that differ, overall and in any one band. Over it, `compare` exits 1. Without a bar it still exits 0.
 - `ddp record` keeps the platform's answers at the end of a live take (hit test and pixels), so `check overlap`, `corners`, `a11y` and `jank` on the file judge it as they would live. Before, they said `not judged`.
