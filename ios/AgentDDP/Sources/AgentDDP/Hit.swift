@@ -10,6 +10,29 @@ import UIKit
 /// a UIKit view sits inside the element's own SwiftUI content), the point counts as reaching: `ddp tap` still sees a
 /// miss after the touch, as nothing changed. Which gesture wins once a touch is under way (a parent's tap recognizer,
 /// a `highPriorityGesture`) is decided by UIKit only during a real touch, so it is not reported either.
+/// Where the keyboard is on screen, as UIKit says it in its keyboard notifications. The keyboard draws in another
+/// process, so the app's hit test does not see it. Nil while it is hidden, or before UIKit has said anything.
+final class Keyboard {
+    static let shared = Keyboard()
+
+    // Main thread only: UIKit posts its keyboard notifications there.
+    private(set) var frame: CGRect?
+
+    func start() {
+        let center = NotificationCenter.default
+        center.addObserver(forName: UIResponder.keyboardWillChangeFrameNotification, object: nil, queue: .main) { [weak self] note in
+            let end = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
+            // A keyboard moved off the screen, or one with no height (a hardware keyboard), covers nothing.
+            self?.frame = end.flatMap { frame in
+                UIScreen.main.bounds.intersects(frame) && frame.height > 0 ? frame : nil
+            }
+        }
+        center.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.frame = nil
+        }
+    }
+}
+
 enum Hit {
     /// Every tappable element, or the one named by id or label. With `minimumTouch` (pt), a control the touch reaches
     /// over less than that, across or down, also gets `reach`.
@@ -55,6 +78,12 @@ enum Hit {
         }
         if object.accessibilityTraits.contains(.notEnabled) {
             result["reason"] = "disabled"
+        } else if let keyboard = Keyboard.shared.frame, keyboard.contains(frame) {
+            // Only all of it under the keyboard: a control partly under still has points a finger reaches.
+            result["points"] = 0
+            result["point"] = nil
+            result["reason"] = "covered"
+            result["by"] = "the keyboard"
         } else if reaching.first != points[0] {
             let (reason, by) = blocker(object, at: points[0])
             result["reason"] = reason

@@ -8,6 +8,7 @@ import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowInsets
 import android.view.WindowManager
 import android.widget.TextView
 import androidx.compose.ui.geometry.Offset
@@ -53,7 +54,21 @@ internal object Hit {
             if (name == null) element.optBoolean("tap") else element.optString("id") == name || element.optString("label") == name
         }
         if (name != null && chosen.isEmpty()) throw IllegalArgumentException("No element '$name'")
-        return JSONArray(chosen.map { check(capture.elements.getJSONObject(it), capture.targets[it], minimumTouch) })
+        val keyboard = keyboardFrame()
+        return JSONArray(chosen.map { check(capture.elements.getJSONObject(it), capture.targets[it], minimumTouch, keyboard) })
+    }
+
+    /**
+     * Where the keyboard is, in the activity window's px, as the platform says it (the IME insets, API 30 and up). The
+     * keyboard is another window, so the app's hit test does not see it. Null when it is hidden or the API cannot say.
+     */
+    private fun keyboardFrame(): RectF? {
+        if (Build.VERSION.SDK_INT < 30) return null
+        val root = FrameRecorder.resumedActivity?.window?.decorView ?: return null
+        val insets = root.rootWindowInsets ?: return null
+        if (!insets.isVisible(WindowInsets.Type.ime())) return null
+        val height = insets.getInsets(WindowInsets.Type.ime()).bottom.takeIf { it > 0 } ?: return null
+        return RectF(0f, (root.height - height).toFloat(), root.width.toFloat(), root.height.toFloat())
     }
 
     private sealed interface Taker {
@@ -65,7 +80,7 @@ internal object Hit {
         class OfCompose(val composeView: View, val nodes: List<Any>, val path: List<LayoutInfo>) : Taker
     }
 
-    private fun check(element: JSONObject, target: Target, minimumTouch: Float): JSONObject {
+    private fun check(element: JSONObject, target: Target, minimumTouch: Float, keyboard: RectF?): JSONObject {
         val frame = element.getJSONArray("frame").let { RectF(it.f(0), it.f(1), it.f(0) + it.f(2), it.f(1) + it.f(3)) }
         // The center first, then a 3 by 3 grid, so a partly covered element still gets a point that reaches it.
         val fractions = listOf(0.5f, 1f / 6, 5f / 6)
@@ -81,6 +96,11 @@ internal object Hit {
         taking.firstOrNull()?.let { result.put("point", JSONArray(listOf(round2(it.x.toDouble()), round2(it.y.toDouble())))) }
         when {
             element.optBoolean("disabled") -> result.put("reason", "disabled")
+            // Only all of it under the keyboard: a control partly under still has points a finger reaches.
+            keyboard != null && keyboard.contains(frame) -> {
+                result.put("points", 0).remove("point")
+                result.put("reason", "covered").put("by", "the keyboard")
+            }
             thief != null -> result.put("reason", "intercepted").put("by", thief)
             reaching.firstOrNull() != points[0] -> {
                 val (reason, by) = blocker(target, points[0])

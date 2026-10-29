@@ -13,6 +13,7 @@ public enum AgentDDP {
         TouchRadius.watch()
         ControlServer.shared.start(directory: FrameRecorder.shared.outputDirectory)
         History.shared.start(directory: FrameRecorder.shared.outputDirectory.appendingPathComponent("history"))
+        Keyboard.shared.start()
         #endif
     }
 

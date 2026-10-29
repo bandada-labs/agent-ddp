@@ -4,6 +4,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 
 ## Unreleased
 
+- `ddp tap` and `check tappable` see the keyboard: a control all under it, as UIKit's keyboard notifications or Android's IME insets (API 30+) place it, is `COVERED by the keyboard` instead of reaching.
 - `ddp media`: the players the platform shows (an `AVPlayerLayer` or `VideoView` on screen) with state, position, duration and rate, and the now-playing info on iOS. A player with no public way in (audio-only, Media3) is shown as an app value, with a recipe in `ddp skills get app`. New protocol method `media.list`.
 - `ios/build-swiftc.sh`: builds the iOS library as a static library and module with plain `swiftc`, for apps built without an Xcode project or SwiftPM. CI builds it, and the iOS sample app, on Xcode 15.4, the oldest Xcode supported.
 - `ddp compare --on ios,android --structure`: what the two phones draw by label, not pixels: labels only one phone has, and the same label drawn as another kind. Platform idiom no longer hides a missing tab or chip.
