@@ -22,6 +22,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.draw.CacheDrawScope
+import androidx.compose.ui.draw.DrawResult
+import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.graphics.toArgb
@@ -289,13 +292,19 @@ internal class Capture(private val density: Float) {
                 cornersOf(modifier.props["shape"], modifier.size)?.let { putCorners(paint, it) }
                 addNode(paint, modifier.frame, paintVisible, alpha, clipRound)
             }
-            // ponytail: drawBehind only (what Canvas uses). drawWithCache and drawWithContent need
-            // internal Compose scopes; add them when an app draws its animation that way.
-            modifiers.filter { it.name == "drawBehind" }.forEach { modifier ->
+            // Canvas and drawBehind, drawWithContent, drawWithCache: each lambda replayed into a recording canvas.
+            modifiers.filter { it.name in DRAW_MODIFIERS }.forEach { modifier ->
                 @Suppress("UNCHECKED_CAST")
-                val onDraw = modifier.props["onDraw"] as? DrawScope.() -> Unit ?: return@forEach
+                val ops = when (modifier.name) {
+                    "drawBehind" -> (modifier.props["onDraw"] as? DrawScope.() -> Unit)
+                        ?.let { DrawRecorder.replay(it, modifier.size, composeDensity) }
+                    "drawWithContent" -> (modifier.props["onDraw"] as? ContentDrawScope.() -> Unit)
+                        ?.let { DrawRecorder.replayContent(it, modifier.size, composeDensity) }
+                    else -> (modifier.props["onBuildDrawCache"] as? CacheDrawScope.() -> DrawResult)
+                        ?.let { DrawRecorder.replayCache(it, modifier.size, composeDensity) }
+                }
                 // The node's own clip cuts what it draws, so draws use the child clip.
-                DrawRecorder.replay(onDraw, modifier.size, composeDensity)?.forEach { op ->
+                ops?.forEach { op ->
                     val opFrame = RectF(op.bounds).apply { offset(modifier.frame.left, modifier.frame.top) }
                     val opVisible = RectF(opFrame).takeIf { it.intersect(childClip) } ?: return@forEach
                     op.points?.let { points ->
@@ -411,6 +420,9 @@ internal class Capture(private val density: Float) {
  * Hidden or internal members, looked up once: reflection lookups per node per frame cost more than the reads.
  * Null when a platform or Compose version does not have them; the recorder then reads less, it does not fail.
  */
+/** The Compose draw modifiers whose lambda the recorder replays (Capture). */
+private val DRAW_MODIFIERS = setOf("drawBehind", "drawWithContent", "drawWithCache")
+
 internal object Hidden {
     val windowManager: Triple<Any, java.lang.reflect.Method, java.lang.reflect.Method>? by lazy {
         runCatching {

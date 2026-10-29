@@ -21,5 +21,7 @@
         <activity android:name=".SpinnerActivity" android:exported="true" />
         <!-- For ddp media: a VideoView. -->
         <activity android:name=".MediaActivity" android:exported="true" />
+        <!-- For the draw recorder: drawWithContent, drawWithCache and text in a Canvas. -->
+        <activity android:name=".DrawActivity" android:exported="true" />
     </application>
 </manifest>

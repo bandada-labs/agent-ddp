@@ -23,6 +23,9 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.zIndex
@@ -54,6 +57,29 @@ class CoveredActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent { MaterialTheme { SampleScreen() } }
+    }
+}
+
+/** One shape each through drawWithContent, drawWithCache and text in a Canvas, for the draw recorder. */
+class DrawActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            val measurer = androidx.compose.ui.text.rememberTextMeasurer()
+            Column(Modifier.padding(24.dp)) {
+                Box(Modifier.testTag("withContent").size(80.dp).drawWithContent {
+                    drawContent()
+                    drawCircle(Color.Red, radius = size.minDimension / 4)
+                })
+                Box(Modifier.testTag("withCache").size(80.dp).drawWithCache {
+                    val inset = size.width / 4
+                    onDrawBehind { drawRect(Color.Blue, topLeft = Offset(inset, inset), size = size / 2f) }
+                })
+                Canvas(Modifier.testTag("canvasText").size(160.dp, 40.dp)) {
+                    drawText(measurer, "Hello")
+                }
+            }
+        }
     }
 }
 

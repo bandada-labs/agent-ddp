@@ -27,6 +27,7 @@ internal object Hooks {
         Hook("compose.zSortedChildren", "internal", "Compose draw order (LayoutNode.getZSortedChildren)"),
         Hook("compose.interopLayout", "internal", "AndroidView inside Compose (AndroidViewHolder.getLayoutNode)"),
         Hook("compose.textColor", "internal", "whether BasicText paints another color (its color producer)"),
+        Hook("compose.drawCache", "internal", "drawWithCache draws (CacheDrawScope, DrawResult.block)"),
     )
 
     private class Count(var ok: Int = 0, var failed: Int = 0, var fallback: Int = 0, var why: String? = null)

@@ -30,5 +30,6 @@ Kinds: `private` (an Apple symbol, class or selector without a public header), `
 | `compose.zSortedChildren` (`LayoutNode.getZSortedChildren`) | internal | the Compose node walk | no Compose nodes below the root | Compose UI 1.7.6 on API 29, 33 and 35 |
 | `compose.interopLayout` (`AndroidViewHolder.getLayoutNode`) | internal | an AndroidView inside Compose | its View is not reached | Compose UI 1.7.6 on API 29, 33 and 35 |
 | `compose.textColor` (BasicText's color producer) | internal | whether a text's color is known | the text is left out of pixel checks | Compose UI 1.7.6 on API 29, 33 and 35 |
+| `compose.drawCache` (`CacheDrawScope()`, `setCacheParams`, `DrawResult.getBlock`) | internal | what a `drawWithCache` lambda draws | its draws are not read; a cache that needs a graphics layer fails it too | not yet checked live |
 
 Not hooks: `drawHierarchy`, `PixelCopy`, `CADisplayLink`, Choreographer, `UIView.hitTest`, `onInterceptTouchEvent` and Compose `PointerInputModifierNode` are public API.
