@@ -13,6 +13,10 @@ use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
 const STILL_SCREEN_SLACK_MS: u64 = 500;
+/// `state watch` reads the value this often: app values have no change signal of their own.
+const STATE_POLL_MS: u64 = 50;
+/// The comparison operators a bare `--until` such as '>100' may start with.
+const QUERY_START: [&str; 6] = [">=", "<=", "!=", ">", "<", "="];
 
 /// Offline recording on an iOS simulator: a request file and a Darwin notification.
 pub struct IosDevice {
@@ -702,6 +706,95 @@ pub fn prefs(args: &mut Args) -> Result<i32> {
         }
     }
     control.close();
+    Ok(0)
+}
+
+/// Values the app added in Debug (`AgentDDP.state`, `AgentDdpState.add`): list, read, watch, and set the writable ones.
+pub fn app_state(args: &mut Args) -> Result<i32> {
+    let session = require_session()?;
+    let mut control = open(&session)?;
+    let name = || match &args.key {
+        Some(name) => Ok(name.clone()),
+        None => Err(failure("which value?", "missing_option", Some("ddp state list"))),
+    };
+    let code = match args.action.as_deref().unwrap_or("list") {
+        "get" => {
+            let name = name()?;
+            let values = control.call("state.get", json!({"names": [name]}))?;
+            say!("{name} = {}", py::str(&values["values"][&name]));
+            0
+        }
+        "set" => {
+            let name = name()?;
+            let text = args.value.clone().unwrap_or_default();
+            // 500, true and {"a": 1} keep their JSON type; anything that is not JSON is text.
+            let value = serde_json::from_str(&text).unwrap_or(Value::String(text));
+            let answer = control.call("state.set", json!({"name": name, "value": value}))?;
+            say!("{name} = {}", py::str(&answer["value"]));
+            0
+        }
+        "watch" => watch_state_values(&mut control, &name()?, args)?,
+        _ => {
+            let listed = control.call("state.list", json!({}))?;
+            let entries = listed["values"].as_array().cloned().unwrap_or_default();
+            if entries.is_empty() {
+                say!("no values: the app adds them in Debug with AgentDDP.state (iOS) or AgentDdpState.add (Android)");
+                say!("next: ddp skills get state");
+            } else {
+                let values = control.call("state.get", json!({}))?;
+                for entry in entries {
+                    let name = py::str(&entry["name"]);
+                    let writable = if entry["writable"] == json!(true) { " (writable)" } else { "" };
+                    say!("{name} = {}{writable}", py::str(&values["values"][&name]));
+                }
+            }
+            0
+        }
+    };
+    control.close();
+    Ok(code)
+}
+
+/// Reads the value until `--until` holds or `--for` ends, printing each change. 1 when `--until` was never met.
+fn watch_state_values(control: &mut Control, name: &str, args: &Args) -> Result<i32> {
+    // '>100' is about the watched value itself.
+    let until = args.until.as_deref().map(|text| {
+        let bare = QUERY_START.iter().any(|operator| text.trim_start().starts_with(operator));
+        if bare {
+            format!("{name}{}", text.trim_start())
+        } else {
+            text.to_string()
+        }
+    });
+    let clauses = until.as_deref().map(model::parse_where).transpose()?;
+    let duration = parse_ms(args.duration.as_deref().unwrap_or("10s"))?;
+    let started = Instant::now();
+    let mut previous: Option<Value> = None;
+    while (started.elapsed().as_millis() as f64) < duration {
+        let values = control.call("state.get", json!({"names": [name]}))?;
+        let value = values["values"][name].clone();
+        let t = started.elapsed().as_millis();
+        match &previous {
+            None => say!("t={t}ms {name} = {}", py::str(&value)),
+            Some(before) if !py::equal(before, &value) => {
+                say!("t={t}ms {name} {} -> {}", py::str(before), py::str(&value))
+            }
+            Some(_) => {}
+        }
+        previous = Some(value);
+        if let Some(clauses) = &clauses {
+            let fields = values["values"].as_object().cloned().unwrap_or_default();
+            if model::matches(&fields, clauses)? {
+                say!("until met at t={t}ms");
+                return Ok(0);
+            }
+        }
+        std::thread::sleep(Duration::from_millis(STATE_POLL_MS));
+    }
+    if let Some(until) = &until {
+        say!("until not met in {}: {until}", args.duration.as_deref().unwrap_or("10s"));
+        return Ok(1);
+    }
     Ok(0)
 }
 

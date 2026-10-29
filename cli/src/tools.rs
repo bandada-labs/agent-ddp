@@ -163,10 +163,11 @@ pub fn mcp(args: &mut Args) -> Result<i32> {
 }
 
 /// The guides, built in so they always match this version.
-const SKILLS: [(&str, &str); 3] = [
+const SKILLS: [(&str, &str); 4] = [
     ("core", include_str!("../../docs/skills/core.md")),
     ("explore", include_str!("../../docs/skills/explore.md")),
     ("reviewer", include_str!("../../docs/skills/reviewer.md")),
+    ("state", include_str!("../../docs/skills/state.md")),
 ];
 const REFERENCE: &str = include_str!("../../docs/agents.md");
 
@@ -316,6 +317,7 @@ fn doctor_checks(platform: &str, device: &str, app: &str) -> Result<Vec<Step>> {
     };
     let answer = snapshot_messages(&session);
     let hooks = hook_steps(&session);
+    let values = value_names(&session);
     if platform == "android" && session["port"].as_u64().unwrap_or(0) > 0 {
         capture(&adb_path()?, &["-s", device, "forward", "--remove", &format!("tcp:{}", py::str(&session["port"]))]);
     }
@@ -349,8 +351,21 @@ fn doctor_checks(platform: &str, device: &str, app: &str) -> Result<Vec<Step>> {
             "give the elements you need a testTag, text or contentDescription".into()
         },
     ));
+    if let Some(names) = values {
+        // Information, never a failure: an app may add no values at all.
+        let listed = if names.is_empty() { "none (ddp skills get state)".to_string() } else { names.join(", ") };
+        steps.push((true, format!("app values: {listed}"), String::new()));
+    }
     steps.extend(hooks);
     Ok(steps)
+}
+
+/// The values the app added for `ddp state`; None from a library before `state.list`.
+fn value_names(session: &Value) -> Option<Vec<String>> {
+    let mut control = open(session).ok()?;
+    let answer = control.call("state.list", json!({}));
+    control.close();
+    Some(answer.ok()?["values"].as_array()?.iter().map(|value| py::str(&value["name"])).collect())
 }
 
 /// One step per engine hook the library reaches outside public API (`app.hooks`), after one `screen.hit` so the hit

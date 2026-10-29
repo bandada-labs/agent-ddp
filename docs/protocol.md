@@ -25,6 +25,9 @@ Coordinates are window coordinates in the platform's unit, the same as in frames
 | `app.info` | | `protocol` (2), `platform`, `app` (bundle id or package), `name`, `unit`, `scale` |
 | `app.commands` | | `commands`: the names the app added with `AgentDDP.command` (iOS) or `AgentDdpCommands.add` (Android) |
 | `app.run` | `name`, `params` (object) | `value`: what the command returned, any JSON value. Commands are the app's own Swift or Kotlin code (log in a test user, reset state, open a screen) and run off the main thread |
+| `state.list` | | `values`: `[{name, writable}]`, the values the app added with `AgentDDP.state` (iOS) or `AgentDdpState.add` (Android); `writable` when it gave a setter |
+| `state.get` | `names` (array, optional: all) | `values`: `{name: value}`, any JSON value, read on the main thread. An unknown name or a value that is not JSON is an error |
+| `state.set` | `name`, `value` (any JSON) | `value`: what the getter reads back after the setter ran on the main thread. A value without a setter is an error |
 | `screen.elements` | | `elements`, the same shape as in a `frame` |
 | `screen.capture` | `format` png or jpeg, `quality`, `clip` `[x, y, width, height]` | `data`, base64, in device pixels. Every window of the app, dialogs included. On Android, SurfaceView and TextureView content is not drawn |
 | `screen.frame` | | One `frame` line, as in a recording: `elements` and `nodes` |

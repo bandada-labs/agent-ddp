@@ -11,7 +11,13 @@ struct DDPSampleApp: App {
         guard !CommandLine.arguments.contains("-noDDP") else { return }
         AgentDDP.start()
         AgentDDP.redact(values: [SampleNetwork.devSecret])
-        AgentDDP.command("load") { _ in await SampleNetwork.load() }
+        AgentDDP.command("load") { _ in
+            let answer = await SampleNetwork.load()
+            await MainActor.run { SampleState.loads += 1 }
+            return answer
+        }
+        AgentDDP.state("mode", get: { SampleState.mode }, set: { SampleState.mode = $0 as? String ?? SampleState.mode })
+        AgentDDP.state("loads", get: { SampleState.loads })
     }
 
     var body: some Scene {
@@ -19,6 +25,12 @@ struct DDPSampleApp: App {
             if showsSpinner { SpinnerView() } else { ContentView() }
         }
     }
+}
+
+/// The sample's own values for `ddp state`: a mode an agent can set, and how many loads ran. Main thread only.
+enum SampleState {
+    static var mode = "normal"
+    static var loads = 0
 }
 
 /// A still screen with a view that redraws every frame without changing anything ddp reads, like a looping Lottie.

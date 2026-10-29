@@ -127,6 +127,9 @@ final class ControlSession {
     private lazy var methods: [String: ([String: Any]) throws -> Any] = [
         "app.info": { [app] _ in Control.info(app) },
         "app.commands": { _ in ["commands": Commands.shared.names()] },
+        "state.list": { _ in AppState.shared.list() },
+        "state.get": { try AppState.shared.get($0) },
+        "state.set": { try AppState.shared.set($0) },
         "screen.elements": { _ in ["elements": onMain { FrameCapture.visibleWindows().flatMap(AccessibilityReader.elements(in:)) }] },
         "screen.capture": { params in try Control.capture(params) },
         "app.hooks": { _ in ["hooks": Hooks.report()] },

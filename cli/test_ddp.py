@@ -392,6 +392,8 @@ class FakeApp:
     def __init__(self):
         self.tapped_at = None
         self.typed, self.prefs, self.interceptor, self.answers = "", {}, None, {}
+        # App values: total grows by 10 on every read; mode is writable.
+        self.total, self.mode = 0, "idle"
         self.server = socket.socket()
         self.server.bind(("127.0.0.1", 0))
         self.server.listen()
@@ -502,6 +504,18 @@ class FakeApp:
                     self.prefs[params["key"]] = params["value"]
                 elif method == "prefs.remove":
                     self.prefs.pop(params["key"], None)
+                elif method == "state.list":
+                    result = {"values": [{"name": "mode", "writable": True}, {"name": "total", "writable": False}]}
+                elif method == "state.get":
+                    self.total += 10
+                    values = {"mode": self.mode, "total": self.total}
+                    result = {"values": {name: values[name] for name in params.get("names", values)}}
+                elif method == "state.set":
+                    if params["name"] != "mode":
+                        send({"id": message["id"], "error": {"code": -32000, "message": f"'{params['name']}' is read-only: the app gave no setter"}})
+                        continue
+                    self.mode = params["value"]
+                    result = {"value": self.mode}
                 elif method == "app.commands":
                     result = {"commands": ["load"]}
                 elif method == "app.run":
@@ -640,6 +654,17 @@ with tempfile.TemporaryDirectory() as directory:
     assert ddp_in(directory, "prefs").stdout == "flag = on\n"
     ddp_in(directory, "prefs", "rm", "flag")
     assert ddp_in(directory, "prefs").stdout == "no values\n"
+    # App values: list, set the writable one, refuse the read-only one, watch until a bar.
+    listed = ddp_in(directory, "state").stdout
+    assert "mode = idle (writable)" in listed and "total = " in listed and "total = 10 (writable)" not in listed, listed
+    assert ddp_in(directory, "state", "set", "mode", "demo").stdout == "mode = demo\n"
+    assert ddp_in(directory, "state", "get", "mode").stdout == "mode = demo\n"
+    refused = ddp_in(directory, "state", "set", "total", "5")
+    assert refused.returncode == 1 and "read-only" in refused.stderr, refused.stderr
+    met = ddp_in(directory, "state", "watch", "total", "--until", ">100")
+    assert met.returncode == 0 and "until met at" in met.stdout and "->" in met.stdout, met.stdout + met.stderr
+    unmet = ddp_in(directory, "state", "watch", "mode", "--until", "=never", "--for", "300ms")
+    assert unmet.returncode == 1 and "until not met in 300ms: mode=never" in unmet.stdout, unmet.stdout + unmet.stderr
     assert ddp_in(directory, "run").stdout == "load\n" and ddp_in(directory, "run", "load").stdout == '"loaded 200"\n'
     mocked = ddp_in(directory, "net", "mock", "*items*", "--status", "503", "--for", "5s", "--limit", "1",
                     "--then", f"{DDP[0]} run load")

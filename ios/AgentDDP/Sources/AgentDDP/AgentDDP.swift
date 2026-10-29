@@ -48,6 +48,16 @@ public enum AgentDDP {
         #endif
     }
 
+    /// Shows agents a named value (`state.list`, `state.get`): a total, a mode, the logged-in user, a value of the app's
+    /// own engine. `get` returns a JSON value (dictionary, array, string, number, Bool or nil). With `set` the value is
+    /// writable (`state.set`) and gets what the agent sent, parsed as JSON. Both run on the main thread. Outside Debug
+    /// it does nothing.
+    public static func state(_ name: String, get: @escaping () -> Any?, set: ((Any?) -> Void)? = nil) {
+        #if DEBUG && canImport(UIKit)
+        AppState.shared.add(name, AppState.Value(get: get, set: set))
+        #endif
+    }
+
     #if DEBUG && canImport(UIKit)
     static func logged(_ request: URLRequest,
                        using send: (URLRequest) async throws -> (Data, URLResponse)) async throws -> (Data, URLResponse) {

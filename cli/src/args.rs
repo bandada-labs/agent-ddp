@@ -84,7 +84,7 @@ Start here (for agents): ddp skills get core
   connect | launch | disconnect | doctor   attach to a running Debug app, or start it fresh; check the setup
   tree | find | get | read | watch | eval  what is drawn, now or over a take (@refs from tree and find)
   record | wait | tap | type | press       take a recording, wait, touch and type
-  open | set | logs | prefs | run          deep links, device settings, app logs, preferences, app commands
+  open | set | logs | prefs | run | state  deep links, device settings, app logs, preferences, app commands, app values
   check overlap|corners|jank|settle|a11y|timeline|parity|baseline|tappable|all
   history                                  the last 15 minutes: what changed, taps, requests; or one moment as a take
   compare --reference <png> | compare <element> --on ios,android   pixels against a reference or the other phone
@@ -221,6 +221,12 @@ pub fn parser() -> Command {
             .arg(positional("key", "set, rm: the key"))
             .arg(positional("value", "set: the value as text; the key keeps its type"))
             .arg(opt("in", "a suite (iOS) or preferences file (Android); default the app's own").id("name")))
+        .subcommand(sub("state", "live: values the app added in Debug; read, watch, and set the writable ones")
+            .arg(choices("action", &["list", "get", "set", "watch"]).default_value("list"))
+            .arg(positional("key", "get, set, watch: the value's name"))
+            .arg(positional("value", "set: the new value, as JSON (500, true, \"text\") or plain text"))
+            .arg(opt("until", "watch: stop when true, e.g. '>100' or 'total>100 and mode=done' (fields: the names watched)"))
+            .arg(opt("for", "watch: stop after this long (default 10s)").id("duration")))
         .subcommand(sub("run", "live: run a command the app added in Debug; without a name, list them")
             .arg(positional("name", "the command's name"))
             .arg(positional("value", "params as a JSON object")))
