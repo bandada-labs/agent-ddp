@@ -72,6 +72,12 @@ internal class DrawRecorder private constructor() : Canvas() {
     override fun drawBitmap(bitmap: Bitmap, src: Rect?, dst: Rect, paint: Paint?) =
         record("image", RectF(dst), paint)
 
+    // No bitmap means an empty clip, and text layout draws only the lines inside the clip: say everything is inside.
+    override fun getClipBounds(bounds: Rect): Boolean {
+        bounds.set(-CLIP, -CLIP, CLIP, CLIP)
+        return true
+    }
+
     // Text: what Compose's text in a Canvas (drawText with a TextMeasurer) ends in, through its layout.
     override fun drawText(text: CharArray, index: Int, count: Int, x: Float, y: Float, paint: Paint) =
         recordText(String(text, index, count), x, y, paint)
@@ -92,6 +98,14 @@ internal class DrawRecorder private constructor() : Canvas() {
                              x: Float, y: Float, isRtl: Boolean, paint: Paint) =
         recordText(text.subSequence(start, end).toString(), x, y, paint)
 
+    // Android 10 and up lay text out as MeasuredText: its bounds come from it; the string itself is not public there.
+    @androidx.annotation.RequiresApi(29)
+    override fun drawTextRun(text: android.graphics.text.MeasuredText, start: Int, end: Int, contextStart: Int, contextEnd: Int,
+                             x: Float, y: Float, isRtl: Boolean, paint: Paint) {
+        val bounds = Rect().also { text.getBounds(start, end, it) }
+        record("text", RectF(bounds).apply { offset(x, y) }, paint)
+    }
+
     /** The text's bounds as the paint measures them, at its baseline. */
     private fun recordText(text: String, x: Float, y: Float, paint: Paint) {
         if (text.isBlank()) return
@@ -104,6 +118,7 @@ internal class DrawRecorder private constructor() : Canvas() {
     companion object {
         // ponytail: caps a dense hatch or particle field; raise it if an agent needs every op.
         private const val MAX_OPS_PER_LAMBDA = 100
+        private const val CLIP = 1 shl 20
 
         /** Ops the lambda draws at this size, or null when it can't be replayed outside Compose. */
         fun replay(onDraw: DrawScope.() -> Unit, size: Size, density: Density): List<DrawOp>? = runCatching {

@@ -100,6 +100,9 @@ pub fn profile(args: &mut Args) -> Result<i32> {
                 "record",
                 "--app",
                 &app,
+                // The kernel's timer, there on every device: emulators and some phones have no cpu-cycles counter.
+                "-e",
+                "cpu-clock",
                 "--duration",
                 &seconds.to_string(),
                 "-o",
@@ -172,16 +175,30 @@ fn sample_lines(output: &str) -> Option<Vec<String>> {
     Some(lines)
 }
 
-/// `simpleperf report`: "Overhead  Symbol  Shared Object" rows, the first ones.
+/// `simpleperf report`: "Overhead  Symbol  Shared Object" rows. Kernel samples (`[kernel.kallsyms]`, no symbols for
+/// an app) are added up on one line, as on iOS, so the app's own functions are what is listed.
 fn simpleperf_lines(output: &str) -> Option<Vec<String>> {
-    let rows: Vec<String> = output
+    let rows: Vec<(f64, String)> = output
         .lines()
         .map(str::trim)
-        .filter(|line| line.split_whitespace().next().is_some_and(|first| first.ends_with('%')))
-        .take(ROWS)
-        .map(|line| format!("  {}", line.split_whitespace().collect::<Vec<_>>().join(" ")))
+        .filter_map(|line| {
+            let share = line.split_whitespace().next()?.strip_suffix('%')?.parse::<f64>().ok()?;
+            Some((share, line.split_whitespace().skip(1).collect::<Vec<_>>().join(" ")))
+        })
         .collect();
-    (!rows.is_empty()).then_some(rows)
+    if rows.is_empty() {
+        return None;
+    }
+    let (kernel, app): (Vec<_>, Vec<_>) = rows.into_iter().partition(|(_, row)| row.contains("[kernel.kallsyms]"));
+    let mut lines: Vec<String> = app.iter().take(ROWS).map(|(share, row)| format!("  {share:>5.1}%  {row}")).collect();
+    let in_kernel: f64 = kernel.iter().map(|(share, _)| share).sum();
+    if in_kernel > 0.0 {
+        lines.push(format!("  ({in_kernel:.1}% in the kernel, left out)"));
+    }
+    if app.is_empty() {
+        lines.insert(0, "  no app function over 1%: the app was mostly idle".into());
+    }
+    Some(lines)
 }
 
 /// `footprint <pid>`: its total, then the biggest categories of its table.
@@ -325,10 +342,14 @@ mod tests {
                 "  (900 samples of threads waiting in the kernel left out)"
             ]
         );
-        let report = "Cmdline: /system/bin/simpleperf record\nOverhead  Symbol  Shared Object\n31.20%  art::Thread  libart.so\n5.01%   dev.agentddp.Capture.walkLayout  base.apk\n";
+        let report = "Cmdline: /system/bin/simpleperf record\nOverhead  Symbol  Shared Object\n31.20%  art::Thread  libart.so\n5.01%   dev.agentddp.Capture.walkLayout  base.apk\n40.00%  [kernel.kallsyms][+ffffffc07a5f9500]  [kernel.kallsyms]\n";
         assert_eq!(
             simpleperf_lines(report).unwrap(),
-            vec!["  31.20% art::Thread libart.so", "  5.01% dev.agentddp.Capture.walkLayout base.apk"]
+            vec![
+                "   31.2%  art::Thread libart.so",
+                "    5.0%  dev.agentddp.Capture.walkLayout base.apk",
+                "  (40.0% in the kernel, left out)"
+            ]
         );
     }
 
