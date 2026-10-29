@@ -73,6 +73,8 @@ fn handler(command: &str) -> fn(&mut Args) -> Result<i32> {
         "back" => device::back,
         "audits" => device::audits,
         "memory" => process::memory,
+        "inspect" => history::inspect,
+        "highlight" => hit::highlight,
         "profile" => process::profile,
         "background" => device::background,
         "push" => device::push,

@@ -367,6 +367,20 @@ fn host_gesture(args: &Args) -> Result<i32> {
     Ok(0)
 }
 
+/// A box over the live app for a while, for a person watching the phone (`screen.highlight`).
+pub fn highlight(args: &mut Args) -> Result<i32> {
+    let session = require_session()?;
+    let key = args.id.clone().unwrap_or_default();
+    let recording = snapshot_live(&session)?;
+    let Some(element) = recording.frames.last().unwrap().element(&key).cloned() else {
+        fail!(format!("no element '{key}' on screen"), "unknown_element", "ddp tree -i");
+    };
+    let ms = args.duration.as_deref().map(crate::state::parse_ms).transpose()?.unwrap_or(3000.0);
+    open(&session)?.call("screen.highlight", json!({"rect": element["frame"], "ms": ms}))?;
+    say!("highlighted {key} {} for {}ms", py::str(&element["frame"]), ms as u64);
+    Ok(0)
+}
+
 /// An element's center, or `x,y`.
 fn place(frame: &Frame, text: &str) -> Result<(f64, f64)> {
     if let Some(point) = point(text) {

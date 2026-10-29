@@ -530,6 +530,8 @@ class FakeApp:
                     result = {"columns": ["name", "token"], "rows": [["first", "[redacted]"]], "more": True}
                 elif method == "storage.keys":
                     result = {"keys": [], "unread": "the Keychain refused: the app has no Keychain entitlement (an unsigned build)"}
+                elif method == "screen.highlight":
+                    self.highlighted = params
                 elif method == "net.cookies":
                     result = {"cookies": [{"name": "session", "domain": "api.example.com", "path": "/", "secure": True, "expires": None}]}
                 elif method == "media.list":
@@ -755,6 +757,8 @@ with tempfile.TemporaryDirectory() as directory:
     keys = ddp_in(directory, "storage", "keys").stdout
     assert keys.startswith("not all read: the Keychain refused") and "no keys" not in keys, keys
     assert ddp_in(directory, "storage", "read").returncode == 1
+    shown = ddp_in(directory, "highlight", "button", "--for", "500ms")
+    assert shown.stdout == "highlighted button [0, 0, 100, 50] for 500ms\n" and app.highlighted == {"rect": [0, 0, 100, 50], "ms": 500}, shown.stdout
     assert ddp_in(directory, "net", "cookies").stdout == "api.example.com session/ (expires session secure)\n"
     media = ddp_in(directory, "media").stdout
     assert media == "AVPlayerLayer playing at 12.5s of 60s rate 1 [0, 0, 390, 220]\nnow playing: title=Song position=12.5\n", media
@@ -817,5 +821,15 @@ with tempfile.TemporaryDirectory() as directory:
     summary = ddp_in(directory, "read", "--file", ".ddp/last.jsonl").stdout
     assert "Total 12" in summary, summary
     assert "jank not judged" in ddp_in(directory, "check", "jank", "--file", ".ddp/last.jsonl").stdout
+    # Inspect mode: the next tap a person makes, and the element under it in the frame before.
+    waiting = subprocess.Popen([*DDP, "inspect", "--for", "5s", "--dir", str(history_dir)], cwd=directory,
+                               stdout=subprocess.PIPE, text=True)
+    clock.sleep(1)
+    now = int(clock.time() * 1000)
+    third = [{"type": "header", "platform": "android", "unit": "px", "scale": 1, "frames": 0, "startedAt": now, "history": True},
+             screen(0, "Total 12", 3), {"type": "event", "kind": "tap", "t": 10, "x": 40, "y": 110}]
+    Path(history_dir, f"{now}.jsonl").write_text("\n".join(map(json.dumps, third)) + "\n")
+    inspected = waiting.communicate(timeout=10)[0]
+    assert waiting.returncode == 0 and 'tapped Total 12 [0, 100, 200, 30] at (40, 110)' in inspected, inspected
 
 print("ok")

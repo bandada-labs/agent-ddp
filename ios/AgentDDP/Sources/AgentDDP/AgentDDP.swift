@@ -254,7 +254,8 @@ enum FrameCapture {
         UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
             .flatMap(\.windows)
-            .filter { !$0.isHidden }
+            // ddp's own highlight is not the app's.
+            .filter { !$0.isHidden && !($0 is HighlightWindow) }
             .sorted { $0.windowLevel < $1.windowLevel }
     }
 }

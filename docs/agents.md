@@ -53,6 +53,8 @@ ddp back | background [--for 2s]                   go back; leave the app for a 
 ddp audits [--since 5m]                            runtime warnings the platform wrote in the app's log
 ddp memory [summary|leaks|heap]                    the app's memory now, its leaks (iOS), a heap dump
 ddp profile [--for 3s]                             the functions the app spends its time in
+ddp inspect [--for 30s]                            a person taps an element on the phone; ddp says which
+ddp highlight <element> [--for 3s]                 a box over the element in the live app, for a person watching
 ddp open <deep link or URL>
 ddp annotate [out.png]                             screenshot with numbered boxes, label N is @eN
 ddp compare --reference <image> [--out ddp-compare.png]   the screen against a reference screenshot

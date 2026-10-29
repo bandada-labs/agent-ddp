@@ -4,6 +4,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 
 ## Unreleased
 
+- `ddp inspect`: a person taps an element on the phone and ddp says which, from the taps History keeps. `ddp highlight <element>`: a box over it in the live app for a while (new protocol method `screen.highlight`).
 - `ddp logs --follow --source`: on iOS each line also says its subsystem and the library that wrote it (`log.entry` adds `subsystem` and `sender`).
 - `ddp net cookies` and `ddp net clear-cookies`: the app's cookies by name, domain and expiry (never the values) from `HTTPCookieStorage.shared` or the default `java.net.CookieManager`, and clearing them. Offline and slow networks stay `ddp net fail` and `ddp net mock`.
 - `ddp profile [--for 3s]`: the functions the app spends its time in, from `sample` on the simulator or `simpleperf` on Android, top entries only, kernel waits counted apart.

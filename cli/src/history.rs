@@ -33,6 +33,43 @@ pub fn history(args: &mut Args) -> Result<i32> {
     Ok(0)
 }
 
+/// Inspect mode: the next tap a person makes on the phone, and the element it landed on, from the taps History keeps.
+/// Nothing in the app changes: the tap reaches the app as any tap does.
+pub fn inspect(args: &mut Args) -> Result<i32> {
+    let started = now_ms();
+    let wait = parse_ms(args.duration.as_deref().unwrap_or("30s"))?;
+    say!("tap an element on the phone (the tap reaches the app as usual)...");
+    while now_ms() < started + wait {
+        std::thread::sleep(std::time::Duration::from_millis(INSPECT_POLL_MS));
+        // No file yet with a tap in it is not an error here: keep waiting.
+        let Ok(segments) = read_segments(args, started) else { continue };
+        let mut last_frame: Option<Frame> = None;
+        for segment in &segments {
+            let tolerance = 4.0 * segment.header.get("scale").map(f).unwrap_or(1.0);
+            for line in &segment.lines {
+                if line["type"] == "frame" {
+                    last_frame = Some(Frame::from(line.clone(), tolerance));
+                } else if line["kind"] == "tap" && f(&line["at"]) >= started {
+                    let point = (f(&line["x"]), f(&line["y"]));
+                    let under = last_frame.as_ref().and_then(|frame| {
+                        let key = element_under(frame, point)?;
+                        Some(format!("{key} {}", py::str(&frame.element(&key)?["frame"])))
+                    });
+                    match under {
+                        Some(element) => say!("tapped {element} at ({:.0}, {:.0})", point.0, point.1),
+                        None => say!("tapped ({:.0}, {:.0}): no element there", point.0, point.1),
+                    }
+                    return Ok(0);
+                }
+            }
+        }
+    }
+    say!("no tap in {}", args.duration.as_deref().unwrap_or("30s"));
+    Ok(1)
+}
+
+const INSPECT_POLL_MS: u64 = 700;
+
 fn start_of(name: &str) -> Option<f64> {
     name.split('.').next().and_then(|s| s.parse::<u64>().ok()).map(|s| s as f64)
 }
