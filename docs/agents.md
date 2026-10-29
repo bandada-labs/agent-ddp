@@ -44,7 +44,10 @@ ddp run [<command> ['<params JSON>']]              run a command the app added i
 ddp wait id <id> | text <label> | --settled 300ms [--ignore <el>] [--timeout 10s]
 ddp logs [--grep <text>]                           app log lines during the last take, at their time in it
 ddp logs --follow [--for 10s] [--grep <text>]      the last 100 lines, then each new one
-ddp set appearance dark | text-size large | reduce-motion on | locale es-ES
+ddp set appearance dark | text-size large | reduce-motion on | locale es-ES | location 4.71,-74.07 | orientation landscape
+ddp biometric enroll | match | fail                Face ID on the simulator, a fingerprint on the emulator
+ddp push <payload.json>                            iOS: a push as APNs would deliver it
+ddp job <id>                                       Android: run one of the app's scheduled jobs now
 ddp open <deep link or URL>
 ddp annotate [out.png]                             screenshot with numbered boxes, label N is @eN
 ddp compare --reference <image> [--out ddp-compare.png]   the screen against a reference screenshot
@@ -234,6 +237,14 @@ report: /Users/you/Library/Logs/DiagnosticReports/DDPSample-2026-10-29-155054.ip
 `swipe`, `drag`, `double-tap` and `long-press` move one real finger with `input.touch`, the same finger `tap` uses, so gesture recognizers, SwiftUI and Compose see a touch. A place is an element (its center, read just before) or `x,y` in the frames' unit. `swipe` moves in 12 steps over `--for`; `drag` holds 500 ms first so the app sees a long press that picks the item up; `double-tap` leaves 100 ms between taps. Each prints what changed, leaving out what changes on its own (a clock). A swipe can leave a list moving: wait (`ddp wait --settled 300ms`) before you touch something in it.
 
 Without the library, `--device <adb serial>` uses Android's own `input` command with `x,y` in screen pixels (the screenshot's), and cannot say what changed. A double tap needs the library: two `adb input` commands come too far apart. iOS has no public way to touch a simulator from the host, so ddp refuses there and points to agent-device.
+
+### device actions
+
+`set location LAT,LON` moves the device: `simctl location` on iOS, the emulator console's `geo fix` on Android (an emulator only). `set orientation portrait|landscape` turns Android's auto-rotate off and sets the rotation; the simulator has no public way to rotate from the host, so ddp refuses there. For a time zone on iOS, launch with `ddp launch --env TZ=America/Bogota`.
+
+`biometric enroll|match|fail` does what the simulator's and emulator's own menus do: Face ID enrollment and a matching or failing face on iOS, a finger touch on the emulator (`match` touches finger 1, the one enrolled first in Settings; `fail` touches one not enrolled). Android enrolls only through Settings. Neither platform confirms, so ddp says it sent it: check what the app shows next.
+
+`push payload.json` delivers a push to the app on the simulator as APNs would (`simctl push`). Android has no local way to deliver an FCM push, so ddp refuses and points to running the app's handler as an app command. `job <id>` runs one of the app's scheduled jobs now on Android (`cmd jobscheduler run -f`, WorkManager included); iOS runs a background task early only from the debugger, so ddp refuses and gives the debugger line.
 
 ### launch
 

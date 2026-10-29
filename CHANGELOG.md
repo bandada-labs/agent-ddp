@@ -4,6 +4,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 
 ## Unreleased
 
+- Device actions with each platform's own tool: `ddp set location` and `set orientation` (Android), `ddp biometric enroll|match|fail`, `ddp push` (iOS, `simctl push`) and `ddp job` (Android, JobScheduler). What a platform cannot do from the host is refused with the reason.
 - The new commands work like the old ones for agents: `--json` on `state`, `events`, `storage`, `perf` and `media`; `@eN` refs for both places of `swipe` and `drag`; and the MCP server offers them (`launch` and `swipe` in `core`, the rest in `live`, `compare` in `checks`).
 - Android: what Compose `drawWithContent` and `drawWithCache` lambdas draw is read like a `Canvas` or `drawBehind` one, and text drawn in a Canvas is a `text` draw op with its string. `drawWithCache` goes through a new engine hook, `compose.drawCache`.
 - `ddp tap` and `check tappable` see the keyboard: a control all under it, as UIKit's keyboard notifications or Android's IME insets (API 30+) place it, is `COVERED by the keyboard` instead of reaching.
