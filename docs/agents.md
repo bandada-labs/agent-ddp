@@ -50,6 +50,7 @@ ddp push <payload.json>                            iOS: a push as APNs would del
 ddp job <id>                                       Android: run one of the app's scheduled jobs now
 ddp back | background [--for 2s]                   go back; leave the app for a while and come back
 ddp audits [--since 5m]                            runtime warnings the platform wrote in the app's log
+ddp memory [summary|leaks|heap]                    the app's memory now, its leaks (iOS), a heap dump
 ddp open <deep link or URL>
 ddp annotate [out.png]                             screenshot with numbered boxes, label N is @eN
 ddp compare --reference <image> [--out ddp-compare.png]   the screen against a reference screenshot
@@ -249,6 +250,10 @@ Without the library, `--device <adb serial>` uses Android's own `input` command 
 `push payload.json` delivers a push to the app on the simulator as APNs would (`simctl push`). Android has no local way to deliver an FCM push, so ddp refuses and points to running the app's handler as an app command. `job <id>` runs one of the app's scheduled jobs now on Android (`cmd jobscheduler run -f`, WorkManager included); iOS runs a background task early only from the debugger, so ddp refuses and gives the debugger line.
 
 `back` is Android's Back key, or on iOS the edge swipe UIKit turns into back (a real finger from the screen's very edge; a screen with no back gesture does not move). `background --for 2s` leaves the app the way a person does (Home on Android, another app on iOS) and brings it back; the libraries write `background` and `foreground` into History from the platform's own notifications, so `ddp history` shows what the app did meanwhile.
+
+### memory
+
+`memory` reads the app's process with each platform's own tools. iOS: a simulator app is a macOS process, so `footprint` gives its footprint and biggest categories, `memory leaks` runs `leaks` (exit 1 when it finds one, with the first few), `memory heap` runs `heap` and lists the classes by bytes. Android: `dumpsys meminfo` gives the App Summary (Java heap, native heap, graphics, total PSS); `memory heap` runs `am dumpheap` and saves the `.hprof` in `.ddp/` for Android Studio. Android has no leak detector of its own, so `memory leaks` points to LeakCanary.
 
 ### audits
 

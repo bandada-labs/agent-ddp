@@ -9,6 +9,7 @@ mod hit;
 mod inspect;
 mod live;
 mod model;
+mod process;
 mod py;
 mod queries;
 mod state;
@@ -71,6 +72,7 @@ fn handler(command: &str) -> fn(&mut Args) -> Result<i32> {
         "biometric" => device::biometric,
         "back" => device::back,
         "audits" => device::audits,
+        "memory" => process::memory,
         "background" => device::background,
         "push" => device::push,
         "job" => device::job,

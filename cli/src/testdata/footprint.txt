@@ -1,0 +1,35 @@
+======================================================================
+zsh [33092]: 64-bit    Footprint: 2400 KB (16384 bytes per page)
+======================================================================
+
+  Dirty      Clean  Reclaimable    Regions    Category
+    ---        ---          ---        ---    ---
+ 912 KB        0 B          0 B          5    Malloc Small
+ 480 KB        0 B          0 B          9    Malloc Metadata
+ 304 KB        0 B          0 B          1    page table
+ 144 KB        0 B          0 B          1    Malloc Tiny
+ 116 KB        0 B          0 B         73    __DATA
+ 114 KB        0 B          0 B         36    __DATA_DIRTY
+ 105 KB        0 B          0 B        209    unused dyld shared cache area
+  64 KB        0 B          0 B          5    Untagged
+  48 KB        0 B          0 B          2    Stack
+  31 KB        0 B          0 B          1    __OBJC_RW
+  16 KB        0 B          0 B          1    Deferred Reclaim
+  16 KB        0 B          0 B          1    Malloc Nano
+  16 KB        0 B          0 B          1    OS Alloc Once
+  16 KB        0 B          0 B          1    Activity Tracing
+  16 KB        0 B          0 B          4    __TPRO_CONST
+  848 B        0 B          0 B         15    __AUTH
+    0 B     496 KB          0 B         86    __TEXT
+    0 B      16 KB          0 B         41    __DATA_CONST
+    0 B      16 KB          0 B          2    __LINKEDIT
+    0 B      16 KB          0 B          2    mapped file
+    0 B        0 B          0 B         43    __AUTH_CONST
+    0 B        0 B          0 B          1    __OBJC_RO
+    ---        ---          ---        ---    ---
+2400 KB     544 KB          0 B        542    TOTAL
+
+Auxiliary data:
+    phys_footprint: 2400 KB
+    phys_footprint_peak: 2464 KB
+

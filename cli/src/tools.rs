@@ -107,6 +107,7 @@ const MCP_PROFILES: [(&str, &[&str]); 3] = [
             "job",
             "back",
             "background",
+            "memory",
         ],
     ),
     ("checks", &["check", "baseline", "diff", "compare", "audits"]),

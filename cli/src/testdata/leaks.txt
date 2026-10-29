@@ -1,0 +1,27 @@
+Process 33092 is not debuggable. Due to security restrictions, leaks can only show or save contents of readonly memory of restricted processes.
+
+Process:         zsh [33092]
+Path:            /bin/zsh
+Load Address:    0x1047b8000
+Identifier:      zsh
+Version:         118
+Code Type:       ARM64E
+Platform:        macOS
+Parent Process:  2.1.312 [11281]
+Target Type:     live task
+
+Date/Time:       2026-10-29 17:45:30.991 -0500
+Launch Time:     2026-10-29 17:40:08.922 -0500
+OS Version:      macOS 27.0.1 (26A434)
+Report Version:  7
+Analysis Tool:   /usr/bin/leaks
+
+Physical footprint:         2400K
+Physical footprint (peak):  2464K
+Idle exit:                  untracked
+----
+
+leaks Report Version: 4.0
+Process 33092: 1782 nodes malloced for 451 KB
+Process 33092: 0 leaks for 0 total leaked bytes.
+

@@ -293,6 +293,8 @@ pub fn parser() -> Command {
                                       Android: small|default|large|largest or a factor); reduce-motion on|off; locale es-ES; \
                                       location LAT,LON; orientation portrait|landscape (Android)")
                 .required(true))))
+        .subcommand(device_options(sub("memory", "the app's memory now, its leaks (iOS) or a heap dump, with the platform's tools")
+            .arg(choices("action", &["summary", "leaks", "heap"]).default_value("summary"))))
         .subcommand(device_options(sub("audits", "runtime warnings the platform wrote in the app's log (SwiftUI, Auto Layout, StrictMode)")
             .arg(opt("since", "how far back (default 5m)").default_value("5m"))))
         .subcommand(device_options(sub("back", "go back: the Back key on Android, the edge swipe on iOS")))
