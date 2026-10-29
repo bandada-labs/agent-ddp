@@ -133,6 +133,7 @@ final class ControlSession {
             let environment = ProcessInfo.processInfo.environment
             return ["received": (params["names"] as? [String] ?? []).filter { environment[$0] != nil }]
         },
+        "media.list": { _ in Media.list() },
         "storage.files": { try Storage.files($0) },
         "storage.read": { try Storage.read($0) },
         "storage.remove": { try Storage.remove($0) },

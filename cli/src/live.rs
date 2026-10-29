@@ -967,6 +967,34 @@ pub fn storage(args: &mut Args) -> Result<i32> {
     Ok(0)
 }
 
+/// Players the platform shows the library, and the now-playing info the app gave the system.
+pub fn media(_args: &mut Args) -> Result<i32> {
+    let session = require_session()?;
+    let answer = open(&session)?.call("media.list", json!({}))?;
+    let time = |value: &Value| if value.is_null() { "?".to_string() } else { format!("{}s", py::str(value)) };
+    let players = answer["players"].as_array().cloned().unwrap_or_default();
+    for player in &players {
+        let rate = player.get("rate").map(|rate| format!(" rate {}", py::str(rate))).unwrap_or_default();
+        say!(
+            "{} {} at {} of {}{rate} {}",
+            py::str(&player["source"]),
+            py::str(&player["state"]),
+            time(&player["position"]),
+            time(&player["duration"]),
+            py::str(&player["frame"])
+        );
+    }
+    if let Some(now) = answer.get("nowPlaying") {
+        let fields: Vec<String> =
+            now.as_object().into_iter().flatten().map(|(key, value)| format!("{key}={}", py::str(value))).collect();
+        say!("now playing: {}", fields.join(" "));
+    }
+    if players.is_empty() && answer.get("nowPlaying").is_none() {
+        say!("no player the platform shows: an audio player or a Media3 one is shown as an app value (ddp skills get app)");
+    }
+    Ok(0)
+}
+
 /// How the app runs for `--for`, from the platform's own clocks. A measurement: it exits 0 whatever it finds.
 pub fn perf(args: &mut Args) -> Result<i32> {
     let session = require_session()?;

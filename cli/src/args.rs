@@ -268,6 +268,7 @@ pub fn parser() -> Command {
             .arg(opt("grep", "only lines holding this text"))
             .arg(opt("limit", "at most this many lines").value_parser(clap::value_parser!(usize)).default_value("50")))))
         .subcommand(device_options(sub("crash", "the app's last crash as the platform recorded it, with its stack (the app may be gone)")))
+        .subcommand(sub("media", "live: the players the platform shows (video layers, now playing), with their state"))
         .subcommand(sub("perf", "live: refreshes the main thread missed and draw time, for whatever is on screen")
             .arg(opt("for", "how long to measure (default 5s)").id("duration")))
         .subcommand(sub("events", "live: events the app sent in Debug (a rule that fired, a sync that ended)")

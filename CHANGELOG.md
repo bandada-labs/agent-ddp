@@ -4,6 +4,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 
 ## Unreleased
 
+- `ddp media`: the players the platform shows (an `AVPlayerLayer` or `VideoView` on screen) with state, position, duration and rate, and the now-playing info on iOS. A player with no public way in (audio-only, Media3) is shown as an app value, with a recipe in `ddp skills get app`. New protocol method `media.list`.
 - `ios/build-swiftc.sh`: builds the iOS library as a static library and module with plain `swiftc`, for apps built without an Xcode project or SwiftPM. CI builds it, and the iOS sample app, on Xcode 15.4, the oldest Xcode supported.
 - `ddp compare --on ios,android --structure`: what the two phones draw by label, not pixels: labels only one phone has, and the same label drawn as another kind. Platform idiom no longer hides a missing tab or chip.
 - `ddp storage`: the app's files (list, read, remove), its SQLite databases with one read-only query, and its Keychain items or Keystore aliases by name, never their data. Text is redacted like network bodies. New protocol methods `storage.files`, `storage.read`, `storage.remove`, `storage.query`, `storage.keys`. `ddp launch --reset` clears the app's data first.

@@ -527,6 +527,10 @@ class FakeApp:
                     result = {"columns": ["name", "token"], "rows": [["first", "[redacted]"]], "more": True}
                 elif method == "storage.keys":
                     result = {"keys": [], "unread": "the Keychain refused: the app has no Keychain entitlement (an unsigned build)"}
+                elif method == "media.list":
+                    result = {"players": [{"source": "AVPlayerLayer", "state": "playing", "rate": 1, "position": 12.5,
+                                           "duration": 60, "frame": [0, 0, 390, 220]}],
+                              "nowPlaying": {"title": "Song", "position": 12.5}}
                 elif method == "perf.metrics":
                     result = {"ms": params["ms"], "refreshMs": 16.67, "refreshes": 59, "missed": 3, "worstGapMs": 66.7,
                               "drawn": 20, "drawMeanMs": 6.1, "drawP95Ms": 12.4, "drawnOverRefresh": 1}
@@ -725,6 +729,8 @@ with tempfile.TemporaryDirectory() as directory:
     keys = ddp_in(directory, "storage", "keys").stdout
     assert keys.startswith("not all read: the Keychain refused") and "no keys" not in keys, keys
     assert ddp_in(directory, "storage", "read").returncode == 1
+    media = ddp_in(directory, "media").stdout
+    assert media == "AVPlayerLayer playing at 12.5s of 60s rate 1 [0, 0, 390, 220]\nnow playing: title=Song position=12.5\n", media
     perf = ddp_in(directory, "perf", "--for", "1s")
     assert perf.returncode == 0 and perf.stdout == "1.0s: the main thread missed 3 of 59 refreshes (16.67 ms each), worst gap 66.7 ms; " \
         "20 frames drawn, the app's work per frame mean 6.1 ms, p95 12.4 ms, 1 over a refresh\n", perf.stdout + perf.stderr

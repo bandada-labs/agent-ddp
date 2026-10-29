@@ -57,6 +57,14 @@ class CoveredActivity : ComponentActivity() {
     }
 }
 
+/** A video view with nothing to play: `ddp media` finds it, paused at 0. */
+class MediaActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(android.widget.VideoView(this))
+    }
+}
+
 /** A still screen with a spinner that redraws every frame without changing anything ddp reads, like a looping Lottie. */
 class SpinnerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {

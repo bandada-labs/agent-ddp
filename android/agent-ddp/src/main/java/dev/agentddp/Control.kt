@@ -112,6 +112,7 @@ internal class ControlSession(private val app: ControlApp, private val send: (St
             JSONObject().put("received", JSONArray(names.filter { it in extras }))
         },
         "perf.metrics" to Perf::measure,
+        "media.list" to { _ -> Media.list() },
         "storage.files" to Storage::files,
         "storage.read" to Storage::read,
         "storage.remove" to Storage::remove,

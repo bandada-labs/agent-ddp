@@ -1,3 +1,4 @@
+import AVFoundation
 import AgentDDP
 import OSLog
 import Security
@@ -8,6 +9,8 @@ import SwiftUI
 struct DDPSampleApp: App {
     // Launch arguments for measuring History's cost: `-spinner` opens the spinner screen, `-noDDP` runs without ddp.
     private let showsSpinner = CommandLine.arguments.contains("-spinner")
+    // `-media` opens a screen with a video layer, for `ddp media`.
+    private let showsMedia = CommandLine.arguments.contains("-media")
 
     init() {
         guard !CommandLine.arguments.contains("-noDDP") else { return }
@@ -37,7 +40,7 @@ struct DDPSampleApp: App {
 
     var body: some Scene {
         WindowGroup {
-            if showsSpinner { SpinnerView() } else { ContentView() }
+            if showsSpinner { SpinnerView() } else if showsMedia { PlayerView() } else { ContentView() }
         }
     }
 }
@@ -74,6 +77,19 @@ struct SpinnerView: View {
         }
         .padding(24)
     }
+}
+
+/// A video layer with a player and nothing to play: `ddp media` finds it, paused at 0.
+struct PlayerView: UIViewRepresentable {
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        let layer = AVPlayerLayer(player: AVPlayer())
+        layer.frame = CGRect(x: 0, y: 100, width: 320, height: 180)
+        view.layer.addSublayer(layer)
+        return view
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {}
 }
 
 struct RedrawEveryFrame: UIViewRepresentable {

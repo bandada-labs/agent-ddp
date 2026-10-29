@@ -19,5 +19,7 @@
             android:theme="@android:style/Theme.Material.Light.DarkActionBar" />
         <!-- History's cost on an idle screen that keeps drawing. -->
         <activity android:name=".SpinnerActivity" android:exported="true" />
+        <!-- For ddp media: a VideoView. -->
+        <activity android:name=".MediaActivity" android:exported="true" />
     </application>
 </manifest>

@@ -13,6 +13,7 @@ ddp state [list] | get <name> | set <name> <value> | watch <name> [--until '>100
 ddp events [--follow] [--for 10s] [--grep <text>]   events the app sent in Debug, also in ddp history
 ddp crash [--device <id> --app <id>]               the app's last crash as the platform recorded it, with its stack
 ddp perf [--for 5s]                                refreshes the main thread missed, worst gap; Android: draw time
+ddp media                                          video players on screen and now-playing info, with their state
 ddp storage [files [<folder>]] | read <file> | rm <file> | query <db> "<sql>" | keys   the app's own data
 ddp launch <device> --app <id> --reset             clear the app's data first, like a fresh install
 ddp doctor [<device> --app <id>]                  what is wrong between the device and a frame, with the fix, and every engine hook's state

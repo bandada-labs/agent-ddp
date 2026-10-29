@@ -54,6 +54,24 @@ ddp state watch mode --until '=done' --for 30s
 
 Put the app in a state without the UI (`state set`), then check what it draws with `ddp tree` or `ddp check all`.
 
+## A player the library cannot see
+
+`ddp media` shows the players the platform shows the library: a video layer (`AVPlayerLayer`, `VideoView`) and the
+now-playing info. An audio-only `AVPlayer`, a Media3 `ExoPlayer` or a `MediaPlayer` has no public way in, so show it
+as a value:
+
+```swift
+AgentDDP.state("player", get: { ["state": player.timeControlStatus == .playing ? "playing" : "paused",
+                                  "position": player.currentTime().seconds, "rate": player.rate] })
+```
+
+```kotlin
+AgentDdpState.add("player", get = { mapOf("playing" to player.isPlaying, "position" to player.currentPosition / 1000.0,
+                                          "duration" to player.duration / 1000.0, "rate" to player.playbackParameters.speed) })
+```
+
+Then `ddp state watch player --until 'player~playing'` waits for it to start.
+
 ## Events
 
 Send one where it happens, from any thread:
