@@ -394,6 +394,7 @@ class FakeApp:
         self.typed, self.prefs, self.interceptor, self.answers = "", {}, None, {}
         # App values: total grows by 10 on every read; mode is writable.
         self.total, self.mode = 0, "idle"
+        self.touches = []
         self.server = socket.socket()
         self.server.bind(("127.0.0.1", 0))
         self.server.listen()
@@ -490,6 +491,7 @@ class FakeApp:
                     result = {"scale": 3, "regions": [{"x": 0, "y": 0, "width": 4, "height": 2, "rgba": pixels}
                                                       for _ in params["rects"]]}
                 elif method == "input.touch":
+                    self.touches.append((params["phase"], round(params["x"]), round(params["y"]), clock.monotonic()))
                     if params["phase"] == "down" and params["x"] < 100 and params["y"] < 50:
                         self.tapped_at = self.stream_index
                 elif method == "screen.watch":
@@ -662,6 +664,34 @@ with tempfile.TemporaryDirectory() as directory:
     assert ddp_in(directory, "prefs").stdout == "flag = on\n"
     ddp_in(directory, "prefs", "rm", "flag")
     assert ddp_in(directory, "prefs").stdout == "no values\n"
+    # Gestures: one finger on input.touch, with the timing each needs.
+    app.touches, app.tapped_at = [], None
+    point = ddp_in(directory, "tap", "50,25")
+    assert "tapped (50, 25); changed: toast" in point.stdout and [t[0] for t in app.touches] == ["down", "up"], point.stdout + point.stderr
+    app.touches = []
+    swiped = ddp_in(directory, "swipe", "10,10", "90,40", "--for", "120ms")
+    phases = [t[0] for t in app.touches]
+    assert swiped.returncode == 0 and phases[0] == "down" and phases[-1] == "up" and phases.count("move") == 12, swiped.stdout + str(phases)
+    assert app.touches[-2][1:3] == (90, 40) and "swipe 10,10 (10, 10) -> (90, 40)" in swiped.stdout, swiped.stdout
+    app.touches = []
+    ddp_in(directory, "double-tap", "button")
+    assert [t[0] for t in app.touches] == ["down", "up", "down", "up"] and app.touches[0][1:3] == (50, 25), app.touches
+    app.touches = []
+    ddp_in(directory, "long-press", "button", "--for", "300ms")
+    assert [t[0] for t in app.touches] == ["down", "up"] and app.touches[1][3] - app.touches[0][3] >= 0.3, app.touches
+    app.touches = []
+    ddp_in(directory, "drag", "button", "0,200", "--for", "120ms")
+    assert app.touches[1][3] - app.touches[0][3] >= 0.5 and app.touches[-1][0:3] == ("up", 0, 200), app.touches
+    # Without the library: Android only, points only, and never a double tap.
+    ios_host = ddp_in(directory, "tap", "10,10", "--device", "5A9A96DD-128D-475C-B007-46F50ED266A7")
+    assert ios_host.returncode == 1 and "no public way to touch a simulator" in ios_host.stderr, ios_host.stderr
+    double = ddp_in(directory, "double-tap", "10,10", "--device", "emulator-5554")
+    assert double.returncode == 1 and "a double tap needs the library" in double.stderr, double.stderr
+    element = ddp_in(directory, "swipe", "button", "0,0", "--device", "emulator-5554")
+    assert element.returncode == 1 and "knows no elements" in element.stderr, element.stderr
+    missing = ddp_in(directory, "swipe", "button")
+    assert missing.returncode != 0, missing.stdout
+    app.tapped_at = None
     # App values: list, set the writable one, refuse the read-only one, watch until a bar.
     listed = ddp_in(directory, "state").stdout
     assert "mode = idle (writable)" in listed and "total = " in listed and "total = 10 (writable)" not in listed, listed

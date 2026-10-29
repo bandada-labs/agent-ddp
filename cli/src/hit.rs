@@ -22,8 +22,14 @@ const BUSY_SAMPLE_MS: u64 = 100;
 const STILL: f64 = 0.5;
 
 pub fn tap(args: &mut Args) -> Result<i32> {
+    if args.device.is_some() {
+        return host_gesture(args);
+    }
     let session = require_session()?;
     let key = args.id.clone().unwrap_or_default();
+    if let Some(at) = point(&key) {
+        return tap_point(&session, at);
+    }
     let started = Instant::now();
     let before = snapshot_live(&session)?;
     let Some(element) = before.frames.last().unwrap().element(&key).cloned() else {
@@ -212,4 +218,169 @@ fn wait_for_change(session: &Value, settled: &Frame, busy: &BTreeSet<String>) ->
             return Ok((changed, now));
         }
     }
+}
+
+/// A point has no element to ask the hit test about: touch it, then say what changed.
+fn tap_point(session: &Value, at: (f64, f64)) -> Result<i32> {
+    let before = frame_now(session)?;
+    std::thread::sleep(Duration::from_millis(BUSY_SAMPLE_MS));
+    let settled = frame_now(session)?;
+    let busy = changed_keys(&before, &settled);
+    let mut control = open(session)?;
+    touch(&mut control, at)?;
+    control.close();
+    let (changed, _) = wait_for_change(session, &settled, &busy)?;
+    let outcome = if changed.is_empty() {
+        format!("nothing changed within {CHANGE_WAIT_MS}ms; look again before a second tap")
+    } else {
+        format!("changed: {}", changed.iter().take(5).cloned().collect::<Vec<_>>().join(", "))
+    };
+    say!("tapped ({:.0}, {:.0}); {outcome}", at.0, at.1);
+    Ok(0)
+}
+
+/// Moves in a swipe or a drag, spread over its time: enough for a gesture recognizer to see a velocity.
+const GESTURE_STEPS: u32 = 12;
+/// A drag holds still this long first, so the app sees a long press that picks the item up.
+const DRAG_HOLD_MS: u64 = 500;
+/// The pause between the two taps of a double tap, under both platforms' double-tap timeout (300 ms).
+const DOUBLE_TAP_GAP_MS: u64 = 100;
+
+/// `swipe`, `drag`, `double-tap`, `long-press`: one finger on `input.touch`, the real finger the libraries give, then
+/// what changed. A place is an element (its center) or `x,y` in the frames' unit (pt on iOS, px on Android).
+pub fn gesture(args: &mut Args) -> Result<i32> {
+    if args.device.is_some() {
+        return host_gesture(args);
+    }
+    let session = require_session()?;
+    let gesture = args.command.clone();
+    let from_text = args.id.clone().unwrap_or_default();
+    let before = snapshot_live(&session)?;
+    let frame = before.frames.last().unwrap();
+    let from = place(frame, &from_text)?;
+    let to = match (&gesture[..], &args.value) {
+        ("swipe" | "drag", Some(text)) => Some(place(frame, text)?),
+        ("swipe" | "drag", None) => {
+            fail!(format!("{gesture} needs where to: FROM TO"), "missing_option", format!("ddp {gesture} list 0,400"))
+        }
+        _ => None,
+    };
+    let default_ms = match &gesture[..] {
+        "swipe" => 300.0,
+        "drag" => 600.0,
+        _ => 800.0,
+    };
+    let ms = args.duration.as_deref().map(crate::state::parse_ms).transpose()?.unwrap_or(default_ms);
+    // Two frames a little apart, so a clock that ticks every frame shows as busy.
+    std::thread::sleep(Duration::from_millis(BUSY_SAMPLE_MS));
+    let settled = frame_now(&session)?;
+    let busy = changed_keys(frame, &settled);
+    let mut control = open(&session)?;
+    let mut finger = |phase: &str, (x, y): (f64, f64)| {
+        control.call("input.touch", json!({"phase": phase, "x": x, "y": y})).map(|_| ())
+    };
+    let pause = |ms: f64| std::thread::sleep(Duration::from_millis(ms.max(0.0) as u64));
+    match (&gesture[..], to) {
+        ("double-tap", _) => {
+            for second in [false, true] {
+                if second {
+                    pause(DOUBLE_TAP_GAP_MS as f64);
+                }
+                finger("down", from)?;
+                finger("up", from)?;
+            }
+        }
+        ("long-press", _) => {
+            finger("down", from)?;
+            pause(ms);
+            finger("up", from)?;
+        }
+        (_, Some(to)) => {
+            finger("down", from)?;
+            if gesture == "drag" {
+                pause(DRAG_HOLD_MS as f64);
+            }
+            for step in 1..=GESTURE_STEPS {
+                pause(ms / GESTURE_STEPS as f64);
+                let share = step as f64 / GESTURE_STEPS as f64;
+                finger("move", (from.0 + (to.0 - from.0) * share, from.1 + (to.1 - from.1) * share))?;
+            }
+            finger("up", to)?;
+        }
+        _ => unreachable!("swipe and drag have a place to go"),
+    }
+    control.close();
+    let (changed, _) = wait_for_change(&session, &settled, &busy)?;
+    let outcome = if changed.is_empty() {
+        format!("nothing changed within {CHANGE_WAIT_MS}ms")
+    } else {
+        format!("changed: {}", changed.iter().take(5).cloned().collect::<Vec<_>>().join(", "))
+    };
+    let places = match to {
+        Some(to) => format!("({:.0}, {:.0}) -> ({:.0}, {:.0})", from.0, from.1, to.0, to.1),
+        None => format!("({:.0}, {:.0})", from.0, from.1),
+    };
+    say!("{gesture} {from_text} {places}; {outcome}");
+    Ok(0)
+}
+
+/// `--device`, for an app without the library: Android's own `input` command, in screen pixels. No element is known
+/// and nothing is checked after. iOS has no public way to touch a simulator from the host.
+fn host_gesture(args: &Args) -> Result<i32> {
+    let (platform, device, _) = crate::device::target(args)?;
+    let gesture = args.command.clone();
+    if platform == "ios" {
+        fail!(
+            "iOS has no public way to touch a simulator from outside the app",
+            "not_supported",
+            "add the library to the Debug build and drop --device, or use agent-device"
+        );
+    }
+    let at = |text: &str| match point(text) {
+        Some((x, y)) => Ok(format!("{x:.0} {y:.0}")),
+        None => Err(failure(
+            format!("without the library ddp knows no elements: give x,y in screen pixels, not '{text}'"),
+            "bad_value",
+            Some("ddp tap 540,1200 --device emulator-5554"),
+        )),
+    };
+    let from = at(&args.id.clone().unwrap_or_default())?;
+    let ms = |default: f64| -> Result<String> {
+        Ok(format!("{:.0}", args.duration.as_deref().map(crate::state::parse_ms).transpose()?.unwrap_or(default)))
+    };
+    let command = match &gesture[..] {
+        "tap" => format!("input tap {from}"),
+        "long-press" => format!("input swipe {from} {from} {}", ms(800.0)?),
+        "swipe" => format!("input swipe {from} {} {}", at(args.value.as_deref().unwrap_or(""))?, ms(300.0)?),
+        "drag" => format!("input draganddrop {from} {} {}", at(args.value.as_deref().unwrap_or(""))?, ms(1100.0)?),
+        _ => fail!(
+            "a double tap needs the library: two adb input commands come too far apart to count as one",
+            "not_supported",
+            "add the library to the Debug build and drop --device"
+        ),
+    };
+    let result = crate::state::capture(&crate::state::adb_path()?, &["-s", &device, "shell", &command]);
+    if result.code != 0 {
+        fail!(format!("adb input failed: {}", result.stderr.trim()), "command_failed");
+    }
+    say!("{gesture} on {device} with adb ({command}); without the library ddp cannot say what changed");
+    Ok(0)
+}
+
+/// An element's center, or `x,y`.
+fn place(frame: &Frame, text: &str) -> Result<(f64, f64)> {
+    if let Some(point) = point(text) {
+        return Ok(point);
+    }
+    let Some(element) = frame.element(text) else {
+        fail!(format!("no element '{text}' on screen"), "unknown_element", "ddp tree -i, or give x,y");
+    };
+    let [x, y, w, h] = rect(&element["frame"]);
+    Ok((x + w / 2.0, y + h / 2.0))
+}
+
+/// `120,300` as a point; anything else is not one.
+pub fn point(text: &str) -> Option<(f64, f64)> {
+    let (x, y) = text.split_once(',')?;
+    Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
 }

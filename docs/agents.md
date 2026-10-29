@@ -28,6 +28,11 @@ ddp net send <url> [--method POST] [--body <text>]  a request through the app's 
 ddp net mock <url pattern> [--status 503] [--body <text>] [--for 10s] [--limit N] [--then "<cmd>"]
 ddp net fail <url pattern> [--error offline|timeout|...] [--for 10s] [--limit N] [--then "<cmd>"]
 ddp tap <element> [--force]                        a real touch where it reaches the element; says what changed
+ddp tap <x,y>                                      a real touch at a point, then what changed
+ddp swipe <from> <to> [--for 300ms]                a quick move (scroll, page); places are elements or x,y
+ddp drag <from> <to> [--for 600ms]                 hold 500ms, move slowly, let go (reorder, drag and drop)
+ddp double-tap <place> | long-press <place> [--for 800ms]
+ddp tap|swipe|drag|long-press <x,y> ... --device <adb serial>   without the library: Android adb input, screen pixels
 ddp type <text> [--into <element>]                 type as the keyboard does, into the focused field
 ddp press Enter | Tab | Backspace
 ddp prefs [list | set <key> <value> | rm <key> | clear | files] [--in <suite or file>]
@@ -203,6 +208,12 @@ thread 0, com.apple.main-thread:
   ...
 report: /Users/you/Library/Logs/DiagnosticReports/DDPSample-2026-10-29-155054.ips
 ```
+
+### gestures
+
+`swipe`, `drag`, `double-tap` and `long-press` move one real finger with `input.touch`, the same finger `tap` uses, so gesture recognizers, SwiftUI and Compose see a touch. A place is an element (its center, read just before) or `x,y` in the frames' unit. `swipe` moves in 12 steps over `--for`; `drag` holds 500 ms first so the app sees a long press that picks the item up; `double-tap` leaves 100 ms between taps. Each prints what changed, leaving out what changes on its own (a clock). A swipe can leave a list moving: wait (`ddp wait --settled 300ms`) before you touch something in it.
+
+Without the library, `--device <adb serial>` uses Android's own `input` command with `x,y` in screen pixels (the screenshot's), and cannot say what changed. A double tap needs the library: two `adb input` commands come too far apart. iOS has no public way to touch a simulator from the host, so ddp refuses there and points to agent-device.
 
 ### launch
 

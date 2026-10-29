@@ -84,6 +84,7 @@ Start here (for agents): ddp skills get core
   connect | launch | disconnect | doctor   attach to a running Debug app, or start it fresh; check the setup
   tree | find | get | read | watch | eval  what is drawn, now or over a take (@refs from tree and find)
   record | wait | tap | type | press       take a recording, wait, touch and type
+  swipe | drag | double-tap | long-press   gestures with a real finger, then what changed
   open | set | logs | prefs | run | state | events   deep links, device settings, app logs, preferences, app commands, values, events
   check overlap|corners|jank|settle|a11y|timeline|parity|baseline|tappable|all
   history | crash                          the last 15 minutes: what changed, taps, requests; the last crash with its stack
@@ -209,8 +210,26 @@ pub fn parser() -> Command {
             .arg(opt("against", "parity: the other platform's recording; baseline: its name"))
             .arg(opt("junit", "baseline: also write a JUnit XML report here")))))
         .subcommand(sub("tap", "live: tap an element with a real touch, once the app's hit test says a touch reaches it")
-            .arg(positional("id", "element id, label or @ref").required(true))
-            .arg(flag("force", "touch the center without the checks")))
+            .arg(positional("id", "element id, label or @ref; or x,y to touch a point").required(true))
+            .arg(flag("force", "touch the center without the checks"))
+            .arg(opt("device", "without the library: x,y in screen pixels with adb input (Android only)")))
+        .subcommand(sub("swipe", "live: a quick finger move from one place to another, then what changed")
+            .arg(positional("id", "from: an element (its center) or x,y").required(true))
+            .arg(positional("value", "to: an element or x,y").required(true))
+            .arg(opt("for", "how long the move takes (default 300ms)").id("duration"))
+            .arg(opt("device", "without the library: Android only, adb input in screen pixels")))
+        .subcommand(sub("drag", "live: hold, then move slowly to another place and let go, then what changed")
+            .arg(positional("id", "from: an element (its center) or x,y").required(true))
+            .arg(positional("value", "to: an element or x,y").required(true))
+            .arg(opt("for", "how long the move takes after a 500ms hold (default 600ms)").id("duration"))
+            .arg(opt("device", "without the library: Android only, adb input in screen pixels")))
+        .subcommand(sub("double-tap", "live: two quick taps, then what changed")
+            .arg(positional("id", "an element (its center) or x,y").required(true))
+            .arg(opt("device", "without the library: Android only, adb input in screen pixels")))
+        .subcommand(sub("long-press", "live: hold a finger down, then what changed")
+            .arg(positional("id", "an element (its center) or x,y").required(true))
+            .arg(opt("for", "how long to hold (default 800ms)").id("duration"))
+            .arg(opt("device", "without the library: Android only, adb input in screen pixels")))
         .subcommand(sub("type", "live: type into the focused field, as the keyboard does")
             .arg(positional("value", "the text").required(true))
             .arg(opt("into", "tap this element first (id, label or @ref)").id("id")))

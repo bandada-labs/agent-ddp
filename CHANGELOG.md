@@ -4,6 +4,8 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 
 ## Unreleased
 
+- Gestures with a real finger: `ddp swipe`, `ddp drag`, `ddp double-tap`, `ddp long-press`, and `ddp tap x,y`, each followed by what changed. Without the library, `--device` uses Android's `adb input` with screen pixels.
+- Fixed: a command given `--device` for another device than the session's took the session's platform and app.
 - `ddp crash`: the app's last crash with its stack, from the platform's own record, after the app is gone. iOS reads the simulator crash report macOS writes, plus the `Fatal error` message; Android reads the crash log buffer (Java and native crashes). Nothing changes in the libraries.
 - `ddp events`: events the app sends in Debug (`AgentDDP.event` on iOS, `AgentDdpEvents.send` on Android), the last 200 or each as it comes with `--follow`. Each one is also in `ddp history` next to frames and taps. New protocol methods `events.list`, `events.watch`, `events.unwatch`.
 - `ddp state`: values the app adds in Debug (`AgentDDP.state` on iOS, `AgentDdpState.add` on Android), for any app. List, `get`, `set` the writable ones, and `watch --until`. New protocol methods `state.list`, `state.get`, `state.set`. `ddp skills get app` shows an agent how to add them.

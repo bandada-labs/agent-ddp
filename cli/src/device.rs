@@ -101,11 +101,13 @@ pub fn target(args: &Args) -> Result<(String, String, Option<String>)> {
     let Some(device) = device else {
         fail!("no device", "missing_device", "ddp connect DEVICE --app ID, or pass --device");
     };
-    let app = args.app.clone().or_else(|| session["app"].as_str().map(String::from));
+    // The session describes its own device only: another one given with --device says its platform by its id.
+    let same_device = session["device"].as_str() == Some(device.as_str());
+    let app = args.app.clone().or_else(|| session["app"].as_str().filter(|_| same_device).map(String::from));
     let platform = args
         .platform
         .clone()
-        .or_else(|| session["platform"].as_str().map(String::from))
+        .or_else(|| session["platform"].as_str().filter(|_| same_device).map(String::from))
         .unwrap_or_else(|| platform_of(None, &device));
     Ok((platform, device, app))
 }
