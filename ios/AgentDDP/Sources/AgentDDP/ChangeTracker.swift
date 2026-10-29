@@ -11,7 +11,11 @@ struct ChangeTracker<Signature: Equatable> {
     private var last: [String: Signature] = [:]
     private var changingSince: [String: Double] = [:]
     private var lastChangeAt: [String: Double] = [:]
+    private var unchangedSince: Double?
     private(set) var onlyBusyChanging = false
+    /// Captures can slow down: only busy elements change, or for `busyAfterMs` every capture saw nothing new. The
+    /// second is a view that redraws without changing what ddp reads, like a spinner or a looping Lottie at rest.
+    private(set) var throttled = false
 
     init(busyAfterMs: Double, quietMs: Double) {
         self.busyAfterMs = busyAfterMs
@@ -29,6 +33,8 @@ struct ChangeTracker<Signature: Equatable> {
         if !changed.isEmpty {
             onlyBusyChanging = changed.allSatisfy { now - changingSince[$0, default: now] >= busyAfterMs }
         }
+        unchangedSince = changed.isEmpty ? unchangedSince ?? now : nil
+        throttled = onlyBusyChanging || unchangedSince.map { now - $0 >= busyAfterMs } == true
         return changed
     }
 }

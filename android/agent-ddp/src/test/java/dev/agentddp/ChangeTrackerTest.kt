@@ -32,6 +32,27 @@ class ChangeTrackerTest {
     }
 
     @Test
+    fun redrawsThatChangeNothingThrottleAfterTheBusyTime() {
+        val tracker = ChangeTracker(busyAfterMs = 2_000, quietMs = 250)
+        tracker.changed(mapOf("row" to "a"), 0)
+        // A spinner that ddp reads no value from: the window draws every frame, the capture sees nothing new.
+        (1 until 120).forEach { tracker.changed(mapOf("row" to "a"), it * 16L) }
+        assertFalse(tracker.throttled)
+        (120 until 130).forEach { tracker.changed(mapOf("row" to "a"), it * 16L) }
+        assertTrue(tracker.throttled)
+        assertFalse(tracker.onlyBusyChanging)
+    }
+
+    @Test
+    fun aChangeAfterRedrawsThatChangeNothingEndsTheThrottle() {
+        val tracker = ChangeTracker(busyAfterMs = 2_000, quietMs = 250)
+        (0 until 200).forEach { tracker.changed(mapOf("row" to "a"), it * 16L) }
+        assertTrue(tracker.throttled)
+        assertEquals(listOf("row"), tracker.changed(mapOf("row" to "b"), 200 * 16L))
+        assertFalse(tracker.throttled)
+    }
+
+    @Test
     fun aPauseLongerThanTheQuietGapStartsOver() {
         val tracker = ChangeTracker(busyAfterMs = 2_000, quietMs = 250)
         (0 until 150).forEach { tracker.changed(mapOf("clock" to "$it"), it * 16L) }

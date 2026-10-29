@@ -25,7 +25,10 @@ import kotlin.math.hypot
 internal object History {
     private const val SEGMENT_MS = 60_000L
     private const val KEEP_MS = 15 * 60_000L
-    /** While only busy elements change, capture at most this often. Anything else changing goes back to every frame. */
+    /**
+     * While only busy elements change, or redraws keep changing nothing, capture at most this often. Anything else
+     * changing goes back to every frame.
+     */
     private const val BUSY_INTERVAL_MS = 250L
 
     private lateinit var directory: File
@@ -84,7 +87,7 @@ internal object History {
     private fun onDraw() {
         if (captureScheduled || FrameStream.active > 0) return
         captureScheduled = true
-        val wait = if (tracker.onlyBusyChanging) BUSY_INTERVAL_MS - (SystemClock.uptimeMillis() - lastCaptureAt) else 0
+        val wait = if (tracker.throttled) BUSY_INTERVAL_MS - (SystemClock.uptimeMillis() - lastCaptureAt) else 0
         Choreographer.getInstance().postFrameCallbackDelayed(capture, wait.coerceAtLeast(0))
     }
 

@@ -7,6 +7,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 - `ddp compare --reference a.png --screen b.png`: two saved screenshots, so both phones can be captured first and compared later with the devices off.
 - `ddp compare --max <pct>` and `--max-band <pct>`: a pass bar the caller sets on the share of pixels that differ, overall and in any one band. Over it, `compare` exits 1. Without a bar it still exits 0.
 - Fixed: `ddp compare --device` on iOS failed in a folder without `.ddp` ("The folder screen.png doesn't exist"). Reading a reference that is not a PNG had the same problem.
+- Fixed: History used a lot of CPU on an idle screen with a view that redraws every frame without changing what ddp reads, such as a looping Lottie or a spinner. Each redraw ran a full capture on the main thread. After 2 s of captures that see nothing new, History now captures at most every 250 ms, as it already did for busy elements. Measured on the sample's spinner screen: iOS 27.0 simulator 75% CPU before, 4% after, 1% without ddp; Android API 35 emulator, main thread 34-55% of a core before, 10-14% after, 5-11% without ddp.
 
 ## 0.2.1 (2026-10-27)
 

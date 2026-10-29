@@ -9,8 +9,16 @@ internal class ChangeTracker(private val busyAfterMs: Long, private val quietMs:
     private var last = emptyMap<String, String>()
     private val changingSince = mutableMapOf<String, Long>()
     private val lastChangeAt = mutableMapOf<String, Long>()
+    private var unchangedSince: Long? = null
 
     var onlyBusyChanging = false
+        private set
+
+    /**
+     * Captures can slow down: only busy elements change, or for [busyAfterMs] every capture saw nothing new. The
+     * second is a view that redraws without changing what ddp reads, like a spinner or a looping Lottie at rest.
+     */
+    var throttled = false
         private set
 
     fun changed(signatures: Map<String, String>, now: Long): List<String> {
@@ -23,6 +31,8 @@ internal class ChangeTracker(private val busyAfterMs: Long, private val quietMs:
         }
         // A capture that saw nothing new does not end a busy stretch: it only came between two of its frames.
         if (changed.isNotEmpty()) onlyBusyChanging = changed.all { now - changingSince.getValue(it) >= busyAfterMs }
+        unchangedSince = if (changed.isEmpty()) unchangedSince ?: now else null
+        throttled = onlyBusyChanging || unchangedSince?.let { now - it >= busyAfterMs } == true
         return changed
     }
 }

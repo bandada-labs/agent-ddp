@@ -137,3 +137,11 @@ Done: the guard (the attribute must still be a one-argument `WeakAttribute` stru
 
 ### 0.2.1 published before the two-phone test
 Mimbre's asks were cut to a patch: `ddp compare` and a note on headless simulators. The other asks wait for a later release. Asked whether to wait for a free device slot to run `compare <element> --on ios,android` on a real simulator and emulator. Answer: "ve haciendolo tu lo de publicar el nuevo release". Published with the fake-app tests and a live screen compare on the iOS simulator. The two-phone run happens when a slot is free, and a bug there ships as 0.2.2.
+
+## 2026-10-29
+
+### Three answers for 0.3.0
+Triage of the 0.3.0 tickets raised three questions. Answers: "1. ok 2. ok 3. its ok".
+1. History on Android ran the layout walk every frame, and with a looping animation an idle debug app used 30-110% CPU and hit an input ANR. Asked whether skipping frames where nothing changed is fine, keeping the 15 minutes of ADR 0005, instead of pausing History when no recording is open. Yes.
+2. `compare` always exits 0 since 0.2.1. Asked whether an opt-in `--max <pct>` that exits non-zero is fine, since the caller sets the bar and ddp reports no problem of its own. Yes.
+3. A structure compare across phones was asked to work without the library. Asked whether the accessibility tree is enough for that. Yes.

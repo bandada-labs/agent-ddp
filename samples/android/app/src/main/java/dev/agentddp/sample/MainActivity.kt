@@ -57,6 +57,21 @@ class CoveredActivity : ComponentActivity() {
     }
 }
 
+/** A still screen with a spinner that redraws every frame without changing anything ddp reads, like a looping Lottie. */
+class SpinnerActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            MaterialTheme {
+                Column(Modifier.padding(24.dp)) {
+                    CircularProgressIndicator()
+                    repeat(30) { Text("Row $it", Modifier.testTag("row$it")) }
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SampleScreen(initialAction: String = "none") {

@@ -12,7 +12,8 @@ final class History {
 
     private static let segmentMs = 60_000.0
     private static let keepMs = 15 * 60_000.0
-    /// While only busy elements change, capture at most this often. Anything else changing goes back to every turn.
+    /// While only busy elements change, or redraws keep changing nothing, capture at most this often. Anything else
+    /// changing goes back to every turn.
     private static let busyIntervalMs = 250.0
 
     /// Streams capture every frame already and offer them here, so history does not capture twice.
@@ -74,7 +75,7 @@ final class History {
 
     private func onTurnEnded() {
         guard !captureScheduled, Self.activeStreams == 0 else { return }
-        let wait = tracker.onlyBusyChanging ? Self.busyIntervalMs - (Self.uptimeMs() - lastCaptureAt) : 0
+        let wait = tracker.throttled ? Self.busyIntervalMs - (Self.uptimeMs() - lastCaptureAt) : 0
         guard wait > 0 else { return captureNow() }
         // The wake-up itself ends a turn, and that turn captures.
         captureScheduled = true

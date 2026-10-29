@@ -17,5 +17,7 @@
         <!-- Reproduces a real bug: the action bar draws over the content. -->
         <activity android:name=".CoveredActivity" android:exported="true"
             android:theme="@android:style/Theme.Material.Light.DarkActionBar" />
+        <!-- History's cost on an idle screen that keeps drawing. -->
+        <activity android:name=".SpinnerActivity" android:exported="true" />
     </application>
 </manifest>

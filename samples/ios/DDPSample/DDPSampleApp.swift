@@ -4,14 +4,54 @@ import SwiftUI
 
 @main
 struct DDPSampleApp: App {
+    // Launch arguments for measuring History's cost: `-spinner` opens the spinner screen, `-noDDP` runs without ddp.
+    private let showsSpinner = CommandLine.arguments.contains("-spinner")
+
     init() {
+        guard !CommandLine.arguments.contains("-noDDP") else { return }
         AgentDDP.start()
         AgentDDP.redact(values: [SampleNetwork.devSecret])
         AgentDDP.command("load") { _ in await SampleNetwork.load() }
     }
 
     var body: some Scene {
-        WindowGroup { ContentView() }
+        WindowGroup {
+            if showsSpinner { SpinnerView() } else { ContentView() }
+        }
+    }
+}
+
+/// A still screen with a view that redraws every frame without changing anything ddp reads, like a looping Lottie.
+struct SpinnerView: View {
+    var body: some View {
+        VStack(alignment: .leading) {
+            RedrawEveryFrame().frame(width: 40, height: 40)
+            ForEach(0..<30, id: \.self) { Text("Row \($0)").accessibilityIdentifier("row\($0)") }
+        }
+        .padding(24)
+    }
+}
+
+struct RedrawEveryFrame: UIViewRepresentable {
+    func makeUIView(context: Context) -> RedrawView { RedrawView() }
+    func updateUIView(_ view: RedrawView, context: Context) {}
+}
+
+final class RedrawView: UIView {
+    private var link: CADisplayLink?
+
+    override func didMoveToWindow() {
+        link?.invalidate()
+        guard window != nil else { return }
+        link = CADisplayLink(target: self, selector: #selector(redraw))
+        link?.add(to: .main, forMode: .common)
+    }
+
+    @objc private func redraw() { setNeedsDisplay() }
+
+    override func draw(_ rect: CGRect) {
+        UIColor.systemBlue.setFill()
+        UIBezierPath(ovalIn: bounds.insetBy(dx: 4, dy: 4)).fill()
     }
 }
 

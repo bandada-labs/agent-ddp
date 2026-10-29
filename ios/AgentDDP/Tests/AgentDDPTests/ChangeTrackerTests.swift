@@ -26,6 +26,25 @@ final class ChangeTrackerTests: XCTestCase {
         XCTAssertFalse(tracker.onlyBusyChanging)
     }
 
+    func testRedrawsThatChangeNothingThrottleAfterTheBusyTime() {
+        var tracker = ChangeTracker<String>(busyAfterMs: 2_000, quietMs: 250)
+        _ = tracker.changed(["row": "a"], at: 0)
+        // A spinner that ddp reads no value from: the app draws every frame, the capture sees nothing new.
+        for step in 1..<120 { _ = tracker.changed(["row": "a"], at: Double(step) * 16) }
+        XCTAssertFalse(tracker.throttled)
+        for step in 120..<130 { _ = tracker.changed(["row": "a"], at: Double(step) * 16) }
+        XCTAssertTrue(tracker.throttled)
+        XCTAssertFalse(tracker.onlyBusyChanging)
+    }
+
+    func testAChangeAfterRedrawsThatChangeNothingEndsTheThrottle() {
+        var tracker = ChangeTracker<String>(busyAfterMs: 2_000, quietMs: 250)
+        for step in 0..<200 { _ = tracker.changed(["row": "a"], at: Double(step) * 16) }
+        XCTAssertTrue(tracker.throttled)
+        XCTAssertEqual(tracker.changed(["row": "b"], at: 200 * 16), ["row"])
+        XCTAssertFalse(tracker.throttled)
+    }
+
     func testAPauseLongerThanTheQuietGapStartsOver() {
         var tracker = ChangeTracker<String>(busyAfterMs: 2_000, quietMs: 250)
         for step in 0..<150 { _ = tracker.changed(["clock": "\(step)"], at: Double(step) * 16) }
