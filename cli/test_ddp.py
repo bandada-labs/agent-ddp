@@ -639,6 +639,9 @@ with tempfile.TemporaryDirectory() as directory:
                      "--out", str(Path(directory, "ignored.png")))
     assert "difference 0.0% (pixels that differ: 0.0%)" in ignored.stdout and \
         "left out: 100.0% of the pixels" in ignored.stdout, ignored.stdout + ignored.stderr
+    same = ddp_in(directory, "compare", "--on", "ios,android", "--structure")
+    assert same.returncode == 0 and "structure: ios 5 labeled elements, android 5; 5 on both" in same.stdout and \
+        "the same labels on both" in same.stdout, same.stdout + same.stderr
     masked = ddp_in(directory, "compare", "button", "--on", "ios,android", "--mask", "0,0,10,10")
     assert masked.returncode == 1 and "--mask is for the whole screen" in masked.stderr, masked.stderr
     missing = ddp_in(directory, "compare", "button")

@@ -41,6 +41,7 @@ pub fn compare(args: &mut Args) -> Result<i32> {
             )
         }
         (Some(key), Some(reference), _) => element_against(key, reference, &args.ignore, &out),
+        (None, None, Some(on)) if args.structure => return structure_across(on),
         (Some(key), None, Some(on)) => element_across(key, on, &args.ignore, &out),
         _ => fail!(
             "compare needs --reference, or an element and --on",
@@ -205,17 +206,7 @@ fn element_across(key: &str, on: &str, ignore: &[String], out: &Path) -> Result<
     let [first, second] = names[..] else {
         fail!("--on takes two sessions, e.g. ios,android", "bad_value", "ddp compare card --on ios,android");
     };
-    let pixels = |name: &str| -> Result<Piece> {
-        let session_file = Path::new(".ddp").join("sessions").join(name).join("session.json");
-        let Some(session) = read_json(&session_file) else {
-            fail!(
-                format!("no session '{name}'"),
-                "no_session",
-                format!("ddp connect DEVICE --app ID --session {name}")
-            );
-        };
-        element_pixels(&session, key, ignore)
-    };
+    let pixels = |name: &str| -> Result<Piece> { element_pixels(&session_named(name)?, key, ignore) };
     let (one, other) = (pixels(first)?, pixels(second)?);
     let (a, b) = (&one.image, &other.image);
     say!("{key} on {first} {}x{} px against {second} {}x{} px", a.width, a.height, b.width, b.height);
@@ -223,6 +214,100 @@ fn element_across(key: &str, on: &str, ignore: &[String], out: &Path) -> Result<
     // An ignored part sits a little differently on each phone: both places are left out.
     let mask = [one.mask(a.width, a.height), other.mask(a.width, a.height)].concat();
     report(&a, &b, ELEMENT_BANDS, [first, second], &mask, out)
+}
+
+/// What two sessions draw, by label: what one phone has and the other does not, and the same label drawn as another
+/// kind. Platform idiom (a large title, a FAB) moves pixels, not labels, so a missing tab or chip stands out here.
+/// A measurement like the rest of compare: it exits 0.
+fn structure_across(on: &str) -> Result<i32> {
+    let names: Vec<&str> = on.split(',').map(str::trim).collect();
+    let [first, second] = names[..] else {
+        fail!("--on takes two sessions, e.g. ios,android", "bad_value", "ddp compare --on ios,android --structure");
+    };
+    let labeled = |name: &str| -> Result<Vec<(String, String)>> {
+        let session = session_named(name)?;
+        let recording = snapshot_live(&session)?;
+        Ok(recording
+            .frames
+            .last()
+            .unwrap()
+            .elements()
+            .iter()
+            .filter_map(|element| {
+                let label = element.get("label").map(py::str)?;
+                let label = label.split_whitespace().collect::<Vec<_>>().join(" ");
+                (!label.is_empty()).then(|| {
+                    (
+                        label.to_lowercase(),
+                        format!("{label}\u{1}{}", element.get("role").map(py::str).unwrap_or_default()),
+                    )
+                })
+            })
+            .collect())
+    };
+    let (one, other) = (labeled(first)?, labeled(second)?);
+    let Structure { only_one, only_other, kinds, both } = structure_difference(&one, &other);
+    say!("structure: {first} {} labeled elements, {second} {}; {both} on both", one.len(), other.len());
+    let list = |items: &[String]| items.iter().take(20).cloned().collect::<Vec<_>>().join(", ");
+    if !only_one.is_empty() {
+        say!("only on {first} ({}): {}", only_one.len(), list(&only_one));
+    }
+    if !only_other.is_empty() {
+        say!("only on {second} ({}): {}", only_other.len(), list(&only_other));
+    }
+    if !kinds.is_empty() {
+        let shown: Vec<String> =
+            kinds.iter().take(20).map(|(label, a, b)| format!("{label} ({first} {a}, {second} {b})")).collect();
+        say!("same label, other kind ({}): {}", kinds.len(), shown.join(", "));
+    }
+    if only_one.is_empty() && only_other.is_empty() && kinds.is_empty() {
+        say!("the same labels on both");
+    }
+    Ok(0)
+}
+
+struct Structure {
+    only_one: Vec<String>,
+    only_other: Vec<String>,
+    /// The label, its role on the first phone, on the second.
+    kinds: Vec<(String, String, String)>,
+    both: usize,
+}
+
+/// `(key, "Label\u{1}role")` lists to: labels only on the first, only on the second, the same label with another
+/// role, and how many match. A label twice on one phone and once on the other leaves one over.
+fn structure_difference(one: &[(String, String)], other: &[(String, String)]) -> Structure {
+    let split = |shown: &str| {
+        let (label, role) = shown.split_once('\u{1}').unwrap_or((shown, ""));
+        (label.to_string(), role.to_string())
+    };
+    let mut rest: Vec<Option<&(String, String)>> = other.iter().map(Some).collect();
+    let (mut only_one, mut kinds, mut both) = (Vec::new(), Vec::new(), 0);
+    for (key, shown) in one {
+        match rest.iter().position(|item| item.is_some_and(|(k, _)| k == key)) {
+            Some(index) => {
+                let (_, theirs) = rest[index].take().unwrap();
+                both += 1;
+                let ((label, mine), (_, their_role)) = (split(shown), split(theirs));
+                if mine != their_role && !mine.is_empty() && !their_role.is_empty() {
+                    kinds.push((label, mine, their_role));
+                }
+            }
+            None => only_one.push(split(shown).0),
+        }
+    }
+    let only_other = rest.into_iter().flatten().map(|(_, shown)| split(shown).0).collect();
+    Structure { only_one, only_other, kinds, both }
+}
+
+fn session_named(name: &str) -> Result<Value> {
+    let session_file = Path::new(".ddp").join("sessions").join(name).join("session.json");
+    match read_json(&session_file) {
+        Some(session) => Ok(session),
+        None => {
+            fail!(format!("no session '{name}'"), "no_session", format!("ddp connect DEVICE --app ID --session {name}"))
+        }
+    }
 }
 
 /// An element's pixels, its frame, and the frames of the parts of it to leave out.
@@ -477,6 +562,23 @@ mod tests {
 
     fn filled(width: usize, height: usize, color: [u8; 4]) -> Image {
         Image { width, height, rgba: color.repeat(width * height) }
+    }
+
+    #[test]
+    fn a_missing_tab_shows_and_a_repeated_label_counts_once_each() {
+        let entry = |label: &str, role: &str| (label.to_lowercase(), format!("{label}\u{1}{role}"));
+        let ios = [
+            entry("Home", "button"),
+            entry("Search", "searchbox"),
+            entry("Row", "StaticText"),
+            entry("Row", "StaticText"),
+        ];
+        let android = [entry("Home", "tab"), entry("Row", "StaticText"), entry("Add", "button")];
+        let found = structure_difference(&ios, &android);
+        assert_eq!(found.only_one, vec!["Search", "Row"]);
+        assert_eq!(found.only_other, vec!["Add"]);
+        assert_eq!(found.kinds, vec![("Home".to_string(), "button".to_string(), "tab".to_string())]);
+        assert_eq!(found.both, 2);
     }
 
     #[test]

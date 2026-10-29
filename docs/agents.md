@@ -50,6 +50,7 @@ ddp compare --reference <image> [--out ddp-compare.png]   the screen against a r
 ddp compare <element> --reference <image>          one element against a reference image of it
 ddp compare <element> --on ios,android             one element on two phones, pixel by pixel
 ddp compare --reference a.png --screen b.png --max 5%   two saved screenshots; exit 1 over the caller's bar
+ddp compare --on ios,android --structure           what each phone draws by label: only on one, other kind
 ddp explore [--per 2s] [--skip <el> ...]           tap each control once, record, check all on each
 ddp record --on ios,android --for 3s --then "<cmd with {platform}>"   both at once, then parity
 ddp view [out.html] [--file rec]                   a local HTML page of a take, for people
@@ -271,6 +272,7 @@ A simulator booted with `xcrun simctl boot` and no Simulator.app window still dr
 - The reference is a PNG, or on macOS any image `sips` opens (JPEG, WebP, HEIC).
 - `--ignore <element>...` leaves elements out of the scores, such as a clock or a spinner: on the screen it needs a session to find them, and across two phones each phone's place for it is left out. `--mask x,y,w,h` (whole screen only, repeatable) leaves out a rectangle in screenshot pixels, such as the status bar, whose time never matches a reference. Left-out pixels are dark gray in the picture and count in no score.
 - `difference` is the mean of each pixel's largest channel difference. `pixels that differ` is the share more than 32 of 255 apart, which is the same tolerance the pixel checks use for "the same color". Then the same two numbers per band, top to bottom: 8 bands for the screen, 4 for an element. Resampling a reference to another width moves edges by a pixel, so text and borders show as small red lines even when nothing changed.
+- `compare --on ios,android --structure` compares what the two phones draw by label, not pixels, so platform idiom (a large title, an inset list, a FAB) does not hide a real gap. It prints the labels only one phone has (a missing tab, search field or chip), and a label drawn as another kind on each (`Home (ios button, android tab)`). Labels match case and spaces aside; a label twice on one phone and once on the other leaves one over. Both sessions need the library: iOS gives the host no accessibility tree.
 - `--max 5%` and `--max-band 20%` set a pass bar on `pixels that differ`, overall and in any one band. Over it, ddp prints `over --max: ...` or `over --max-band: band ...` and exits 1; under it, `within the bar` and exits 0. The bar is the caller's, so a run over many screens can count passes.
 
 ```

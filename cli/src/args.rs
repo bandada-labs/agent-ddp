@@ -69,6 +69,7 @@ pub struct Args {
     pub follow: bool,
     pub force: bool,
     pub reset: bool,
+    pub structure: bool,
     pub reference: Option<PathBuf>,
     pub masks: Vec<String>,
     pub screen: Option<PathBuf>,
@@ -298,6 +299,7 @@ pub fn parser() -> Command {
             .arg(Arg::new("mask").long("mask").num_args(1).action(ArgAction::Append).value_name("X,Y,W,H")
                 .help("the whole screen: a rectangle in screenshot pixels to leave out, such as the status bar; repeat for more"))
             .arg(opt("screen", "the whole screen: a saved screenshot instead of the device's, to compare offline"))
+            .arg(flag("structure", "with --on and no element: what each phone draws by label, not pixels"))
             .arg(opt("max", "exit 1 when more than this share of pixels differ overall (5 or 5%)"))
             .arg(opt("max-band", "exit 1 when more than this share of pixels differ in any band (20 or 20%)"))
             .arg(opt("out", "where to write the side-by-side PNG").default_value("ddp-compare.png")))
@@ -452,5 +454,6 @@ pub fn parse(argv: &[String]) -> Result<Args, clap::Error> {
         follow: boolean(m, "follow"),
         force: boolean(m, "force"),
         reset: boolean(m, "reset"),
+        structure: boolean(m, "structure"),
     })
 }
