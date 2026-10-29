@@ -2,6 +2,7 @@ mod args;
 mod checks;
 mod compare;
 mod control;
+mod crash;
 mod device;
 mod history;
 mod hit;
@@ -58,6 +59,7 @@ fn handler(command: &str) -> fn(&mut Args) -> Result<i32> {
         "run" => live::run_command,
         "state" => live::app_state,
         "events" => live::app_events,
+        "crash" => crash::crash,
         "wait" => device::wait,
         "logs" => device::logs,
         "history" => history::history,

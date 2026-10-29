@@ -86,7 +86,7 @@ Start here (for agents): ddp skills get core
   record | wait | tap | type | press       take a recording, wait, touch and type
   open | set | logs | prefs | run | state | events   deep links, device settings, app logs, preferences, app commands, values, events
   check overlap|corners|jank|settle|a11y|timeline|parity|baseline|tappable|all
-  history                                  the last 15 minutes: what changed, taps, requests; or one moment as a take
+  history | crash                          the last 15 minutes: what changed, taps, requests; the last crash with its stack
   compare --reference <png> | compare <element> --on ios,android   pixels against a reference or the other phone
   diff | baseline | annotate | view | explore | net | time
   skills | batch | mcp
@@ -241,6 +241,7 @@ pub fn parser() -> Command {
             .arg(opt("for", "--follow: stop after this long").id("duration"))
             .arg(opt("grep", "only lines holding this text"))
             .arg(opt("limit", "at most this many lines").value_parser(clap::value_parser!(usize)).default_value("50")))))
+        .subcommand(device_options(sub("crash", "the app's last crash as the platform recorded it, with its stack (the app may be gone)")))
         .subcommand(sub("events", "live: events the app sent in Debug (a rule that fired, a sync that ended)")
             .arg(flag("follow", "the kept ones, then each new one"))
             .arg(opt("for", "--follow: stop after this long").id("duration"))

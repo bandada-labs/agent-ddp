@@ -17,6 +17,11 @@ struct DDPSampleApp: App {
             AgentDDP.event("loaded", ["loads": loads, "answer": answer])
             return answer
         }
+        // For `ddp crash`: a Swift trap on the main thread, like a force unwrap of nil.
+        AgentDDP.command("crash") { _ in
+            DispatchQueue.main.async { SampleState.crash("the sample crashed on purpose") }
+            return nil
+        }
         AgentDDP.state("mode", get: { SampleState.mode }, set: { SampleState.mode = $0 as? String ?? SampleState.mode })
         AgentDDP.state("loads", get: { SampleState.loads })
     }
@@ -32,6 +37,8 @@ struct DDPSampleApp: App {
 enum SampleState {
     static var mode = "normal"
     static var loads = 0
+
+    static func crash(_ why: String) -> Never { fatalError(why) }
 }
 
 /// A still screen with a view that redraws every frame without changing anything ddp reads, like a looping Lottie.

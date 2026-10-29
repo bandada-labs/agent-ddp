@@ -15,6 +15,7 @@ ddp connect <sim UDID | adb serial> --app <id>  # attach; every command below no
 ddp launch <device> --app <id> --env MODE=demo   # start it fresh with values for it (iOS env, Android intent extras), then connect
 ddp state [get|set|watch] NAME   # values the app added in Debug (a total, a mode); ddp skills get app shows how
 ddp events [--follow]            # events the app sent in Debug (a rule that fired), also in ddp history
+ddp crash                        # the app died? its last crash with the stack, from the platform's own record
 ddp tree -i                                      # what is on screen: elements with @refs, no paint nodes
 ddp watch @e3 --until 'border>3' --then "agent-device press id=start"
 ddp read --for 3s --then "agent-device press id=start"   # record a take, summary per element
