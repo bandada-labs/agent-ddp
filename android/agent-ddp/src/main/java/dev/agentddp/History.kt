@@ -37,6 +37,8 @@ internal object History {
     // Main thread only.
     private val watchedWindows = WeakHashMap<Window, Unit>()
     private var captureScheduled = false
+    /** While above 0 History captures nothing: `perf.metrics` measures the app without the library's cost. */
+    var quiet = 0
     // The quiet gap must be longer than BUSY_INTERVAL_MS: while throttled, a busy element is only seen that often.
     private val tracker = ChangeTracker(busyAfterMs = 2_000, quietMs = 2 * BUSY_INTERVAL_MS)
     private var lastCaptureAt = 0L
@@ -88,7 +90,7 @@ internal object History {
     }
 
     private fun onDraw() {
-        if (captureScheduled || FrameStream.active > 0) return
+        if (captureScheduled || FrameStream.active > 0 || quiet > 0) return
         captureScheduled = true
         val wait = if (tracker.throttled) BUSY_INTERVAL_MS - (SystemClock.uptimeMillis() - lastCaptureAt) else 0
         Choreographer.getInstance().postFrameCallbackDelayed(capture, wait.coerceAtLeast(0))
@@ -96,7 +98,7 @@ internal object History {
 
     private fun captureNow() {
         captureScheduled = false
-        if (FrameRecorder.resumedActivity == null || FrameStream.active > 0) return
+        if (FrameRecorder.resumedActivity == null || FrameStream.active > 0 || quiet > 0) return
         lastCaptureAt = SystemClock.uptimeMillis()
         val started = SystemClock.elapsedRealtimeNanos()
         val frame = FrameCapture.frame(0, 0.0)

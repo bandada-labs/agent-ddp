@@ -518,6 +518,9 @@ class FakeApp:
                         continue
                     self.mode = params["value"]
                     result = {"value": self.mode}
+                elif method == "perf.metrics":
+                    result = {"ms": params["ms"], "refreshMs": 16.67, "refreshes": 59, "missed": 3, "worstGapMs": 66.7,
+                              "drawn": 20, "drawMeanMs": 6.1, "drawP95Ms": 12.4, "drawnOverRefresh": 1}
                 elif method in ("events.list", "events.watch"):
                     events = [{"t": 1729700000000, "name": "rule", "fields": {"event": "save:expenses", "spent": 120}},
                               {"t": 1729700000500, "name": "sync", "fields": {"ok": True}}]
@@ -703,6 +706,9 @@ with tempfile.TemporaryDirectory() as directory:
     assert met.returncode == 0 and "until met at" in met.stdout and "->" in met.stdout, met.stdout + met.stderr
     unmet = ddp_in(directory, "state", "watch", "mode", "--until", "=never", "--for", "300ms")
     assert unmet.returncode == 1 and "until not met in 300ms: mode=never" in unmet.stdout, unmet.stdout + unmet.stderr
+    perf = ddp_in(directory, "perf", "--for", "1s")
+    assert perf.returncode == 0 and perf.stdout == "1.0s: the main thread missed 3 of 59 refreshes (16.67 ms each), worst gap 66.7 ms; " \
+        "20 frames drawn, draw time mean 6.1 ms, p95 12.4 ms, 1 over a refresh\n", perf.stdout + perf.stderr
     # App events: the kept ones, a filter, and a follow that ends with --for.
     events = ddp_in(directory, "events").stdout
     assert "rule event=save:expenses spent=120" in events and "sync ok=true" in events, events

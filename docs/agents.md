@@ -12,6 +12,7 @@ ddp launch <device> --app <id> [--env KEY=VALUE ...]   start the app fresh with 
 ddp state [list] | get <name> | set <name> <value> | watch <name> [--until '>100'] [--for 10s]   the app's own values
 ddp events [--follow] [--for 10s] [--grep <text>]   events the app sent in Debug, also in ddp history
 ddp crash [--device <id> --app <id>]               the app's last crash as the platform recorded it, with its stack
+ddp perf [--for 5s]                                refreshes the main thread missed, worst gap; Android: draw time
 ddp doctor [<device> --app <id>]                  what is wrong between the device and a frame, with the fix, and every engine hook's state
 ddp tree [-i] [-c] [--within <el>] [-d N]         what is on screen now, per element, with @refs
 ddp find text <part of a label> | id <id>          elements by name, with @refs
@@ -192,6 +193,15 @@ OUTSIDE trapOutside: outside its parent (UIView bounds), no point of it takes a 
 `state` reads values the app added in its Debug code, in its own language: `AgentDDP.state(name, get:, set:)` on iOS, `AgentDdpState.add(name, get, set)` on Android. ddp knows nothing about the app's model or engine; the app decides what to show. `ddp state` lists every value with `(writable)` when the app gave a setter. `set` sends the value as JSON when it parses (`500`, `true`, `{"a": 1}`), else as text, and prints what the getter reads back. `watch` reads every 50 ms and prints each change; with `--until` it exits 0 when it holds and 1 when `--for` (default 10s) ends first. A bare `--until '>100'` is about the watched value; `'total>100 and mode=done'` names values. `ddp skills get app` is the guide for adding the lines.
 
 `events` shows events the app sent in its Debug code: `AgentDDP.event(name, fields)` on iOS, `AgentDdpEvents.send(name, fields)` on Android, from any thread. The library keeps the last 200; `--follow` prints them, then each new one. Each event also goes into History, so `ddp history` prints `event <name> key=value ...` next to frames and taps, after a crash too.
+
+### perf
+
+`perf` measures for `--for` (default 5s) whatever is on screen, from the platform's own clocks, without a recording. Both platforms count the refreshes the main thread missed from their vsync callbacks (Choreographer, CADisplayLink): a gap of two refresh periods is one missed. Android adds the draw time of each frame it drew (FrameMetrics: mean, p95, how many took longer than a refresh); iOS gives an app no draw time, so it says not measured. A still screen draws nothing on Android: `no frame drawn` is not a problem. History captures nothing during the measure, so ddp's own cost is not in it. A measurement: it exits 0.
+
+```
+$ ddp perf --for 3s
+3.0s: the main thread missed 12 of 178 refreshes (16.67 ms each), worst gap 217.07 ms; draw time not measured (iOS gives an app none)
+```
 
 ### crash
 

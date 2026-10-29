@@ -17,6 +17,11 @@ struct DDPSampleApp: App {
             AgentDDP.event("loaded", ["loads": loads, "answer": answer])
             return answer
         }
+        // For `ddp perf`: the main thread busy for 200 ms, about 11 refreshes missed at 60 Hz.
+        AgentDDP.command("jank") { _ in
+            await MainActor.run { Thread.sleep(forTimeInterval: 0.2) }
+            return nil
+        }
         // For `ddp crash`: a Swift trap on the main thread, like a force unwrap of nil.
         AgentDDP.command("crash") { _ in
             DispatchQueue.main.async { SampleState.crash("the sample crashed on purpose") }

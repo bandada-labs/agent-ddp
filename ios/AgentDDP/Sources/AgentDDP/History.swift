@@ -16,7 +16,8 @@ final class History {
     /// changing goes back to every turn.
     private static let busyIntervalMs = 250.0
 
-    /// Streams capture every frame already and offer them here, so history does not capture twice.
+    /// Streams capture every frame already and offer them here, so history does not capture twice. `perf.metrics`
+    /// counts as one too, so History's cost is not in what it measures.
     static var activeStreams = 0
 
     // Main thread only.

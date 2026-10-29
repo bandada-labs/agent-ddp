@@ -20,6 +20,11 @@ fun addSampleCommands() {
             AgentDdpEvents.send("loaded", mapOf("loads" to SampleState.loads, "answer" to answer))
         }
     }
+    // For `ddp perf`: the main thread busy for 200 ms, about 11 refreshes missed at 60 Hz.
+    AgentDdpCommands.add("jank") {
+        Handler(Looper.getMainLooper()).post { Thread.sleep(200) }
+        null
+    }
     // For `ddp crash`: an uncaught exception on the main thread.
     AgentDdpCommands.add("crash") {
         Handler(Looper.getMainLooper()).post { throw IllegalStateException("the sample crashed on purpose") }

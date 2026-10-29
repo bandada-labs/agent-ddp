@@ -111,6 +111,7 @@ internal class ControlSession(private val app: ControlApp, private val send: (St
             val extras = onMain { FrameRecorder.resumedActivity?.intent?.extras?.keySet().orEmpty() }
             JSONObject().put("received", JSONArray(names.filter { it in extras }))
         },
+        "perf.metrics" to Perf::measure,
         "state.list" to { _ -> AgentDdpState.list() },
         "state.get" to AgentDdpState::get,
         "state.set" to AgentDdpState::set,
@@ -264,7 +265,7 @@ internal class ControlSession(private val app: ControlApp, private val send: (St
 
     private companion object {
         /** These wait on the app's code or the network, off the reading thread, so a request they send can still be paused and continued. */
-        val WAITING = setOf("app.run", "net.send")
+        val WAITING = setOf("app.run", "net.send", "perf.metrics")
         const val FRAME_BACKLOG = 64
     }
 }

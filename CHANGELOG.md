@@ -4,6 +4,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 
 ## Unreleased
 
+- `ddp perf [--for 5s]`: refreshes the main thread missed and the worst gap, from the platform's vsync callbacks, plus draw time per frame on Android (FrameMetrics), without a recording. New protocol method `perf.metrics`. History pauses while it measures.
 - Gestures with a real finger: `ddp swipe`, `ddp drag`, `ddp double-tap`, `ddp long-press`, and `ddp tap x,y`, each followed by what changed. Without the library, `--device` uses Android's `adb input` with screen pixels.
 - Fixed: a command given `--device` for another device than the session's took the session's platform and app.
 - `ddp crash`: the app's last crash with its stack, from the platform's own record, after the app is gone. iOS reads the simulator crash report macOS writes, plus the `Fatal error` message; Android reads the crash log buffer (Java and native crashes). Nothing changes in the libraries.

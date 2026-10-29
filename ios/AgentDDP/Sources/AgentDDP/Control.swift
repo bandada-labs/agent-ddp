@@ -249,6 +249,7 @@ final class ControlSession {
     private let waitingMethods: [String: ([String: Any]) async throws -> Any] = [
         "app.run": { try await Commands.shared.run($0) },
         "net.send": { try await AppClient.shared.send($0) },
+        "perf.metrics": { try await Perf.measure($0) },
     ]
 
     init(app: ControlApp, send: @escaping (String) -> Void) {

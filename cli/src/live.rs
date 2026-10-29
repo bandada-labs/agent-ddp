@@ -853,6 +853,35 @@ pub fn follow_logs(args: &Args) -> Result<i32> {
     Ok(0)
 }
 
+/// How the app runs for `--for`, from the platform's own clocks. A measurement: it exits 0 whatever it finds.
+pub fn perf(args: &mut Args) -> Result<i32> {
+    let session = require_session()?;
+    let ms = parse_ms(args.duration.as_deref().unwrap_or("5s"))?;
+    let mut control = open(&session)?;
+    let answer = control.call("perf.metrics", json!({"ms": ms}))?;
+    control.close();
+    let refreshes = answer["refreshes"].as_u64().unwrap_or(0);
+    let mut line = format!(
+        "{}s: the main thread missed {} of {refreshes} refreshes ({} ms each), worst gap {} ms",
+        py::fixed(&json!(ms / 1000.0), 1),
+        py::str(&answer["missed"]),
+        py::str(&answer["refreshMs"]),
+        py::str(&answer["worstGapMs"])
+    );
+    match answer["drawn"].as_u64() {
+        None => line.push_str("; draw time not measured (iOS gives an app none)"),
+        Some(0) => line.push_str("; no frame drawn (nothing changed on screen)"),
+        Some(drawn) => line.push_str(&format!(
+            "; {drawn} frames drawn, draw time mean {} ms, p95 {} ms, {} over a refresh",
+            py::str(&answer["drawMeanMs"]),
+            py::str(&answer["drawP95Ms"]),
+            py::str(&answer["drawnOverRefresh"])
+        )),
+    }
+    say!("{line}");
+    Ok(0)
+}
+
 /// Events the app sent in Debug (`AgentDDP.event`, `AgentDdpEvents.send`): the last ones, or each as it comes.
 pub fn app_events(args: &mut Args) -> Result<i32> {
     let session = require_session()?;
