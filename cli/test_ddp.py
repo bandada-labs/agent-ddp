@@ -720,10 +720,14 @@ with tempfile.TemporaryDirectory() as directory:
     assert refused.returncode == 1 and "read-only" in refused.stderr, refused.stderr
     met = ddp_in(directory, "state", "watch", "total", "--until", ">100")
     assert met.returncode == 0 and "until met at" in met.stdout and "->" in met.stdout, met.stdout + met.stderr
+    many = ddp_in(directory, "state", "watch", "total", "--until", ">600")
+    printed = [line for line in many.stdout.splitlines() if "->" in line]
+    assert len(printed) == 20 and "more changes, now" in many.stdout and "until met" in many.stdout, many.stdout
     unmet = ddp_in(directory, "state", "watch", "mode", "--until", "=never", "--for", "300ms")
     assert unmet.returncode == 1 and "until not met in 300ms: mode=never" in unmet.stdout, unmet.stdout + unmet.stderr
     assert ddp_in(directory, "storage").stdout == "Documents/\nnote.txt  22 bytes\n"
     assert ddp_in(directory, "storage", "read", "note.txt").stdout == "hello from the sample\n"
+    assert "... 1 lines in all, 22 bytes" in ddp_in(directory, "storage", "read", "note.txt", "--limit", "0").stdout
     queried = ddp_in(directory, "storage", "query", "a.sqlite", "SELECT * FROM items").stdout
     assert queried == "name | token\nfirst | [redacted]\n... more rows: add LIMIT/OFFSET to see them\n", queried
     keys = ddp_in(directory, "storage", "keys").stdout

@@ -15,6 +15,8 @@ use std::time::{Duration, Instant};
 const STILL_SCREEN_SLACK_MS: u64 = 500;
 /// `state watch` reads the value this often: app values have no change signal of their own.
 const STATE_POLL_MS: u64 = 50;
+/// `state watch` prints this many changes, then only how many more came.
+const STATE_PRINTED_CHANGES: usize = 20;
 /// The comparison operators a bare `--until` such as '>100' may start with.
 const QUERY_START: [&str; 6] = [">=", "<=", "!=", ">", "<", "="];
 
@@ -818,6 +820,8 @@ fn watch_state_values(control: &mut Control, name: &str, args: &Args) -> Result<
     let duration = parse_ms(args.duration.as_deref().unwrap_or("10s"))?;
     let started = Instant::now();
     let mut previous: Option<Value> = None;
+    // A value that changes on every read would print a line every 50 ms: past this many, only the count.
+    let (mut changes, mut unprinted) = (0usize, 0usize);
     while (started.elapsed().as_millis() as f64) < duration {
         let values = control.call("state.get", json!({"names": [name]}))?;
         let value = values["values"][name].clone();
@@ -825,7 +829,12 @@ fn watch_state_values(control: &mut Control, name: &str, args: &Args) -> Result<
         match &previous {
             None => say!("t={t}ms {name} = {}", py::str(&value)),
             Some(before) if !py::equal(before, &value) => {
-                say!("t={t}ms {name} {} -> {}", py::str(before), py::str(&value))
+                changes += 1;
+                if changes <= STATE_PRINTED_CHANGES {
+                    say!("t={t}ms {name} {} -> {}", py::str(before), py::str(&value));
+                } else {
+                    unprinted += 1;
+                }
             }
             Some(_) => {}
         }
@@ -833,11 +842,17 @@ fn watch_state_values(control: &mut Control, name: &str, args: &Args) -> Result<
         if let Some(clauses) = &clauses {
             let fields = values["values"].as_object().cloned().unwrap_or_default();
             if model::matches(&fields, clauses)? {
+                if unprinted > 0 {
+                    say!("... {unprinted} more changes, now {}", py::str(previous.as_ref().unwrap_or(&Value::Null)));
+                }
                 say!("until met at t={t}ms");
                 return Ok(0);
             }
         }
         std::thread::sleep(Duration::from_millis(STATE_POLL_MS));
+    }
+    if unprinted > 0 {
+        say!("... {unprinted} more changes, now {}", py::str(previous.as_ref().unwrap_or(&Value::Null)));
     }
     if let Some(until) = &until {
         say!("until not met in {}: {until}", args.duration.as_deref().unwrap_or("10s"));
@@ -908,9 +923,15 @@ pub fn storage(args: &mut Args) -> Result<i32> {
             let answer = control.call("storage.read", json!({"path": needs_path()?}))?;
             match answer["text"].as_str() {
                 Some(text) => {
-                    say!("{text}");
-                    if answer["truncated"] == true {
-                        say!("... (the first 256 KB of {} bytes)", py::str(&answer["bytes"]));
+                    let limit = args.limit.unwrap_or(50);
+                    let lines: Vec<&str> = text.lines().collect();
+                    lines.iter().take(limit).for_each(|line| say!("{line}"));
+                    if lines.len() > limit || answer["truncated"] == true {
+                        say!(
+                            "... {} lines in all, {} bytes: --limit N for more",
+                            lines.len(),
+                            py::str(&answer["bytes"])
+                        );
                     }
                 }
                 None => say!("{path}: {} bytes, not text", py::str(&answer["bytes"])),
@@ -925,11 +946,15 @@ pub fn storage(args: &mut Args) -> Result<i32> {
             let answer = control.call("storage.query", json!({"path": needs_path()?, "sql": sql}))?;
             let columns: Vec<String> = answer["columns"].as_array().into_iter().flatten().map(py::str).collect();
             say!("{}", columns.join(" | "));
-            for row in answer["rows"].as_array().into_iter().flatten() {
+            let rows = answer["rows"].as_array().cloned().unwrap_or_default();
+            let limit = args.limit.unwrap_or(50);
+            for row in rows.iter().take(limit) {
                 let cells: Vec<String> = row.as_array().into_iter().flatten().map(py::str).collect();
                 say!("{}", cells.join(" | "));
             }
-            if answer["more"] == true {
+            if rows.len() > limit {
+                say!("... {} more rows: --limit N, or LIMIT/OFFSET in the query", rows.len() - limit);
+            } else if answer["more"] == true {
                 say!("... more rows: add LIMIT/OFFSET to see them");
             }
         }
