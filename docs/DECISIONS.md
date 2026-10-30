@@ -58,6 +58,9 @@ A line leaves this file when the maintainer replaces it or when its work has lan
 - Repo in the GitHub org bandada-labs. npm package unscoped `agent-ddp`, installed with `npm i agent-ddp`, with sebospc as the developer and the package listed under the bandada-labs org. (2026-10-23)
 - Releases run on GitHub Actions from a tag, only when the maintainer says. npm publishes with Trusted Publishing, no token. (2026-10-23, "I think it's better to use GitHub Actions")
 
+- Network capture has no WebSocket frames or throttling until an app needs them. (2026-10-29)
+- `ddp launch --arg` passes iOS launch arguments; Android refuses, it has intent extras (`--env`). (2026-10-29)
+
 ## How agents work with the maintainer
 
 - Reply to the maintainer in English, even when they write in Spanish. (2026-10-23, "please keep talking to me in English")

@@ -60,6 +60,10 @@ with tempfile.TemporaryDirectory() as directory:
     assert refused.returncode == 1 and json.loads(refused.stdout)["code"] == "protocol_too_new", refused.stdout
     assert "agent-ddp@latest" in json.loads(refused.stdout)["next"], refused.stdout
 
+    # Launch arguments are iOS only: Android refuses before it touches a device.
+    no_args = ddp_in(directory, "launch", "emulator-5554", "--app", "dev.agentddp.sample", "--arg", "-Flag", "--json")
+    assert no_args.returncode == 1 and json.loads(no_args.stdout)["code"] == "not_supported", no_args.stdout
+
     summary = run("read", recording=recording)
     assert "border: 0 -> 0" in summary and "max 4" in summary and "TRANSIENT" in summary, summary
     assert "borderColor: None -> None, 3 values" in summary, summary

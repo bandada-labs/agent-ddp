@@ -153,3 +153,6 @@ Proposed one library call for launch values on both platforms. Asked whether tha
 
 ### Media through the platform, the rest through app values
 Proposed: iOS finds players itself (an `AVPlayerLayer` on screen, the system's now-playing info); Android, with no way to see a Media3 player without depending on it or reflecting on its classes, registers the player as an app value with a recipe in the guide. Answer: "ok".
+
+### 2026-10-29: network extras, launch arguments, keep going
+Proposed: skip WebSocket frames and network throttling until an app needs them; add launch arguments to `ddp launch` (for the iOS 27 Auto Layout log flag); keep building the 0.3.0 list. Answer: "1. ok 2. ok 3. ok". No push asked, so nothing is pushed.

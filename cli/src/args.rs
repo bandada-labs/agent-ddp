@@ -77,6 +77,7 @@ pub struct Args {
     pub max: Option<String>,
     pub max_band: Option<String>,
     pub env: Vec<String>,
+    pub launch_args: Vec<String>,
 }
 
 const ABOUT: &str = "ddp: see what a Debug iOS/Android app draws, frame by frame, live or from a recording.
@@ -172,7 +173,9 @@ pub fn parser() -> Command {
             .arg(opt("platform", "default: guessed from the device id").value_parser(["ios", "android"]))
             .arg(flag("reset", "clear the app's data first (its files and preferences), like a fresh install"))
             .arg(Arg::new("env").long("env").num_args(1).action(ArgAction::Append).value_name("KEY=VALUE")
-                .help("a value for the app: iOS environment variable, Android launch intent string extra; repeat for more")))
+                .help("a value for the app: iOS environment variable, Android launch intent string extra; repeat for more"))
+            .arg(Arg::new("arg").long("arg").num_args(1).action(ArgAction::Append).allow_hyphen_values(true).value_name("ARG")
+                .help("iOS: a launch argument, as an Xcode scheme passes it (--arg -SomeDefault --arg YES); repeat for more")))
         .subcommand(sub("disconnect", "forget the live session"))
         .subcommand(file(window(sub("record", "record frames (live, or offline by notification/broadcast)")
             .arg(opt("platform", "offline only").value_parser(["ios", "android"]))
@@ -443,6 +446,7 @@ pub fn parse(argv: &[String]) -> Result<Args, clap::Error> {
         max: string(m, "max"),
         max_band: string(m, "max-band"),
         env: strings(m, "env"),
+        launch_args: strings(m, "arg"),
         against: string(m, "against").map(PathBuf::from),
         junit: string(m, "junit").map(PathBuf::from),
         settled: string(m, "settled"),

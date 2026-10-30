@@ -190,7 +190,7 @@ pub fn connect(args: &mut Args) -> Result<i32> {
 
 /// `ddp launch`: the app started fresh (a running copy is stopped first), with values for it, then connected.
 /// iOS gets them as environment variables, Android as string extras of the launch intent: Android has no
-/// per-launch environment for an app.
+/// per-launch environment for an app. Launch arguments are iOS only: an Android activity has no arguments.
 pub fn launch(args: &mut Args) -> Result<i32> {
     let device = args.device.clone().unwrap_or_default();
     let app = args.app.clone().unwrap_or_default();
@@ -207,12 +207,20 @@ pub fn launch(args: &mut Args) -> Result<i32> {
             )),
         })
         .collect::<Result<Vec<_>>>()?;
+    if platform != "ios" && !args.launch_args.is_empty() {
+        fail!(
+            "an Android activity takes no launch arguments",
+            "not_supported",
+            "pass values as intent extras: --env KEY=VALUE"
+        );
+    }
     if args.reset {
         reset_data(&platform, &device, &app)?;
     }
     let started = if platform == "ios" {
         let mut command = Command::new("xcrun");
         command.args(["simctl", "launch", "--terminate-running-process", &device, &app]);
+        command.args(&args.launch_args);
         command.envs(values.iter().map(|(key, value)| (format!("SIMCTL_CHILD_{key}"), value)));
         command.output()
     } else {
