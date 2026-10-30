@@ -606,7 +606,15 @@ fn watch_state(frame: &Frame, key: &str) -> serde_json::Map<String, Value> {
 
 pub fn evaluate(args: &mut Args) -> Result<i32> {
     let session = require_session()?;
-    let answer = open(&session)?.call("screen.value", json!({"id": args.id, "path": args.path}))?;
+    let mut control = open(&session)?;
+    let answer = match &args.set_value {
+        // A number or true/false goes as JSON, a color as its text.
+        Some(text) => {
+            let value = serde_json::from_str(text).unwrap_or(Value::String(text.clone()));
+            control.call("screen.setValue", json!({"id": args.id, "path": args.path, "value": value}))?
+        }
+        None => control.call("screen.value", json!({"id": args.id, "path": args.path}))?,
+    };
     say!("{}", py::dumps(answer.get("value").unwrap_or(&Value::Null)));
     Ok(0)
 }

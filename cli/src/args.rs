@@ -78,6 +78,7 @@ pub struct Args {
     pub max_band: Option<String>,
     pub env: Vec<String>,
     pub launch_args: Vec<String>,
+    pub set_value: Option<String>,
 }
 
 const ABOUT: &str = "ddp: see what a Debug iOS/Android app draws, frame by frame, live or from a recording.
@@ -190,10 +191,12 @@ pub fn parser() -> Command {
                                (fields: t present x y w h alpha fill border borderColor opacity draws)"))
             .arg(opt("for", "stop after this long (1.5s, 1500ms)").id("duration"))
             .arg(opt("then", "program to run once watching starts (no shell)")))
-        .subcommand(sub("eval", "live: read one property of an element, read-only")
+        .subcommand(sub("eval", "live: read one property of an element, or set it (iOS)")
             .arg(positional("id", "element id, label or @ref").required(true))
             .arg(positional("path", "iOS: element.<key path> or layer.<key path>; \
-                                     Android: <modifier>.<property> (border.width) or semantics.<Key>").required(true)))
+                                     Android: <modifier>.<property> (border.width) or semantics.<Key>").required(true))
+            .arg(opt("set", "iOS: set it first, a number, true/false or #RRGGBB(AA); prints what UIKit reads back")
+                .allow_hyphen_values(true)))
         .subcommand(sub("net", "live: the app's requests (redacted): see them, send one, or answer them yourself")
             .arg(choices("action", &["list", "get", "watch", "send", "mock", "fail", "cookies", "clear-cookies"]).required(true))
             .arg(positional("request_id", "get: request id from `ddp net list`; send: URL; mock, fail: URL pattern with *"))
@@ -447,6 +450,7 @@ pub fn parse(argv: &[String]) -> Result<Args, clap::Error> {
         max_band: string(m, "max-band"),
         env: strings(m, "env"),
         launch_args: strings(m, "arg"),
+        set_value: string(m, "set"),
         against: string(m, "against").map(PathBuf::from),
         junit: string(m, "junit").map(PathBuf::from),
         settled: string(m, "settled"),

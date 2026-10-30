@@ -536,6 +536,9 @@ class FakeApp:
                     result = {"keys": [], "unread": "the Keychain refused: the app has no Keychain entitlement (an unsigned build)"}
                 elif method == "screen.highlight":
                     self.highlighted = params
+                elif method == "screen.setValue":
+                    self.set_value = params
+                    result = {"path": params["path"], "value": params["value"]}
                 elif method == "net.cookies":
                     result = {"cookies": [{"name": "session", "domain": "api.example.com", "path": "/", "secure": True, "expires": None}]}
                 elif method == "media.list":
@@ -763,6 +766,11 @@ with tempfile.TemporaryDirectory() as directory:
     assert ddp_in(directory, "storage", "read").returncode == 1
     shown = ddp_in(directory, "highlight", "button", "--for", "500ms")
     assert shown.stdout == "highlighted button [0, 0, 100, 50] for 500ms\n" and app.highlighted == {"rect": [0, 0, 100, 50], "ms": 500}, shown.stdout
+    # --set sends a number as JSON and a color as text, and prints what the app reads back.
+    assert ddp_in(directory, "eval", "button", "layer.cornerRadius", "--set", "12").stdout == "12\n"
+    assert app.set_value == {"id": "button", "path": "layer.cornerRadius", "value": 12}, app.set_value
+    ddp_in(directory, "eval", "button", "layer.backgroundColor", "--set", "#FF0000")
+    assert app.set_value["value"] == "#FF0000", app.set_value
     assert ddp_in(directory, "net", "cookies").stdout == "api.example.com session/ (expires session secure)\n"
     media = ddp_in(directory, "media").stdout
     assert media == "AVPlayerLayer playing at 12.5s of 60s rate 1 [0, 0, 390, 220]\nnow playing: title=Song position=12.5\n", media

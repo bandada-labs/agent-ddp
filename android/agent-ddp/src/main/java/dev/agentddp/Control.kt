@@ -146,6 +146,10 @@ internal class ControlSession(private val app: ControlApp, private val send: (St
         "screen.watch" to { params -> watchScreen(params.optInt("frames", 0)); JSONObject() },
         "screen.unwatch" to { _ -> onMain { screenStream?.stop() }; JSONObject() },
         "screen.value" to { params -> Control.answer(onMain { LiveEval.evaluate(params.getString("id"), params.getString("path")) }) },
+        // Compose draws what the app's state says, so a value set from outside would not be the app's; ddp does not.
+        "screen.setValue" to { _ ->
+            throw IllegalArgumentException("Compose takes its values from the app's state: change that state (ddp state set)")
+        },
         "time.pause" to time("pause"),
         "time.resume" to time("resume"),
         "time.step" to time("step", "frames"),

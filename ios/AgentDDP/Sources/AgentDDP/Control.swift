@@ -177,6 +177,12 @@ final class ControlSession {
             return try Control.answer(onMain { LiveEval.evaluate(name: params["id"] as? String ?? "", path: path) })
                 .merging(["path": path]) { _, asked in asked }
         },
+        "screen.setValue": { params in
+            let path = params["path"] as? String ?? ""
+            return try Control.answer(onMain {
+                LiveEval.set(name: params["id"] as? String ?? "", path: path, to: params["value"] ?? NSNull())
+            }).merging(["path": path]) { _, asked in asked }
+        },
         "time.pause": Self.time("pause"),
         "time.resume": Self.time("resume"),
         "time.step": Self.time("step", "frames"),
