@@ -30,10 +30,12 @@ jobs:
       - run: ./samples/android/gradlew -p samples/android :agent-ddp:testDebugUnitTest :agent-ddp:assembleRelease :app:assembleDebug
 
   ios:
-    runs-on: macos-14
+    runs-on: macos-15
+    env:
+      # Xcode 16.0, the oldest one the README supports and the runner has: a newer Xcode accepts what it does not.
+      DEVELOPER_DIR: /Applications/Xcode_16.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
-      # macos-14 has Xcode 15.4 (Swift 5.10), the oldest one the README supports: a newer Xcode accepts what it does not.
       - run: xcodebuild -scheme AgentDDP -destination 'generic/platform=iOS Simulator' build
       - name: The sample app, as an app adding the package by path builds it
         # The project is generated from samples/ios/project.yml, not kept in git.

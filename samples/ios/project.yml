@@ -1,8 +1,6 @@
 name: DDPSample
 options:
   bundleIdPrefix: dev.agentddp
-  # CI builds with Xcode 15.4, which cannot read the newer default format.
-  projectFormat: xcode15_0
 packages:
   AgentDDP:
     path: ../../ios/AgentDDP

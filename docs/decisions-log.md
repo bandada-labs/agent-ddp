@@ -159,3 +159,5 @@ Proposed: skip WebSocket frames and network throttling until an app needs them; 
 
 ### 2026-10-30: finish and ship 0.3.0
 Asked whether tickets were left for 0.3.0. Answer: "los puedes resolver y probar? desarrollalos los metes al rlease creas el rlease lo certificas y lo publicar para npm git etc changelog y todo eso" (solve and test them, put them in the release, create it, certify it and publish it to npm, git, with the changelog). Done: Canvas shapes on iOS. Left out, because they wait on something outside the repo: the older-OS hook matrix (no downloads until Mimbre's store build), Mimbre's timeline fixture (never made), a physical iPhone (no test device), and the known-answer probe (parked 2026-10-24).
+
+GitHub's macOS 14 runners were in a scheduled brownout on release day and retire on November 2, which cancelled the iOS check and would have broken the macOS binaries. CI and the release moved to macOS 15. Its oldest Xcode is 16.0, so the supported Xcode went from 15.4 to 16: 15.4 can no longer be checked.
