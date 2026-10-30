@@ -1,12 +1,14 @@
 # Status
 
-Last update: 2026-10-29. Read this after a break, then [DECISIONS.md](DECISIONS.md).
+Last update: 2026-10-30. Read this after a break, then [DECISIONS.md](DECISIONS.md).
 
 ## In one paragraph
 
 A small library inside a Debug build of an iOS or Android app serves what the app draws, frame by frame (ADR 0001). The `ddp` CLI, one Rust binary on npm (ADR 0002, 0003), reads it live or from recordings and prints short text for coding agents (ADR 0006). The protocol between them is versioned (ADR 0004). A flight recorder keeps the last 15 minutes on both platforms (ADR 0005).
 
 ## Released
+
+0.3.0 on 2026-10-30 (CLI and both libraries; npm, GitHub release with 5 binaries, JitPack `v0.3.0`, SwiftPM from the repo URL): app state and events, gestures with a real finger, `perf`, `storage`, `media`, `crash`, `debug`, `profile`, `memory`, `audits`, `inspect`, `animations`, `eval --set`, device actions, network timing and cookies, a structure compare across phones, Compose `drawWithCache`, and the shapes inside a SwiftUI `Canvas`. Checked before the tag: CI's three jobs, the new commands live on both sample apps, and the hook matrix on iOS 26.5 and API 35. iOS 27.0 was checked for the device commands the same day, but its simulator runtime stopped booting after a CoreSimulator update before the hook matrix ran. What is in it: [CHANGELOG.md](../CHANGELOG.md).
 
 0.2.1 on 2026-10-27 (CLI only; npm, GitHub release with 5 binaries, JitPack `v0.2.1`): `ddp compare`, which compares the screen against a reference screenshot, or one element against a reference image or against the same element on the other phone. `--ignore` and `--mask` leave moving parts out. The libraries are the same as in 0.2.0. Also a doc note: a headless simulator draws frames when the app has the library (121 frames in 2 s on iOS 27.0).
 
@@ -16,7 +18,7 @@ A small library inside a Debug build of an iOS or Android app serves what the ap
 
 ## Next
 
-0. 0.3.0, not released. Built: History stays cheap on an idle screen that keeps redrawing; `ddp record` keeps the platform's answers, so checks on the file judge; `compare --screen`, `--max`, `--max-band`; `ddp launch` with `--env`. Planned, as protocol domains on both platforms: app state and app events (generic, registered by the app in Debug), exceptions with stack, `perf.metrics`, gestures on `input.touch`, `media.*`, `storage.*`, a structure compare from two sessions' element trees, shapes inside a SwiftUI Canvas, Compose `drawWithCache`. The list with its state is in the issue tracker, label `release-0.3.0`.
+0. After 0.3.0: the hook matrix on older versions (API 26 to 28, iOS 17 and 18) once the images can be downloaded, iOS 27.0 again when its runtime boots, Mimbre's timeline fixture when it exists, and a physical iPhone when there is a test device.
 1. The control endpoint in the library (ADR 0008, which replaced the CDP plan of ADR 0007). Seven phases, in order:
    1. Transport. Done.
    2. Reading: `app.info`, `screen.*`, `net.list`/`net.get`/`net.watch`, `log.watch`. Done.

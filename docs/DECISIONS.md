@@ -60,6 +60,7 @@ A line leaves this file when the maintainer replaces it or when its work has lan
 
 - Network capture has no WebSocket frames or throttling until an app needs them. (2026-10-29)
 - `ddp launch --arg` passes iOS launch arguments; Android refuses, it has intent extras (`--env`). (2026-10-29)
+- 0.3.0 ships without the items that wait on outside things (older-OS images, a fixture, a test iPhone); they move to the next release. (2026-10-30)
 
 ## How agents work with the maintainer
 
