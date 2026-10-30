@@ -96,6 +96,8 @@ struct SpinnerView: View {
     var body: some View {
         VStack(alignment: .leading) {
             RedrawEveryFrame().frame(width: 40, height: 40)
+            // For `ddp animations`: UIKit spins it with a Core Animation animation.
+            ProgressView()
             ForEach(0..<30, id: \.self) { Text("Row \($0)").accessibilityIdentifier("row\($0)") }
         }
         .padding(24)

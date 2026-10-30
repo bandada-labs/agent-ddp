@@ -106,12 +106,16 @@ final class Timing: NSObject, URLSessionTaskDelegate {
         lock.unlock()
     }
 
-    /// The last transaction's phases in ms, only the ones the system measured, with its protocol and whether it reused
-    /// a connection. Empty when the client did not take the delegate.
+    /// The last network transaction's phases in ms, only the ones the system measured, with its protocol and whether it
+    /// reused a connection; `cache` when URLSession answered from its cache without the network. Empty when the client
+    /// did not take the delegate.
     var fields: [String: Any] {
         lock.lock()
         defer { lock.unlock() }
-        guard let transaction = metrics?.transactionMetrics.last else { return [:] }
+        let transactions = metrics?.transactionMetrics ?? []
+        // A cached response revalidated with a 304 has a network transaction and a cache one; the phases are the first's.
+        let network = transactions.last { $0.resourceFetchType == .networkLoad }
+        guard let transaction = network ?? transactions.last else { return [:] }
         func milliseconds(_ start: Date?, _ end: Date?) -> Double? {
             guard let start, let end else { return nil }
             return (end.timeIntervalSince(start) * 1000).rounded()
@@ -129,6 +133,7 @@ final class Timing: NSObject, URLSessionTaskDelegate {
             "reused": transaction.isReusedConnection,
         ]
         if let name = transaction.networkProtocolName { fields["protocol"] = name }
+        if network == nil && transaction.resourceFetchType == .localCache { fields["cache"] = true }
         return fields
     }
 }

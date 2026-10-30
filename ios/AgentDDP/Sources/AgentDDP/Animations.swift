@@ -21,7 +21,8 @@ enum Animations {
             var entry: [String: Any] = ["key": key, "type": String(describing: type(of: animation)),
                                         "duration": round2(animation.duration), "frame": rectArray(frame)]
             if let keyPath = (animation as? CAPropertyAnimation)?.keyPath { entry["keyPath"] = keyPath }
-            if animation.repeatCount > 0 { entry["repeat"] = animation.repeatCount == .infinity ? "forever" : animation.repeatCount }
+            // UIKit's own spinners repeat 2^31 times, not .infinity.
+            if animation.repeatCount > 0 { entry["repeat"] = animation.repeatCount >= Float(Int32.max) ? "forever" : animation.repeatCount }
             if layer.speed != 1 { entry["speed"] = layer.speed }
             if let id = (layer.delegate as? UIView)?.accessibilityIdentifier, !id.isEmpty { entry["id"] = id }
             found.append(entry)

@@ -354,12 +354,16 @@ fn py_seconds(wait: Duration) -> String {
     format!("{}s", wait.as_secs_f64())
 }
 
+const LLDB_READY: &str = "ddp: breakpoint set";
+
 /// LLDB in batch mode: attach, a one-shot breakpoint, continue, and after the stop `bt` and `frame variable`, then
 /// detach. Not reached in time: LLDB is stopped, which detaches, and a process left stopped gets SIGCONT.
 fn lldb_stop(pid: &str, file: &str, line: &str, wait: Duration, then: Option<&str>) -> Result<Stopped> {
     let commands = [
         format!("process attach --pid {pid}"),
         format!("breakpoint set --file {file} --line {line} --one-shot true"),
+        // LLDB holds its output back in a pipe until the stop; a flush from its Python says the breakpoint is in.
+        format!("script import sys; print('{LLDB_READY}'); sys.stdout.flush()"),
         "process continue".to_string(),
         "bt 30".to_string(),
         "frame variable".to_string(),
@@ -562,7 +566,7 @@ fn jdb_session(address: &str, place: &str, wait: Duration, then: Option<&str>) -
 }
 
 /// Runs LLDB until it exits or `wait` passes, then stops it. Its output, and whether it finished on its own. The
-/// `--then` program starts when LLDB lets the app run with the breakpoint in.
+/// `--then` program starts once LLDB prints that the breakpoint is in.
 fn run_for(mut command: Command, wait: Duration, then: Option<&str>) -> Result<(String, bool)> {
     let mut child = command
         .stdout(Stdio::piped())
@@ -581,7 +585,7 @@ fn run_for(mut command: Command, wait: Duration, then: Option<&str>) -> Result<(
     let deadline = Instant::now() + wait + Duration::from_secs(10);
     let finished = loop {
         for line in received.try_iter() {
-            if triggered.is_none() && line.contains(" resuming") {
+            if triggered.is_none() && line.trim_end() == LLDB_READY {
                 triggered = then.and_then(crate::live::spawn_then);
             }
             output.push_str(&line);
