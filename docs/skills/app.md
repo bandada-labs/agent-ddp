@@ -91,3 +91,31 @@ ddp history                        # events next to frames and taps, for the las
 ```
 
 Fields are JSON values. The app decides what an event is and what it carries; ddp only shows them.
+
+## Stepping back (an app with a pure engine)
+
+When the app's state comes from its own list of events (a reducer, an undo log), stepping back is the app's job: it
+rebuilds the state from the first N events. ddp does not model the engine. Give it a command:
+
+```swift
+AgentDDP.command("replay") { params in
+    let count = params["to"] as? Int ?? 0
+    await MainActor.run { store.rebuild(from: store.events.prefix(count)) }
+    return store.events.count
+}
+```
+
+```kotlin
+AgentDdpCommands.add("replay") { params ->
+    val count = params.optInt("to")
+    // Commands run on a background thread; the state lives on the main one.
+    runBlocking(Dispatchers.Main) { store.rebuild(store.events.take(count)) }
+    store.events.size
+}
+```
+
+```bash
+ddp events                          # what happened, in order
+ddp run replay '{"to": 12}'         # the state after the 12th event
+ddp tree -i                         # what the screen shows there
+```
