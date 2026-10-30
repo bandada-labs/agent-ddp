@@ -437,6 +437,6 @@ struct ObservedSession {
     let session: URLSession
 
     func data(for request: URLRequest) async throws -> (Data, URLResponse) {
-        try await AgentDDP.send(request) { try await session.data(for: $0) }
+        try await AgentDDP.send(request) { try await session.data(for: $0, delegate: AgentDDP.timing) }
     }
 }

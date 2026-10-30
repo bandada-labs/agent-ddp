@@ -25,7 +25,7 @@ final class NetworkLog {
     }
 
     func add(request: URLRequest, response: URLResponse?, body: Data?, error: Error?,
-             startedAt: Date, finishedAt: Date) {
+             startedAt: Date, finishedAt: Date, extra: [String: Any] = [:]) {
         let redactor = currentRedactor
         lock.lock()
         let id = "n\(nextNumber)"
@@ -50,6 +50,7 @@ final class NetworkLog {
         }
         if let responseBody = redactor.body(body) { entry["responseBody"] = responseBody }
         if let error { entry["error"] = redactor.text(error.localizedDescription) }
+        entry.merge(extra) { current, _ in current }
 
         lock.lock()
         entries.append(entry)
@@ -88,6 +89,47 @@ final class NetworkLog {
 
     private static func summary(_ entry: [String: Any]) -> [String: Any] {
         entry.filter { ["type", "id", "method", "url", "status", "ms", "responseBytes", "error", "startedAt"].contains($0.key) }
+    }
+}
+
+/// One request's URLSessionTaskMetrics. `logged` makes one per request and hands it to the app's client through a task
+/// local, so the metrics belong to that request and no other.
+final class Timing: NSObject, URLSessionTaskDelegate {
+    @TaskLocal static var current: Timing?
+
+    private let lock = NSLock()
+    private var metrics: URLSessionTaskMetrics?
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {
+        lock.lock()
+        self.metrics = metrics
+        lock.unlock()
+    }
+
+    /// The last transaction's phases in ms, only the ones the system measured, with its protocol and whether it reused
+    /// a connection. Empty when the client did not take the delegate.
+    var fields: [String: Any] {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let transaction = metrics?.transactionMetrics.last else { return [:] }
+        func milliseconds(_ start: Date?, _ end: Date?) -> Double? {
+            guard let start, let end else { return nil }
+            return (end.timeIntervalSince(start) * 1000).rounded()
+        }
+        // Apple's connect end includes the TLS handshake, so plain connect stops where TLS starts.
+        let phases: [(String, Double?)] = [
+            ("dns", milliseconds(transaction.domainLookupStartDate, transaction.domainLookupEndDate)),
+            ("connect", milliseconds(transaction.connectStartDate, transaction.secureConnectionStartDate ?? transaction.connectEndDate)),
+            ("tls", milliseconds(transaction.secureConnectionStartDate, transaction.secureConnectionEndDate)),
+            ("wait", milliseconds(transaction.requestEndDate, transaction.responseStartDate)),
+            ("download", milliseconds(transaction.responseStartDate, transaction.responseEndDate)),
+        ]
+        var fields: [String: Any] = [
+            "timing": Dictionary(uniqueKeysWithValues: phases.compactMap { name, value in value.map { (name, $0) } }),
+            "reused": transaction.isReusedConnection,
+        ]
+        if let name = transaction.networkProtocolName { fields["protocol"] = name }
+        return fields
     }
 }
 

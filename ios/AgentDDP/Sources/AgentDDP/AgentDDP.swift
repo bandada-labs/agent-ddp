@@ -40,6 +40,17 @@ public enum AgentDDP {
         #endif
     }
 
+    /// A per-task delegate that gives `ddp net get` the request's phases from URLSessionTaskMetrics (`timing`). Pass it
+    /// inside the closure given to `send`: `session.data(for: $0, delegate: AgentDDP.timing)`. Anywhere else, and
+    /// outside Debug, it is nil.
+    public static var timing: URLSessionTaskDelegate? {
+        #if DEBUG && canImport(UIKit)
+        return Timing.current
+        #else
+        return nil
+        #endif
+    }
+
     /// Adds a named action for agents (`app.commands`, `app.run`): log in a test user, reset state, open a screen.
     /// `run` gets the agent's params and returns a JSON value (dictionary, array, string, number, Bool or nil). It runs
     /// off the main thread; UI work goes through `MainActor.run`. Outside Debug it does nothing.
@@ -72,20 +83,23 @@ public enum AgentDDP {
     static func logged(_ request: URLRequest,
                        using send: (URLRequest) async throws -> (Data, URLResponse)) async throws -> (Data, URLResponse) {
         let startedAt = Date()
+        let timing = Timing()
         var sent = request
         do {
             let result: (Data, URLResponse)
             switch await Fetch.shared.pause(request) {
             case .proceed(let changed):
                 sent = changed
-                result = try await send(changed)
+                result = try await Timing.$current.withValue(timing) { try await send(changed) }
             case .fulfill(let body, let response): result = (body, response)
             case .fail(let error): throw error
             }
-            logRequest(sent, response: result.1, body: result.0, error: nil, startedAt: startedAt)
+            NetworkLog.shared.add(request: sent, response: result.1, body: result.0, error: nil,
+                                  startedAt: startedAt, finishedAt: Date(), extra: timing.fields)
             return result
         } catch {
-            logRequest(sent, response: nil, body: nil, error: error, startedAt: startedAt)
+            NetworkLog.shared.add(request: sent, response: nil, body: nil, error: error,
+                                  startedAt: startedAt, finishedAt: Date(), extra: timing.fields)
             throw error
         }
     }

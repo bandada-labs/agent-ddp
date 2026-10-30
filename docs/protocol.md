@@ -54,7 +54,7 @@ Coordinates are window coordinates in the platform's unit, the same as in frames
 | `input.type` | `text` | Types into the focused field as the keyboard does. Nothing happens with no field focused |
 | `input.key` | `key`: `Enter`, `Tab`, `Backspace` | Enter in a single-line field runs its action (Done, Search) |
 | `net.list` | | `requests`: the `request` summaries of `ddp net` |
-| `net.get` | `id` | The full entry with headers and bodies, redacted, bodies cut at 16 KB |
+| `net.get` | `id` | The full entry with headers and bodies, redacted, bodies cut at 16 KB. With the app's timing hook (`AgentDDP.timing`, `AgentDdpNetwork.timing`): `timing` with the phases in ms the platform measured, of `dns`, `connect` (without TLS), `tls`, `wait` (request sent to first response byte) and, on iOS, `download`; `protocol` (`http/1.1`, `h2`, `h3`) and `reused` (an open connection). iOS reads the last transaction of URLSessionTaskMetrics; Android gives none for a call that sent more than one request (a redirect, a retry) |
 | `net.watch`, `net.unwatch` | | `net.request` event with each summary as the request ends |
 | `net.intercept` | `urls`: wildcards with `*` and `?`; none pauses every request | `net.paused` event: `{id, request: {url, method, headers, body}}`, redacted |
 | `net.continue` | `id`, and any of `url`, `method`, `headers` (object), `body` (text) | The request goes on. A value sent back as it was shown, such as a `[redacted]` header, keeps its real value |

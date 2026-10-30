@@ -1,5 +1,9 @@
 package dev.agentddp
 
+import okhttp3.Call
+import okhttp3.Connection
+import okhttp3.EventListener
+import okhttp3.Handshake
 import okhttp3.Headers.Companion.toHeaders
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
@@ -15,6 +19,10 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
 import java.io.IOException
+import java.net.InetSocketAddress
+import java.net.Proxy
+import java.util.Collections
+import java.util.WeakHashMap
 import java.util.UUID
 
 /**
@@ -25,6 +33,12 @@ import java.util.UUID
 object AgentDdpNetwork {
     /** Literal values (the app's dev secret, a test token) to replace with "[redacted]" wherever they show up. */
     fun redact(vararg values: String) = NetworkLog.redact(values.toList())
+
+    /**
+     * OkHttp's own phase events for `ddp net get` (`timing`): add it to the Debug client with
+     * `eventListenerFactory(AgentDdpNetwork.timing)`, next to [AgentDdpInterceptor].
+     */
+    val timing: EventListener.Factory get() = CallTiming
 
     fun log(
         method: String, url: String, requestHeaders: Map<String, String>, requestBody: ByteArray?,
@@ -54,15 +68,15 @@ class AgentDdpInterceptor : Interceptor {
                 is Fetch.Decision.Fail -> throw decision.error
             }
         } catch (error: Exception) {
-            AgentDdpNetwork.log(sent.method, sent.url, sent.headers, sent.body, null, emptyMap(),
-                null, 0, error.toString(), startedAt, System.currentTimeMillis() - startedAt)
+            NetworkLog.add(sent.method, sent.url, sent.headers, sent.body, null, emptyMap(),
+                null, 0, error.toString(), startedAt, System.currentTimeMillis() - startedAt, CallTiming.take(chain.call()))
             throw error
         }
         val peeked = response.peekBody(Redactor.BODY_LIMIT + 1L).bytes()
-        AgentDdpNetwork.log(sent.method, sent.url, sent.headers, sent.body, response.code,
+        NetworkLog.add(sent.method, sent.url, sent.headers, sent.body, response.code,
             response.headers.toMultimap().mapValues { it.value.joinToString() }, peeked,
             response.body?.contentLength()?.takeIf { it >= 0 } ?: peeked.size.toLong(), null,
-            startedAt, System.currentTimeMillis() - startedAt)
+            startedAt, System.currentTimeMillis() - startedAt, CallTiming.take(chain.call()))
         return response
     }
 
@@ -121,7 +135,7 @@ internal object NetworkLog {
     fun add(
         method: String, url: String, requestHeaders: Map<String, String>, requestBody: ByteArray?,
         status: Int?, responseHeaders: Map<String, String>, responseBody: ByteArray?, responseBytes: Long,
-        error: String?, startedAtMillis: Long, durationMillis: Long,
+        error: String?, startedAtMillis: Long, durationMillis: Long, extra: JSONObject? = null,
     ) {
         val redactor = redactor
         val entry = JSONObject().put("type", "request").put("method", method).put("url", redactor.url(url))
@@ -133,6 +147,7 @@ internal object NetworkLog {
         redactor.body(responseBody)?.let { entry.put("responseBody", it) }
         status?.let { entry.put("status", it) }
         error?.let { entry.put("error", redactor.text(it)) }
+        extra?.keys()?.forEach { entry.put(it, extra.get(it)) }
         val current = synchronized(this) {
             entry.put("id", "n${nextNumber++}")
             entries.addLast(entry)
@@ -200,4 +215,59 @@ internal class Redactor(private val values: List<String>) {
     }
 
     private fun cut(text: String) = if (text.length <= BODY_LIMIT) text else text.take(BODY_LIMIT) + "... [cut at 16 KB]"
+}
+
+/**
+ * One call's phases from OkHttp's events, read by [AgentDdpInterceptor] when it logs the call. The interceptor runs
+ * before the body is read, so there is no download phase.
+ */
+// ponytail: a call that sent more than one request (a redirect, a retry) gives no timing. Per-hop phases if needed.
+internal object CallTiming : EventListener.Factory {
+    private val calls: MutableMap<Call, Phases> = Collections.synchronizedMap(WeakHashMap())
+
+    override fun create(call: Call): EventListener = Phases().also { calls[call] = it }
+
+    fun take(call: Call): JSONObject? = calls.remove(call)?.fields()
+
+    class Phases : EventListener() {
+        private val at = HashMap<String, Long>()
+        private var requests = 0
+        private var protocol: String? = null
+
+        private fun mark(name: String) = synchronized(this) { at[name] = System.nanoTime() }
+
+        override fun dnsStart(call: Call, domainName: String) = mark("dnsStart")
+        override fun dnsEnd(call: Call, domainName: String, inetAddressList: List<java.net.InetAddress>) = mark("dnsEnd")
+        override fun connectStart(call: Call, inetSocketAddress: InetSocketAddress, proxy: Proxy) = mark("connectStart")
+        override fun secureConnectStart(call: Call) = mark("tlsStart")
+        override fun secureConnectEnd(call: Call, handshake: Handshake?) = mark("tlsEnd")
+        override fun connectEnd(call: Call, inetSocketAddress: InetSocketAddress, proxy: Proxy, protocol: okhttp3.Protocol?) =
+            mark("connectEnd")
+        override fun requestHeadersStart(call: Call) = synchronized(this) { requests += 1 }
+        override fun requestHeadersEnd(call: Call, request: Request) = mark("requestEnd")
+        override fun requestBodyEnd(call: Call, byteCount: Long) = mark("requestEnd")
+        override fun responseHeadersStart(call: Call) = mark("responseStart")
+        override fun connectionAcquired(call: Call, connection: Connection) = synchronized(this) {
+            protocol = connection.protocol().toString()
+        }
+
+        /** The phases in ms that OkHttp reported, its protocol and whether the connection was reused. */
+        fun fields(): JSONObject? = synchronized(this) {
+            if (requests != 1) return null
+            fun milliseconds(start: String, end: String): Long? {
+                val from = at[start] ?: return null
+                val to = at[end] ?: return null
+                return (to - from) / 1_000_000
+            }
+            // As on iOS: connect stops where TLS starts.
+            val phases = mapOf(
+                "dns" to milliseconds("dnsStart", "dnsEnd"),
+                "connect" to milliseconds("connectStart", if ("tlsStart" in at) "tlsStart" else "connectEnd"),
+                "tls" to milliseconds("tlsStart", "tlsEnd"),
+                "wait" to milliseconds("requestEnd", "responseStart"),
+            )
+            JSONObject().put("timing", JSONObject(phases.filterValues { it != null }))
+                .put("reused", "connectStart" !in at).put("protocol", protocol)
+        }
+    }
 }
