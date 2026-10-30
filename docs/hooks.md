@@ -14,6 +14,7 @@ Kinds: `private` (an Apple symbol, class or selector without a public header), `
 | `swiftui.responders` (accessibility node geometry, `AGGraphGetWeakValue`) | internal | whose gesture takes a touch | as above; it also fails, instead of reading memory, when the attribute is no longer a one-argument `WeakAttribute` struct whose metadata names its `Value` | iOS 26.5 and 27.0 simulators |
 | `uikit.touchRadius` (`contextWithPoint:radius:event:`) | private | the radius SwiftUI hit-tests a touch with | 20 pt, what iOS 27 gives every touch | iOS 26.5 and 27.0 simulators |
 | `input.hid` (IOHIDEvent functions, `_enqueueHIDEvent:`, `_contextId`) | private | tap, type, press, input.touch | those commands fail with the missing name | iOS 26.5 and 27.0 simulators |
+| `renderbox.displayList` (`RBDisplayList`, `drawInDisplayList:`, `RBXMLRecorderStart`) | private | `draw` nodes inside a SwiftUI `Canvas` or `drawingGroup` | no `draw` nodes; the `opaque-drawing` node and its pixels stay | iOS 26.5 simulator |
 
 ## Android
 

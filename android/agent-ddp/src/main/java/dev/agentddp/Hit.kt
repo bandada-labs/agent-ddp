@@ -90,7 +90,9 @@ internal object Hit {
         val thief = reaching.firstOrNull()?.let { parentTaking(target, it) }
         val taking = if (thief == null) reaching else emptyList()
         val result = JSONObject(element.toString()).put("points", taking.size)
-        if (minimumTouch > 0) touchSize(target, frame, minimumTouch)?.let { (width, height) ->
+        // Part of it past the window's edge (a row half scrolled off) is cut by the edge, not small.
+        val window = FrameRecorder.resumedActivity?.window?.decorView?.let { RectF(0f, 0f, it.width.toFloat(), it.height.toFloat()) }
+        if (minimumTouch > 0 && window?.contains(frame) == true) touchSize(target, frame, minimumTouch)?.let { (width, height) ->
             result.put("reach", JSONArray(listOf(round2(width.toDouble()), round2(height.toDouble()))))
         }
         taking.firstOrNull()?.let { result.put("point", JSONArray(listOf(round2(it.x.toDouble()), round2(it.y.toDouble())))) }

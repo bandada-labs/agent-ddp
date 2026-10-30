@@ -165,7 +165,7 @@ Without npm: `cargo install --git https://github.com/bandada-labs/agent-ddp agen
 
 ## Limits
 
-Debug builds only. iOS works on the simulator, not on devices yet. Not seen yet: the single shapes inside a SwiftUI `Canvas` (read by their pixels instead), and system UI outside the app such as iOS alerts.
+Debug builds only. iOS works on the simulator, not on devices yet. Not seen yet: text and images inside a SwiftUI `Canvas` (its shapes are read), and system UI outside the app such as iOS alerts.
 
 ## Contributing
 

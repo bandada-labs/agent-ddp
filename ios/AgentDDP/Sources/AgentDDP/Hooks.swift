@@ -20,6 +20,8 @@ enum Hooks {
         Hook(name: "swiftui.responders", kind: "internal", feeds: "whose gesture takes a touch (AGGraphGetWeakValue)"),
         Hook(name: "uikit.touchRadius", kind: "private", feeds: "the touch radius SwiftUI hit-tests with"),
         Hook(name: "input.hid", kind: "private", feeds: "tap, type, press (IOHIDEvent, _enqueueHIDEvent:)"),
+        Hook(name: "renderbox.displayList", kind: "private",
+             feeds: "draw nodes inside a SwiftUI Canvas or drawingGroup (RBDisplayList XML recorder)"),
     ]
 
     private typealias Count = (ok: Int, failed: Int, why: String?)

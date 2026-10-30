@@ -9,6 +9,8 @@ import UIKit
 public enum AgentDDP {
     public static func start() {
         #if DEBUG && canImport(UIKit)
+        // First, so the Canvases of the first screen are drawn with the recorder on.
+        CanvasDraws.start()
         FrameRecorder.shared.listenForRequests()
         TouchRadius.watch()
         ControlServer.shared.start(directory: FrameRecorder.shared.outputDirectory)

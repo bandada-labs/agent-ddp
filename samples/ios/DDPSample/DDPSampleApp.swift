@@ -409,6 +409,24 @@ struct CanvasDot: View, Animatable {
             let dotColor = Color(red: 1 - progress, green: 0, blue: progress)
             context.fill(Path(ellipseIn: dotRect), with: .color(dotColor))
             context.stroke(Path(ellipseIn: dotRect), with: .color(.black), lineWidth: 1 + 3 * progress)
+            // For `draw` nodes: a dimmed and a moved brick, a line, a curve, a gradient, and text (not read, `unread`).
+            var brick = context
+            brick.opacity = 0.5
+            brick.fill(Path(CGRect(x: 2, y: 2, width: 20, height: 8)), with: .color(.green))
+            brick.translateBy(x: 30, y: 0)
+            brick.fill(Path(roundedRect: CGRect(x: 2, y: 2, width: 20, height: 8), cornerRadius: 3), with: .color(.blue))
+            var line = Path()
+            line.move(to: CGPoint(x: 0, y: 58))
+            line.addLine(to: CGPoint(x: 80, y: 50))
+            context.stroke(line, with: .color(.orange), lineWidth: 2)
+            var curve = Path()
+            curve.move(to: CGPoint(x: 60, y: 10))
+            curve.addQuadCurve(to: CGPoint(x: 78, y: 20), control: CGPoint(x: 80, y: 0))
+            curve.closeSubpath()
+            context.fill(curve, with: .color(.pink))
+            context.fill(Path(ellipseIn: CGRect(x: 40, y: 40, width: 20, height: 10)),
+                         with: .linearGradient(Gradient(colors: [.red, .blue]), startPoint: .zero, endPoint: CGPoint(x: 80, y: 60)))
+            context.draw(Text("Hi"), at: CGPoint(x: 10, y: 30))
         }
     }
 }

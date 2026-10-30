@@ -73,7 +73,9 @@ enum Hit {
         let reaching = points.filter { !blocked(object, at: $0, responders: responders) }
         result["points"] = reaching.count
         if let point = reaching.first { result["point"] = [round2(point.x), round2(point.y)] }
-        if minimumTouch > 0, let (width, height) = touchSize(object, frame, minimum: minimumTouch, responders: responders) {
+        // Part of it past the screen's edge (a row half scrolled off) is cut by the edge, not small.
+        if minimumTouch > 0, UIScreen.main.bounds.contains(frame),
+           let (width, height) = touchSize(object, frame, minimum: minimumTouch, responders: responders) {
             result["reach"] = [round2(width), round2(height)]
         }
         if object.accessibilityTraits.contains(.notEnabled) {

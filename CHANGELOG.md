@@ -4,6 +4,8 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 
 ## Unreleased
 
+- iOS: the shapes inside a SwiftUI `Canvas` or `drawingGroup` are `draw` nodes, like Android's Canvas replay: circle, rect, rounded rect, oval, path or line, with bounds, fill or stroke, and color alpha (a dimmed context too). They come from RenderBox, SwiftUI's renderer, through a new engine hook, `renderbox.displayList`, which turns on RenderBox's XML recorder for the app run (Debug only). Text and images in a Canvas are not read yet and are counted as `unread`. Measured on the sample: no change in capture time (5.6-6.1 ms a frame) or app CPU and memory.
+- Fixed: `check a11y` said SMALL TARGET for a control partly past the screen's edge, such as a list row half scrolled off; the edge cut its reach, not its size. Such a control is no longer measured.
 - `ddp skills get app`: stepping back in an app with a pure engine, through an app `replay` command; ddp does not model the engine.
 - `ddp debug <FILE:LINE> [--for 30s] [--then CMD]`: stop once at a line with the platform's debugger (LLDB on the simulator, jdb over JDWP on Android), print the stack and the locals, then the app runs on. Exits 1 when the line does not run in time.
 - `ddp animations` (iOS): the Core Animation animations on screen, by layer, with key path, class, duration and repeat. `ddp eval <id> layer.speed --set 0` holds one. Android refuses: Compose animations are not listed by the platform.

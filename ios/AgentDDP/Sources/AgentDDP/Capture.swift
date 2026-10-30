@@ -155,6 +155,9 @@ enum LayerReader {
                 texts.append((layer, frame))
             }
             nodes.append(node)
+            if node["kind"] as? String == "opaque-drawing" {
+                appendDraws(of: layer, shown: shown, root: root, offset: offset, clip: clip, base: node, into: &nodes)
+            }
         }
 
         let childClip = shown.masksToBounds ? clip.intersection(frame) : clip
@@ -165,6 +168,25 @@ enum LayerReader {
         ordered.forEach {
             walk($0, root: root, clip: childClip, opacity: effectiveOpacity, offset: offset, effects: effects, into: &nodes,
                  texts: &texts)
+        }
+    }
+
+    /// One `draw` node per shape a SwiftUI `Canvas` or `drawingGroup` drew, after its `opaque-drawing` node.
+    private static func appendDraws(of layer: CALayer, shown: CALayer, root: CALayer, offset: CGPoint, clip: CGRect,
+                                    base: [String: Any], into nodes: inout [[String: Any]]) {
+        guard let read = CanvasDraws.read(layer) else { return }
+        if read.unread > 0 { nodes[nodes.count - 1]["unread"] = read.unread }
+        for draw in read.draws {
+            let frame = shown.convert(draw.bounds, to: root).offsetBy(dx: offset.x, dy: offset.y)
+            let visible = frame.intersection(clip)
+            guard !visible.isEmpty else { continue }
+            var node: [String: Any] = ["z": nodes.count, "kind": "draw", "op": draw.op, "frame": rectArray(frame)]
+            if visible != frame { node["visible"] = rectArray(visible) }
+            if let fill = draw.fill { node["fill"] = fill }
+            if let border = draw.border { node["border"] = ["width": border.width, "color": border.color] }
+            if draw.shader { node["shader"] = true }
+            for key in ["opacity", "effects"] { node[key] = base[key] }
+            nodes.append(node)
         }
     }
 
