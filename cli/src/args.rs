@@ -90,13 +90,16 @@ Start here (for agents): ddp skills get core
   tree | find | get | read | watch | eval  what is drawn, now or over a take (@refs from tree and find)
   record | wait | tap | type | press       take a recording, wait, touch and type
   swipe | drag | double-tap | long-press   gestures with a real finger, then what changed
-  open | set | logs | prefs | run | state | events   deep links, device settings, app logs, preferences, app commands, values, events
-  biometric | push | job                   simulated Face ID or fingerprint, a push, a background job
+  back | background | open | set          the Back key or edge swipe, leave and come back, deep links, device settings
+  biometric | push | job                   simulated Face ID or fingerprint, a push (iOS), a background job (Android)
   check overlap|corners|jank|settle|a11y|timeline|parity|baseline|tappable|all
-  history | crash                          the last 15 minutes: what changed, taps, requests; the last crash with its stack
+  history | crash | audits | logs          the last 15 minutes; the last crash; the platform's runtime warnings; app logs
+  profile | memory | perf | debug          where time goes; memory and leaks; missed frames; stop at FILE:LINE
+  state | events | run | prefs | storage   the app's Debug values, events and commands; preferences; files, SQLite, keys
+  net | media | animations | time          requests (mock, fail, cookies); players; Core Animation; pause and step
+  inspect | highlight | annotate | view    which element a person taps; a box on the phone; a numbered screenshot; a page
   compare --reference <png> | compare <element> --on ios,android   pixels against a reference or the other phone
-  diff | baseline | annotate | view | explore | net | time
-  skills | batch | mcp
+  diff | baseline | explore | skills | batch | mcp
 
 See `ddp skills get core --full` for every command and its output.";
 

@@ -2,6 +2,10 @@
 
 Changes that users or agents will notice. Before 1.0, a minor version may change the protocol or the output; those changes are marked.
 
+## Unreleased
+
+- `ddp skills get core` now starts with which command answers which question: slow, leaking, crashed, platform warnings, a breakpoint, the app's storage and network, motion, and device actions. Before, most of the 0.3.0 commands were only in `--full`. The `ddp --help` summary lists every command, and each MCP tool says what its command does instead of pointing to the guide.
+
 ## 0.3.0 (2026-10-30)
 
 - iOS needs Xcode 16.4 or later (was 15.4). GitHub retires its last runner with Xcode 15.4 on November 2, and 16.4 is the oldest Xcode left there with an iOS simulator, so older ones can no longer be checked.

@@ -140,11 +140,17 @@ pub fn mcp(args: &mut Args) -> Result<i32> {
             }
         }
     }
-    let tools: Vec<Value> = wanted.iter().map(|name| json!({
-        "name": format!("ddp_{name}"),
-        "description": format!("ddp {name}: see `ddp skills get core`. Pass the arguments as you would after `ddp {name}` on a command line."),
-        "inputSchema": {"type": "object", "properties": {"args": {"type": "string"}}},
-    })).collect();
+    // Each tool says what its command does, from the same help line `ddp --help` prints, so an MCP client
+    // picks the right one without loading a guide first.
+    let parser = crate::args::parser();
+    let tools: Vec<Value> = wanted.iter().map(|name| {
+        let about = parser.find_subcommand(name).and_then(|command| command.get_about()).map(|about| about.to_string()).unwrap_or_default();
+        json!({
+            "name": format!("ddp_{name}"),
+            "description": format!("ddp {name}: {about}. Pass the arguments as you would after `ddp {name}` on a command line; `--help` as the arguments lists them."),
+            "inputSchema": {"type": "object", "properties": {"args": {"type": "string"}}},
+        })
+    }).collect();
     let reply = |id: &Value, result: Option<Value>, error: Option<Value>| {
         let mut body = json!({"jsonrpc": "2.0", "id": id});
         match error {

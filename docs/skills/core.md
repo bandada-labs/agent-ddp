@@ -1,6 +1,6 @@
 ---
 name: core
-description: Start here. The ddp loop, the commands you need most, waits, refs, saving tokens, troubleshooting.
+description: Start here. The ddp loop, which command answers which question (slow, leaking, crashed, warnings, storage, network, motion, device actions), waits, refs, saving tokens, troubleshooting.
 ---
 
 # ddp core
@@ -13,11 +13,6 @@ ddp shows what a Debug iOS or Android app draws, frame by frame: per element its
 ddp doctor <sim UDID | adb serial> --app <id>   # once: device, app, library, endpoint, elements
 ddp connect <sim UDID | adb serial> --app <id>  # attach; every command below now runs live
 ddp launch <device> --app <id> --env MODE=demo   # start it fresh with values for it (iOS env, Android intent extras), then connect
-ddp state [get|set|watch] NAME   # values the app added in Debug (a total, a mode); ddp skills get app shows how
-ddp events [--follow]            # events the app sent in Debug (a rule that fired), also in ddp history
-ddp crash                        # the app died? its last crash with the stack, from the platform's own record
-ddp perf --for 5s                # missed refreshes and worst gap now; Android also draw time
-ddp storage query Documents/app.sqlite "SELECT * FROM items"   # files, read-only SQL, Keychain/Keystore names
 ddp tree -i                                      # what is on screen: elements with @refs, no paint nodes
 ddp watch @e3 --until 'border>3' --then "agent-device press id=start"
 ddp read --for 3s --then "agent-device press id=start"   # record a take, summary per element
@@ -25,7 +20,54 @@ ddp check all --file .ddp/last.jsonl             # every check over that take, p
 ddp disconnect
 ```
 
-After `connect`, a command that looks at a time window records it first (`--for 2s` default, or `--frames N`) and runs `--then` as the first frame arrives. `--file <recording or saved name>` reads a take instead, so you can ask many questions about one take without recording again.
+After `connect`, a command that looks at a time window records it first (`--for 2s` default, or `--frames N`) and runs `--then` as the first frame arrives. `--then` is any shell command: `"ddp tap @e3"`, or another tool such as agent-device. `--file <recording or saved name>` reads a take instead, so you can ask many questions about one take without recording again.
+
+## Pick the command by the question
+
+The loop covers what is drawn. When the question is about something else, go straight to its command; each one answers from the platform's own tool, and `ddp <command> --help` lists its options.
+
+```
+# Slow, stuck, leaking, crashing
+ddp perf --for 5s                # missed refreshes now (Android also draw time)
+ddp profile --for 3s             # the functions the app spends its time in (sample / simpleperf)
+ddp memory                       # footprint now; `memory leaks` (iOS); `memory heap`: classes by size (iOS), an .hprof (Android)
+ddp crash                        # the last crash with its stack, even when the app is gone
+ddp audits --since 10m           # warnings the platform logged (default 5m): SwiftUI, Auto Layout, Main Thread Checker, StrictMode
+ddp debug Cart.swift:42 --then "ddp tap @e3"   # stop once at a line: stack and locals, then the app goes on by itself (Android: com.example.Cart:42)
+ddp logs --follow --source       # live log lines; iOS adds subsystem and the library that wrote it
+
+# What the app holds
+ddp state                        # values the app added in Debug (a total, a mode); get, set, watch
+ddp events --follow              # events the app sent in Debug (a rule that fired)
+ddp run                          # commands the app added in Debug; `ddp skills get app` shows how to add all three
+ddp prefs                        # UserDefaults / SharedPreferences, secrets redacted
+ddp storage keys                 # Keychain / Keystore item names, never their data
+ddp storage files                # the app's files; paths are from its home folder (iOS) or data folder (Android)
+ddp storage query Documents/app.sqlite "SELECT name FROM sqlite_master"   # one read-only statement; tables first
+ddp net list                     # requests; `net get ID` adds timing when the app opted in; `net cookies` (names, never values)
+ddp media                        # players on screen: state, position, duration, rate
+
+# Motion
+ddp animations                   # iOS: Core Animation animations, by the view's id when it has one
+ddp eval spinner layer.speed --set 0   # iOS: hold that one layer's animation (spinner = an id from `animations`)
+ddp time pause                   # hold the whole app's clock; then `time step 3`, `rate 0.1`, `seek 500ms`, `resume`
+ddp eval @e3 layer.cornerRadius --set 12   # iOS: try a style live, read back from UIKit
+
+# The person and the device
+ddp inspect                      # waits for a person to tap the phone, then says which element
+ddp highlight @e3                # a box over the element on the phone, for a person watching
+ddp back                         # Android Back key, iOS edge swipe
+ddp background --for 2s          # leave the app and come back
+ddp set location 40.4,-3.7       # also appearance, text-size, reduce-motion, locale, orientation (Android)
+ddp biometric enroll             # iOS, once (Android: enroll a finger in the emulator's Settings)
+ddp biometric fail               # a face or finger that does not match; `match` for a good one. Check what the app shows next
+ddp push payload.json            # iOS, as APNs would (needs notification permission)
+ddp job 7                        # Android: run a scheduled job now
+ddp launch <device> --app ID --reset   # wipe the app's data first (the iOS Keychain stays)
+ddp launch <device> --app ID --arg -SomeDefault --arg YES   # iOS launch arguments, as an Xcode scheme; Android: use --env
+```
+
+A platform that cannot do something from the host refuses with the reason and the alternative; do not retry it.
 
 ## Refs
 
