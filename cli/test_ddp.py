@@ -536,6 +536,9 @@ class FakeApp:
                     result = {"keys": [], "unread": "the Keychain refused: the app has no Keychain entitlement (an unsigned build)"}
                 elif method == "screen.highlight":
                     self.highlighted = params
+                elif method == "screen.animations":
+                    result = {"animations": [{"key": "spin", "type": "CABasicAnimation", "keyPath": "transform.rotation.z",
+                                              "duration": 1, "repeat": "forever", "frame": [10, 10, 40, 40], "id": "spinner"}]}
                 elif method == "screen.setValue":
                     self.set_value = params
                     result = {"path": params["path"], "value": params["value"]}
@@ -766,6 +769,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert ddp_in(directory, "storage", "read").returncode == 1
     shown = ddp_in(directory, "highlight", "button", "--for", "500ms")
     assert shown.stdout == "highlighted button [0, 0, 100, 50] for 500ms\n" and app.highlighted == {"rect": [0, 0, 100, 50], "ms": 500}, shown.stdout
+    assert ddp_in(directory, "animations").stdout == "spinner transform.rotation.z CABasicAnimation 1s repeat forever [10, 10, 40, 40]\n"
     # --set sends a number as JSON and a color as text, and prints what the app reads back.
     assert ddp_in(directory, "eval", "button", "layer.cornerRadius", "--set", "12").stdout == "12\n"
     assert app.set_value == {"id": "button", "path": "layer.cornerRadius", "value": 12}, app.set_value

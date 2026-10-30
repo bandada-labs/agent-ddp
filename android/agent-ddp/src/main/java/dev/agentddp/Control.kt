@@ -113,6 +113,10 @@ internal class ControlSession(private val app: ControlApp, private val send: (St
         },
         "perf.metrics" to Perf::measure,
         "media.list" to { _ -> Media.list() },
+        // Compose animates on its own frame clock and the animator registry is hidden: a list would miss most motion.
+        "screen.animations" to { _ ->
+            throw IllegalArgumentException("Android has no public list of running animations: ddp record shows what moves")
+        },
         "screen.highlight" to Highlight::show,
         "storage.files" to Storage::files,
         "storage.read" to Storage::read,

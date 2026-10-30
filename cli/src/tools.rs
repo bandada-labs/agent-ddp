@@ -97,6 +97,7 @@ const MCP_PROFILES: [(&str, &[&str]); 3] = [
             "storage",
             "perf",
             "media",
+            "animations",
             "crash",
             "drag",
             "double-tap",

@@ -1071,6 +1071,38 @@ pub fn storage(args: &mut Args) -> Result<i32> {
 }
 
 /// Players the platform shows the library, and the now-playing info the app gave the system.
+pub fn animations(_args: &mut Args) -> Result<i32> {
+    let session = require_session()?;
+    let answer = open(&session)?.call("screen.animations", json!({}))?;
+    if ctx().json {
+        say!("{}", py::dumps(&answer));
+        return Ok(0);
+    }
+    let animations = answer["animations"].as_array().cloned().unwrap_or_default();
+    let shown = 30;
+    for animation in animations.iter().take(shown) {
+        let owner = animation.get("id").map(py::str).unwrap_or_else(|| "layer".to_string());
+        let key_path = animation.get("keyPath").map(|path| format!(" {}", py::str(path))).unwrap_or_default();
+        let repeat = animation.get("repeat").map(|count| format!(" repeat {}", py::str(count))).unwrap_or_default();
+        let speed = animation.get("speed").map(|speed| format!(" speed {}", py::str(speed))).unwrap_or_default();
+        say!(
+            "{owner}{key_path} {} {}s{repeat}{speed} {}",
+            py::str(&animation["type"]),
+            py::str(&animation["duration"]),
+            py::str(&animation["frame"])
+        );
+    }
+    if animations.len() > shown {
+        say!("... {} more", animations.len() - shown);
+    }
+    if animations.is_empty() {
+        say!(
+            "no Core Animation animation on screen; SwiftUI draws most of its animations itself: ddp record shows them"
+        );
+    }
+    Ok(0)
+}
+
 pub fn media(_args: &mut Args) -> Result<i32> {
     let session = require_session()?;
     let answer = open(&session)?.call("media.list", json!({}))?;

@@ -134,6 +134,7 @@ final class ControlSession {
             return ["received": (params["names"] as? [String] ?? []).filter { environment[$0] != nil }]
         },
         "media.list": { _ in Media.list() },
+        "screen.animations": { _ in Animations.list() },
         "screen.highlight": { try HighlightWindow.show($0) },
         "storage.files": { try Storage.files($0) },
         "storage.read": { try Storage.read($0) },

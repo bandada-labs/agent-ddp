@@ -4,6 +4,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 
 ## Unreleased
 
+- `ddp animations` (iOS): the Core Animation animations on screen, by layer, with key path, class, duration and repeat. `ddp eval <id> layer.speed --set 0` holds one. Android refuses: Compose animations are not listed by the platform.
 - `ddp eval <id> <path> --set VALUE` (iOS): try a style live, a number, `true`/`false` or a color set on the element or its layer, then read back from UIKit. Android refuses: Compose takes its values from the app's state.
 - `ddp launch --arg` (iOS, repeatable): a launch argument as an Xcode scheme passes it, such as `-_UIConstraintBasedLayoutLogUnsatisfiable YES` so iOS 27 logs Auto Layout conflicts for `ddp audits`. Android refuses it and points to `--env`.
 - Android: a layer dimmed in a `graphicsLayer { alpha = ... }` block now shows its opacity; only `graphicsLayer(alpha = ...)` and `Modifier.alpha` were read before. The block runs on Compose's own `GraphicsLayerScope()`, so it reads the same animated state.
