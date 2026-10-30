@@ -318,9 +318,9 @@ pub fn debug(args: &mut Args) -> Result<i32> {
     };
     let wait = Duration::from_millis(state::parse_ms(args.duration.as_deref().unwrap_or("30s"))? as u64);
     let stop = if platform == "ios" {
-        lldb_stop(&ios_pid(&device, &app)?, file, line, wait)?
+        lldb_stop(&ios_pid(&device, &app)?, file, line, wait, args.then.as_deref())?
     } else {
-        jdb_stop(&device, &app, file, line, wait)?
+        jdb_stop(&device, &app, file, line, wait, args.then.as_deref())?
     };
     match stop {
         Stopped::At { stack, locals } => {
@@ -356,7 +356,7 @@ fn py_seconds(wait: Duration) -> String {
 
 /// LLDB in batch mode: attach, a one-shot breakpoint, continue, and after the stop `bt` and `frame variable`, then
 /// detach. Not reached in time: LLDB is stopped, which detaches, and a process left stopped gets SIGCONT.
-fn lldb_stop(pid: &str, file: &str, line: &str, wait: Duration) -> Result<Stopped> {
+fn lldb_stop(pid: &str, file: &str, line: &str, wait: Duration, then: Option<&str>) -> Result<Stopped> {
     let commands = [
         format!("process attach --pid {pid}"),
         format!("breakpoint set --file {file} --line {line} --one-shot true"),
@@ -370,7 +370,7 @@ fn lldb_stop(pid: &str, file: &str, line: &str, wait: Duration) -> Result<Stoppe
     commands.iter().for_each(|it| {
         command.args(["-o", it]);
     });
-    let (output, finished) = run_for(command, wait)?;
+    let (output, finished) = run_for(command, wait, then)?;
     if !finished {
         let state = capture("ps", &["-o", "stat=", "-p", pid]).stdout;
         if state.contains('T') {
@@ -411,7 +411,7 @@ fn lldb_rows(output: &str) -> Option<(Vec<String>, Vec<String>)> {
 
 /// jdb over JDWP, through an adb forward to the app's debuggable process: `stop at`, wait for the hit, `where` and
 /// `locals`, then the breakpoint is cleared and jdb leaves with the app running.
-fn jdb_stop(device: &str, app: &str, class: &str, line: &str, wait: Duration) -> Result<Stopped> {
+fn jdb_stop(device: &str, app: &str, class: &str, line: &str, wait: Duration, then: Option<&str>) -> Result<Stopped> {
     let adb = adb_path()?;
     let pid = capture(&adb, &["-s", device, "shell", "pidof", app]).stdout.trim().to_string();
     if pid.is_empty() {
@@ -426,46 +426,95 @@ fn jdb_stop(device: &str, app: &str, class: &str, line: &str, wait: Duration) ->
             "the app must be debuggable (a debug build)"
         );
     }
-    let stop = jdb_session(&format!("localhost:{port}"), &format!("{class}:{line}"), wait);
+    let stop = jdb_session(&format!("localhost:{port}"), &format!("{class}:{line}"), wait, then);
     capture(&adb, &["-s", device, "forward", "--remove", &format!("tcp:{port}")]);
     stop
 }
 
-fn jdb_session(address: &str, place: &str, wait: Duration) -> Result<Stopped> {
-    let mut child = Command::new("jdb")
+fn jdb_session(address: &str, place: &str, wait: Duration, then: Option<&str>) -> Result<Stopped> {
+    // The JDK in JAVA_HOME first: /usr/bin/jdb runs the system's default JDK, which can be for another CPU.
+    let jdb = std::env::var("JAVA_HOME")
+        .ok()
+        .map(|home| format!("{home}/bin/jdb"))
+        .filter(|path| std::path::Path::new(path).exists())
+        .unwrap_or_else(|| "jdb".to_string());
+    let mut child = Command::new(&jdb)
         .args(["-attach", address])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| {
             state::failure(format!("jdb: {error}"), "command_failed", Some("install a JDK: jdb ships with it"))
         })?;
     let mut input = child.stdin.take().expect("piped");
     let (lines, received) = mpsc::channel();
+    let errors = lines.clone();
     let stdout = child.stdout.take().expect("piped");
+    let stderr = child.stderr.take().expect("piped");
     std::thread::spawn(move || {
         BufReader::new(stdout).lines().map_while(|line| line.ok()).for_each(|line| {
             let _ = lines.send(line);
+        })
+    });
+    std::thread::spawn(move || {
+        BufReader::new(stderr).lines().map_while(|line| line.ok()).for_each(|line| {
+            let _ = errors.send(line);
         })
     });
     let mut say_to_jdb = |text: &str| {
         let _ = writeln!(input, "{text}");
     };
     say_to_jdb(&format!("stop at {place}"));
-    let deadline = Instant::now() + wait;
+    // Attaching has its own time: --for counts from when jdb is in.
+    let attach_by = Instant::now() + Duration::from_secs(15);
+    let mut deadline = None;
     let mut hit = false;
+    let mut connected = false;
     let mut problem = None;
-    while let Some(left) = deadline.checked_duration_since(Instant::now()) {
-        let Ok(line) = received.recv_timeout(left) else { break };
+    let mut last = String::new();
+    let mut triggered = None;
+    while let Some(left) = deadline.unwrap_or(attach_by).checked_duration_since(Instant::now()) {
+        let line = match received.recv_timeout(left) {
+            Ok(line) => line,
+            Err(mpsc::RecvTimeoutError::Timeout) => break,
+            // jdb ended before the line ran: it never attached, or it lost the app.
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                let _ = child.wait();
+                fail!(
+                    format!("jdb stopped: {}", last.trim()),
+                    "command_failed",
+                    "set JAVA_HOME to a JDK for this Mac; the app must be a debug build"
+                );
+            }
+        };
+        if !connected && (line.contains("Initializing jdb") || line.contains("breakpoint")) {
+            connected = true;
+            deadline = Some(Instant::now() + wait);
+        }
+        // "Set breakpoint" or "Deferring breakpoint": it is in, so the --then program can make the line run.
+        if triggered.is_none() && (line.contains("Set breakpoint") || line.contains("Deferring breakpoint")) {
+            triggered = then.and_then(crate::live::spawn_then);
+        }
         if line.contains("Breakpoint hit:") {
             hit = true;
             break;
         }
-        if line.contains("Unable to set") || line.contains("is not a valid line number") {
-            problem = Some(format!("jdb could not stop there: {}", line.trim()));
+        if line.contains("Unable to set")
+            || line.contains("No code at line")
+            || line.contains("is not a valid line number")
+        {
+            problem = Some(format!("jdb could not stop there: {}", line.trim_start_matches("> ").trim()));
             break;
         }
+        if !line.trim().is_empty() {
+            last = line;
+        }
+    }
+    if !connected && !hit && problem.is_none() {
+        let _ = child.kill();
+        let _ = child.wait();
+        fail!(format!("jdb did not attach: {}", last.trim()), "command_failed", "the app must be a debug build");
     }
     if hit {
         say_to_jdb("where");
@@ -487,6 +536,9 @@ fn jdb_session(address: &str, place: &str, wait: Duration) -> Result<Stopped> {
     }
     let _ = child.kill();
     let _ = child.wait();
+    if let Some(mut program) = triggered {
+        let _ = program.wait();
+    }
     if !hit {
         return Ok(Stopped::NotReached(problem.unwrap_or_else(|| "the line did not run".to_string())));
     }
@@ -494,7 +546,7 @@ fn jdb_session(address: &str, place: &str, wait: Duration) -> Result<Stopped> {
     let rows: Vec<String> = after
         .iter()
         .map(|line| {
-            line.rsplit_once("] ").filter(|(prompt, _)| !prompt.contains(' ')).map_or(line.as_str(), |(_, rest)| rest)
+            line.split_once("] ").filter(|(prompt, _)| !prompt.contains(' ')).map_or(line.as_str(), |(_, rest)| rest)
         })
         .map(str::trim_end)
         .filter(|row| !row.trim().is_empty() && !row.starts_with('>'))
@@ -509,17 +561,32 @@ fn jdb_session(address: &str, place: &str, wait: Duration) -> Result<Stopped> {
     Ok(Stopped::At { stack, locals })
 }
 
-/// Runs a debugger until it exits or `wait` passes, then stops it. Its output, and whether it finished on its own.
-fn run_for(mut command: Command, wait: Duration) -> Result<(String, bool)> {
+/// Runs LLDB until it exits or `wait` passes, then stops it. Its output, and whether it finished on its own. The
+/// `--then` program starts when LLDB lets the app run with the breakpoint in.
+fn run_for(mut command: Command, wait: Duration, then: Option<&str>) -> Result<(String, bool)> {
     let mut child = command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| state::failure(error.to_string(), "command_failed", None))?;
     let stdout = child.stdout.take().expect("piped");
-    let reader = std::thread::spawn(move || std::io::read_to_string(stdout).unwrap_or_default());
+    let (lines, received) = mpsc::channel::<String>();
+    std::thread::spawn(move || {
+        BufReader::new(stdout).lines().map_while(|line| line.ok()).for_each(|line| {
+            let _ = lines.send(line);
+        })
+    });
+    let mut output = String::new();
+    let mut triggered = None;
     let deadline = Instant::now() + wait + Duration::from_secs(10);
     let finished = loop {
+        for line in received.try_iter() {
+            if triggered.is_none() && line.contains(" resuming") {
+                triggered = then.and_then(crate::live::spawn_then);
+            }
+            output.push_str(&line);
+            output.push('\n');
+        }
         if child.try_wait().ok().flatten().is_some() {
             break true;
         }
@@ -536,7 +603,16 @@ fn run_for(mut command: Command, wait: Duration) -> Result<(String, bool)> {
         }
         std::thread::sleep(Duration::from_millis(100));
     };
-    Ok((reader.join().unwrap_or_default(), finished))
+    // The reader ends with LLDB: what it had left is in the channel.
+    std::thread::sleep(Duration::from_millis(100));
+    received.try_iter().for_each(|line| {
+        output.push_str(&line);
+        output.push('\n');
+    });
+    if let Some(mut program) = triggered {
+        let _ = program.wait();
+    }
+    Ok((output, finished))
 }
 
 #[cfg(test)]

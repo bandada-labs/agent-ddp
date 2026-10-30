@@ -127,7 +127,7 @@ pub fn run_then(command: &str) -> bool {
     }
 }
 
-fn spawn_then(command: &str) -> Option<Child> {
+pub fn spawn_then(command: &str) -> Option<Child> {
     then_command(command)?.spawn().map_err(|error| warn!("ddp: --then: {error}")).ok()
 }
 
