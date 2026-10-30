@@ -4,6 +4,9 @@ use crate::args::Args;
 use crate::device::target;
 use crate::state::{self, adb_path, capture, Result};
 use crate::{fail, say};
+use std::io::{BufRead, BufReader, Write};
+use std::process::{Command, Stdio};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 /// Lines printed from a tool's table; the tool has them all.
@@ -300,6 +303,242 @@ fn android_heap(device: &str, app: &str) -> Result<i32> {
     Ok(0)
 }
 
+/// `ddp debug <place>`: one stop at a line with the platform's own debugger, the stack and the locals there, then the
+/// app runs on. No daemon: the command attaches, waits up to `--for`, and always lets the app go, hit or not.
+pub fn debug(args: &mut Args) -> Result<i32> {
+    let (platform, device, app) = target(args)?;
+    let Some(app) = app else { fail!("no app", "missing_option", "pass --app, or ddp connect first") };
+    let place = args.path.clone().unwrap_or_default();
+    let example =
+        if platform == "ios" { "ddp debug ContentView.swift:42" } else { "ddp debug com.example.MainActivity:42" };
+    let Some((file, line)) =
+        place.rsplit_once(':').filter(|(file, line)| !file.is_empty() && line.parse::<u32>().is_ok())
+    else {
+        fail!(format!("the place is FILE:LINE, not '{place}'"), "bad_value", example)
+    };
+    let wait = Duration::from_millis(state::parse_ms(args.duration.as_deref().unwrap_or("30s"))? as u64);
+    let stop = if platform == "ios" {
+        lldb_stop(&ios_pid(&device, &app)?, file, line, wait)?
+    } else {
+        jdb_stop(&device, &app, file, line, wait)?
+    };
+    match stop {
+        Stopped::At { stack, locals } => {
+            say!("stopped at {place}");
+            print_rows("stack", &stack, 15);
+            print_rows("locals", &locals, 50);
+            say!("the app runs on");
+            Ok(0)
+        }
+        Stopped::NotReached(why) => {
+            say!("{place} was not reached in {}: {why}; the app runs on", py_seconds(wait));
+            Ok(1)
+        }
+    }
+}
+
+enum Stopped {
+    At { stack: Vec<String>, locals: Vec<String> },
+    NotReached(String),
+}
+
+fn print_rows(title: &str, rows: &[String], shown: usize) {
+    say!("{title}:");
+    rows.iter().take(shown).for_each(|row| say!("  {row}"));
+    if rows.len() > shown {
+        say!("  ... {} more", rows.len() - shown);
+    }
+}
+
+fn py_seconds(wait: Duration) -> String {
+    format!("{}s", wait.as_secs_f64())
+}
+
+/// LLDB in batch mode: attach, a one-shot breakpoint, continue, and after the stop `bt` and `frame variable`, then
+/// detach. Not reached in time: LLDB is stopped, which detaches, and a process left stopped gets SIGCONT.
+fn lldb_stop(pid: &str, file: &str, line: &str, wait: Duration) -> Result<Stopped> {
+    let commands = [
+        format!("process attach --pid {pid}"),
+        format!("breakpoint set --file {file} --line {line} --one-shot true"),
+        "process continue".to_string(),
+        "bt 30".to_string(),
+        "frame variable".to_string(),
+        "process detach".to_string(),
+    ];
+    let mut command = Command::new("xcrun");
+    command.args(["lldb", "--batch"]);
+    commands.iter().for_each(|it| {
+        command.args(["-o", it]);
+    });
+    let (output, finished) = run_for(command, wait)?;
+    if !finished {
+        let state = capture("ps", &["-o", "stat=", "-p", pid]).stdout;
+        if state.contains('T') {
+            capture("kill", &["-CONT", pid]);
+        }
+    }
+    let Some((stack, locals)) = lldb_rows(&output) else {
+        let why = if output.contains("no locations") {
+            format!("LLDB found no code at {file}:{line} in the app")
+        } else if output.contains("error: attach failed") {
+            "LLDB could not attach to the app".to_string()
+        } else {
+            "the line did not run".to_string()
+        };
+        return Ok(Stopped::NotReached(why));
+    };
+    Ok(Stopped::At { stack, locals })
+}
+
+/// The stack frames and the locals LLDB printed after its breakpoint stop, or None when it never stopped there.
+fn lldb_rows(output: &str) -> Option<(Vec<String>, Vec<String>)> {
+    if !output.contains("stop reason = one-shot breakpoint") {
+        return None;
+    }
+    let section = |from: &str, to: &str| -> Vec<String> {
+        output
+            .split_once(from)
+            .and_then(|(_, rest)| rest.split_once(to).map(|(inside, _)| inside))
+            .map(|inside| {
+                inside.lines().map(str::trim_end).filter(|row| !row.trim().is_empty()).map(String::from).collect()
+            })
+            .unwrap_or_default()
+    };
+    let stack =
+        section("(lldb) bt", "(lldb) frame variable").into_iter().filter(|row| row.contains("frame #")).collect();
+    Some((stack, section("(lldb) frame variable", "(lldb) process detach")))
+}
+
+/// jdb over JDWP, through an adb forward to the app's debuggable process: `stop at`, wait for the hit, `where` and
+/// `locals`, then the breakpoint is cleared and jdb leaves with the app running.
+fn jdb_stop(device: &str, app: &str, class: &str, line: &str, wait: Duration) -> Result<Stopped> {
+    let adb = adb_path()?;
+    let pid = capture(&adb, &["-s", device, "shell", "pidof", app]).stdout.trim().to_string();
+    if pid.is_empty() {
+        fail!(format!("{app} is not running"), "not_running", format!("ddp launch {device} --app {app}"));
+    }
+    let forwarded = capture(&adb, &["-s", device, "forward", "tcp:0", &format!("jdwp:{pid}")]);
+    let port = forwarded.stdout.trim().to_string();
+    if forwarded.code != 0 || port.parse::<u16>().is_err() {
+        fail!(
+            format!("no JDWP for {app}: {}", forwarded.stderr.trim()),
+            "command_failed",
+            "the app must be debuggable (a debug build)"
+        );
+    }
+    let stop = jdb_session(&format!("localhost:{port}"), &format!("{class}:{line}"), wait);
+    capture(&adb, &["-s", device, "forward", "--remove", &format!("tcp:{port}")]);
+    stop
+}
+
+fn jdb_session(address: &str, place: &str, wait: Duration) -> Result<Stopped> {
+    let mut child = Command::new("jdb")
+        .args(["-attach", address])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| {
+            state::failure(format!("jdb: {error}"), "command_failed", Some("install a JDK: jdb ships with it"))
+        })?;
+    let mut input = child.stdin.take().expect("piped");
+    let (lines, received) = mpsc::channel();
+    let stdout = child.stdout.take().expect("piped");
+    std::thread::spawn(move || {
+        BufReader::new(stdout).lines().map_while(|line| line.ok()).for_each(|line| {
+            let _ = lines.send(line);
+        })
+    });
+    let mut say_to_jdb = |text: &str| {
+        let _ = writeln!(input, "{text}");
+    };
+    say_to_jdb(&format!("stop at {place}"));
+    let deadline = Instant::now() + wait;
+    let mut hit = false;
+    let mut problem = None;
+    while let Some(left) = deadline.checked_duration_since(Instant::now()) {
+        let Ok(line) = received.recv_timeout(left) else { break };
+        if line.contains("Breakpoint hit:") {
+            hit = true;
+            break;
+        }
+        if line.contains("Unable to set") || line.contains("is not a valid line number") {
+            problem = Some(format!("jdb could not stop there: {}", line.trim()));
+            break;
+        }
+    }
+    if hit {
+        say_to_jdb("where");
+        say_to_jdb("locals");
+    }
+    // jdb leaves an attached app running: it disposes of the connection rather than ending the VM.
+    say_to_jdb(&format!("clear {place}"));
+    if hit {
+        say_to_jdb("cont");
+    }
+    say_to_jdb("exit");
+    let mut after: Vec<String> = Vec::new();
+    let quit_by = Instant::now() + Duration::from_secs(5);
+    while let Some(left) = quit_by.checked_duration_since(Instant::now()) {
+        match received.recv_timeout(left) {
+            Ok(line) => after.push(line),
+            Err(_) => break,
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    if !hit {
+        return Ok(Stopped::NotReached(problem.unwrap_or_else(|| "the line did not run".to_string())));
+    }
+    // jdb puts its prompt ("main[1] ") in front of the next output line.
+    let rows: Vec<String> = after
+        .iter()
+        .map(|line| {
+            line.rsplit_once("] ").filter(|(prompt, _)| !prompt.contains(' ')).map_or(line.as_str(), |(_, rest)| rest)
+        })
+        .map(str::trim_end)
+        .filter(|row| !row.trim().is_empty() && !row.starts_with('>'))
+        .map(String::from)
+        .collect();
+    let (stack, rest): (Vec<String>, Vec<String>) = rows.into_iter().partition(|row| row.trim_start().starts_with('['));
+    let locals = rest
+        .into_iter()
+        .take_while(|row| !row.starts_with("Removed:") && !row.starts_with("Not found:"))
+        .filter(|row| !row.contains("Breakpoint hit:"))
+        .collect();
+    Ok(Stopped::At { stack, locals })
+}
+
+/// Runs a debugger until it exits or `wait` passes, then stops it. Its output, and whether it finished on its own.
+fn run_for(mut command: Command, wait: Duration) -> Result<(String, bool)> {
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| state::failure(error.to_string(), "command_failed", None))?;
+    let stdout = child.stdout.take().expect("piped");
+    let reader = std::thread::spawn(move || std::io::read_to_string(stdout).unwrap_or_default());
+    let deadline = Instant::now() + wait + Duration::from_secs(10);
+    let finished = loop {
+        if child.try_wait().ok().flatten().is_some() {
+            break true;
+        }
+        if Instant::now() >= deadline {
+            // SIGTERM lets LLDB detach; only its debugserver dying takes the app with it, and nothing here kills that.
+            capture("kill", &["-TERM", &child.id().to_string()]);
+            let grace = Instant::now() + Duration::from_secs(3);
+            while child.try_wait().ok().flatten().is_none() && Instant::now() < grace {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            let _ = child.kill();
+            let _ = child.wait();
+            break false;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    Ok((reader.join().unwrap_or_default(), finished))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -360,5 +599,14 @@ mod tests {
             meminfo_lines(output).unwrap(),
             vec!["Java Heap: 4248 21468", "Native Heap: 12564 13200", "TOTAL PSS: 55555 TOTAL RSS: 120000"]
         );
+    }
+
+    #[test]
+    fn lldb_gives_the_frames_and_the_locals_at_its_stop() {
+        let (stack, locals) = lldb_rows(include_str!("testdata/lldb.txt")).unwrap();
+        assert_eq!(stack.len(), 2, "{stack:?}");
+        assert!(stack[0].contains("loop.swift:6"), "{stack:?}");
+        assert_eq!(locals, vec![r#"(String) label = "tick 43""#.to_string()]);
+        assert!(lldb_rows("Process 1 resuming").is_none());
     }
 }

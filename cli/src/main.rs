@@ -77,6 +77,7 @@ fn handler(command: &str) -> fn(&mut Args) -> Result<i32> {
         "inspect" => history::inspect,
         "highlight" => hit::highlight,
         "profile" => process::profile,
+        "debug" => process::debug,
         "background" => device::background,
         "push" => device::push,
         "job" => device::job,

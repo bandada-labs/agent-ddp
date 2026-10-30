@@ -1,0 +1,35 @@
+(lldb) process attach --pid 71470
+Process 71470 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = signal SIGSTOP
+       frame #0: 0x000000018f9c0308 libsystem_kernel.dylib`__semwait_signal + 8
+libsystem_kernel.dylib`__semwait_signal:
+->  0x18f9c0308 <+8>:  b.lo   0x18f9c0328               ; <+40>
+    0x18f9c030c <+12>: pacibsp 
+    0x18f9c0310 <+16>: stp    x29, x30, [sp, #-0x10]!
+    0x18f9c0314 <+20>: mov    x29, sp
+Target 0: (loop) stopped.
+Executable binary set to "/tmp/app/loop".
+Architecture set to: arm64-apple-macosx-.
+(lldb) breakpoint set --file loop.swift --line 6 --one-shot true
+Breakpoint 1: where = loop`main + 408 at loop.swift:6:5, address = 0x0000000100528b40
+(lldb) process continue
+Process 71470 resuming
+Process 71470 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = one-shot breakpoint 1
+       frame #0: 0x0000000100528b40 loop`main at loop.swift:6:5
+   3   	while true {
+   4   	    count += 1
+   5   	    let label = "tick \(count)"
+-> 6   	    Thread.sleep(forTimeInterval: 0.2)
+    	    ^
+   7   	    if label.isEmpty { print(label) }
+   8   	}
+Target 0: (loop) stopped.
+(lldb) bt 5
+* thread #1, queue = 'com.apple.main-thread', stop reason = one-shot breakpoint 1
+   * frame #0: 0x0000000100528b40 loop`main at loop.swift:6:5
+     frame #1: 0x000000018f62be80 dyld`start + 6688
+(lldb) frame variable
+(String) label = "tick 43"
+(lldb) process detach
+Process 71470 detached

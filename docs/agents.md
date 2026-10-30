@@ -54,6 +54,7 @@ ddp back | background [--for 2s]                   go back; leave the app for a 
 ddp audits [--since 5m]                            runtime warnings the platform wrote in the app's log
 ddp memory [summary|leaks|heap]                    the app's memory now, its leaks (iOS), a heap dump
 ddp profile [--for 3s]                             the functions the app spends its time in
+ddp debug <FILE:LINE> [--for 30s]                  stop once at a line: the stack and the locals, then the app runs on
 ddp inspect [--for 30s]                            a person taps an element on the phone; ddp says which
 ddp highlight <element> [--for 3s]                 a box over the element in the live app, for a person watching
 ddp open <deep link or URL>
@@ -261,6 +262,8 @@ Without the library, `--device <adb serial>` uses Android's own `input` command 
 `memory` reads the app's process with each platform's own tools. iOS: a simulator app is a macOS process, so `footprint` gives its footprint and biggest categories, `memory leaks` runs `leaks` (exit 1 when it finds one, with the first few), `memory heap` runs `heap` and lists the classes by bytes. Android: `dumpsys meminfo` gives the App Summary (Java heap, native heap, graphics, total PSS); `memory heap` runs `am dumpheap` and saves the `.hprof` in `.ddp/` for Android Studio. Android has no leak detector of its own, so `memory leaks` points to LeakCanary.
 
 ### profile
+
+`debug <FILE:LINE>` stops the app once at a line with the platform's own debugger and prints the stack and the locals there, then lets the app go. iOS: LLDB attached to the simulator process, with a one-shot breakpoint at `File.swift:42`, then `bt` and `frame variable`, then `process detach`. Android: jdb over JDWP through an `adb forward` to the app's process, with jdb's own place, `com.example.MainActivity:42`, then `where` and `locals`; the breakpoint is cleared and jdb disconnects. Make the line run (a tap, `ddp run`) while it waits. When the line does not run within `--for` (default 30s), it says so, exits 1 and the app runs on; it also says when the debugger found no code at that line. A debug build only. One stop per command, no daemon: for a session with stepping, use Xcode or Android Studio.
 
 `profile --for 3s` samples the app with the platform's own sampler and prints the top functions by their own samples, with their library: `sample` on the simulator process, `simpleperf record --app` on Android (Android 10 and later, a debuggable build). On iOS, threads asleep in a system call are idle time: they are counted on one line, not listed. A measurement: it exits 0.
 

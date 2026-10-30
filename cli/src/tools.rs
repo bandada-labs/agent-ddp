@@ -110,6 +110,7 @@ const MCP_PROFILES: [(&str, &[&str]); 3] = [
             "background",
             "memory",
             "profile",
+            "debug",
             "inspect",
             "highlight",
         ],
