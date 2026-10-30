@@ -28,6 +28,9 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -78,6 +81,14 @@ class DrawActivity : ComponentActivity() {
                 Canvas(Modifier.testTag("canvasText").size(160.dp, 40.dp)) {
                     drawText(measurer, "Hello")
                 }
+                // Draws moved by the DrawScope transform, and a layer dimmed in a graphicsLayer block.
+                Canvas(Modifier.testTag("translated").size(80.dp)) {
+                    translate(top = 20.dp.toPx()) { drawCircle(Color.Green, radius = 10.dp.toPx(), center = Offset(40.dp.toPx(), 10.dp.toPx())) }
+                }
+                Canvas(Modifier.testTag("scaled").size(80.dp)) {
+                    scale(0.5f, pivot = Offset.Zero) { drawRect(Color.Magenta, size = size) }
+                }
+                Box(Modifier.testTag("dimmed").size(40.dp).graphicsLayer { alpha = 0.4f }.background(Color.Black))
             }
         }
     }

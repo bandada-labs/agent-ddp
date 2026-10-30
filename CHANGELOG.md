@@ -4,6 +4,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 
 ## Unreleased
 
+- Android: a layer dimmed in a `graphicsLayer { alpha = ... }` block now shows its opacity; only `graphicsLayer(alpha = ...)` and `Modifier.alpha` were read before. The block runs on Compose's own `GraphicsLayerScope()`, so it reads the same animated state.
 - `ddp net get` shows a request's phases (`timing`: dns, connect, tls, wait, and download on iOS), its `protocol` and whether it `reused` a connection, when the app passes `AgentDDP.timing` to URLSession (iOS) or `AgentDdpNetwork.timing` as OkHttp's event listener factory (Android).
 - `ddp inspect`: a person taps an element on the phone and ddp says which, from the taps History keeps. `ddp highlight <element>`: a box over it in the live app for a while (new protocol method `screen.highlight`).
 - `ddp logs --follow --source`: on iOS each line also says its subsystem and the library that wrote it (`log.entry` adds `subsystem` and `sender`).

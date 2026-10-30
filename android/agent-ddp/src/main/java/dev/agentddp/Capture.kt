@@ -32,6 +32,7 @@ import androidx.compose.ui.layout.LayoutInfo
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.InspectableValue
 import androidx.compose.ui.platform.ViewRootForTest
+import androidx.compose.ui.graphics.GraphicsLayerScope
 import androidx.compose.ui.platform.isDebugInspectorInfoEnabled
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
@@ -241,7 +242,7 @@ internal class Capture(private val density: Float) {
             inspect(info.modifier)?.let { (name, props) -> Painted(name, props, windowRect(info.coordinates)) }
         }
         val alpha = parentAlpha * modifiers.filter { it.name == "graphicsLayer" || it.name == "alpha" }
-            .fold(1f) { total, modifier -> total * ((modifier.props["alpha"] as? Float) ?: 1f) }
+            .fold(1f) { total, modifier -> total * layerAlpha(modifier) }
         val node = semantics[layout.semanticsId]
         val frame = node?.let {
             val position = it.positionInWindow
@@ -340,6 +341,17 @@ internal class Capture(private val density: Float) {
         }
         owner = outerOwner
         effects = outerEffects
+    }
+
+    /**
+     * A layer's alpha: its parameter, or what its `graphicsLayer { }` block sets, run on a fresh scope the way Compose
+     * runs it, so it reads the same animated state. A block that fails counts as fully shown.
+     */
+    private fun layerAlpha(modifier: Painted): Float {
+        (modifier.props["alpha"] as? Float)?.let { return it }
+        @Suppress("UNCHECKED_CAST")
+        val block = modifier.props["block"] as? GraphicsLayerScope.() -> Unit ?: return 1f
+        return runCatching { GraphicsLayerScope().apply(block).alpha }.getOrDefault(1f)
     }
 
     /** One inspectable modifier and the rectangle it applies to, in activity-window pixels. */
