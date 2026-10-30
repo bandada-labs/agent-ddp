@@ -60,7 +60,7 @@ jobs:
           gh release create "$GITHUB_REF_NAME" bin/ddp-* --title "$GITHUB_REF_NAME" $notes
         env:
           GH_TOKEN: ${{ github.token }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
