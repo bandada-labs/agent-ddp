@@ -32,8 +32,9 @@ jobs:
   ios:
     runs-on: macos-15
     env:
-      # Xcode 16.0, the oldest one the README supports and the runner has: a newer Xcode accepts what it does not.
-      DEVELOPER_DIR: /Applications/Xcode_16.app/Contents/Developer
+      # Xcode 16.4, the oldest one the README supports: a newer Xcode accepts what it does not.
+      # It is the oldest on the runner with an iOS simulator runtime; 16.0 to 16.3 have only the SDK.
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
       - run: xcodebuild -scheme AgentDDP -destination 'generic/platform=iOS Simulator' build

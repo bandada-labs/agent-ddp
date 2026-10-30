@@ -4,7 +4,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 
 ## 0.3.0 (2026-10-30)
 
-- iOS needs Xcode 16 or later (was 15.4). GitHub retires its last runner with Xcode 15.4 on November 2, so 15.4 can no longer be checked.
+- iOS needs Xcode 16.4 or later (was 15.4). GitHub retires its last runner with Xcode 15.4 on November 2, and 16.4 is the oldest Xcode left there with an iOS simulator, so older ones can no longer be checked.
 - iOS: the shapes inside a SwiftUI `Canvas` or `drawingGroup` are `draw` nodes, like Android's Canvas replay: circle, rect, rounded rect, oval, path or line, with bounds, fill or stroke, and color alpha (a dimmed context too). They come from RenderBox, SwiftUI's renderer, through a new engine hook, `renderbox.displayList`, which turns on RenderBox's XML recorder for the app run (Debug only). Text and images in a Canvas are not read yet and are counted as `unread`. Measured on the sample: no change in capture time (5.6-6.1 ms a frame) or app CPU and memory.
 - Fixed: `check a11y` said SMALL TARGET for a control partly past the screen's edge, such as a list row half scrolled off; the edge cut its reach, not its size. Such a control is no longer measured.
 - `ddp skills get app`: stepping back in an app with a pure engine, through an app `replay` command; ddp does not model the engine.
@@ -26,7 +26,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 - Android: what Compose `drawWithContent` and `drawWithCache` lambdas draw is read like a `Canvas` or `drawBehind` one, and text drawn in a Canvas is a `text` draw op with its string. `drawWithCache` goes through a new engine hook, `compose.drawCache`.
 - `ddp tap` and `check tappable` see the keyboard: a control all under it, as UIKit's keyboard notifications or Android's IME insets (API 30+) place it, is `COVERED by the keyboard` instead of reaching.
 - `ddp media`: the players the platform shows (an `AVPlayerLayer` or `VideoView` on screen) with state, position, duration and rate, and the now-playing info on iOS. A player with no public way in (audio-only, Media3) is shown as an app value, with a recipe in `ddp skills get app`. New protocol method `media.list`.
-- `ios/build-swiftc.sh`: builds the iOS library as a static library and module with plain `swiftc`, for apps built without an Xcode project or SwiftPM. CI builds it, and the iOS sample app, on Xcode 16.0, the oldest Xcode supported.
+- `ios/build-swiftc.sh`: builds the iOS library as a static library and module with plain `swiftc`, for apps built without an Xcode project or SwiftPM. CI builds it, and the iOS sample app, on Xcode 16.4, the oldest Xcode supported.
 - `ddp compare --on ios,android --structure`: what the two phones draw by label, not pixels: labels only one phone has, and the same label drawn as another kind. Platform idiom no longer hides a missing tab or chip.
 - `ddp storage`: the app's files (list, read, remove), its SQLite databases with one read-only query, and its Keychain items or Keystore aliases by name, never their data. Text is redacted like network bodies. New protocol methods `storage.files`, `storage.read`, `storage.remove`, `storage.query`, `storage.keys`. `ddp launch --reset` clears the app's data first.
 - `ddp perf [--for 5s]`: refreshes the main thread missed and the worst gap, from the platform's vsync callbacks, plus the app's work per frame on Android (FrameMetrics, without the GPU wait), without a recording. New protocol method `perf.metrics`. History pauses while it measures.
