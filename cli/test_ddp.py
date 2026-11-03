@@ -550,7 +550,8 @@ class FakeApp:
                     result = {"ms": 300, "composables": [
                         {"name": "dev.example.Cart (Cart.kt:40)", "runs": 48,
                          "invalidatedBy": [{"state": "MutableState<Integer>", "times": 46}]},
-                        {"name": "dev.example.Row (Cart.kt:80)", "runs": 2}]}
+                        {"name": "dev.example.Row (Cart.kt:80)", "runs": 2},
+                        {"name": "androidx.compose.runtime.SideEffect (Effects.kt:48)", "runs": 515}]}
                 elif method == "screen.source":
                     if params["id"] == "spinner":
                         result = {"status": "none", "why": "the app was built without Compose source information"}
@@ -798,8 +799,11 @@ with tempfile.TemporaryDirectory() as directory:
     Path(android_dir, ".ddp", "session.json").write_text(json.dumps(
         {"platform": "android", "app": "fake", "device": "fake", "port": app.port}))
     ran = ddp_in(android_dir, "recompositions", "--for", "200ms").stdout
-    assert ran == ("0.3s: 2 composables ran\n  dev.example.Cart (Cart.kt:40)  48 runs, invalidated by "
-                   "MutableState<Integer> x46\n  dev.example.Row (Cart.kt:80)  2 runs\n"), ran
+    assert ran == ("0.3s: 2 composables of the app ran (1 more inside androidx libraries: --full)\n"
+                   "  dev.example.Cart (Cart.kt:40)  48 runs, invalidated by MutableState<Integer> x46\n"
+                   "  dev.example.Row (Cart.kt:80)  2 runs\n"), ran
+    full = ddp_in(android_dir, "recompositions", "--for", "200ms", "--full").stdout
+    assert full.startswith("0.3s: 3 composables ran\n") and "androidx.compose.runtime.SideEffect" in full, full
     assert app.measuring == {"ms": 200}, app.measuring
     # source: the app's own calls innermost first, library calls counted; no source information is said, not guessed.
     assert ddp_in(directory, "source", "@e1").stdout == ("button: called from\n  Button  Cart.kt:57\n  CartRow  Cart.kt:42\n"

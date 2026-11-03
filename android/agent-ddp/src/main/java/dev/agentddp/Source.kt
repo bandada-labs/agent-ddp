@@ -120,8 +120,8 @@ internal object SourceLocations {
         val row = JSONObject().put("name", name)
         val at = group.location ?: return row
         at.sourceFile?.let { row.put("file", it) }
-        // The compiler counts lines from 0.
-        row.put("line", at.lineNumber + 1).put("offset", at.offset).put("length", at.length)
+        // The compiler writes lines from 0; ui-tooling-data hands them counted from 1, as the file shows them.
+        row.put("line", at.lineNumber).put("offset", at.offset).put("length", at.length)
         androidxPackages[at.packageHash]?.let { row.put("library", it) }
         return row
     }

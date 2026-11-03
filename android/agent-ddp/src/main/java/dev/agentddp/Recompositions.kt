@@ -51,7 +51,9 @@ internal object Recompositions {
     private val handles = mutableListOf<CompositionObserverHandle>()
     private var startingScope: RecomposeScope? = null
     private var startedAt = 0L
-    private val autoStop = Runnable { stop() }
+    private val main = Handler(Looper.getMainLooper())
+    // Removed through the same handler that posted it; a no-op when a stop already came.
+    private val autoStop = Runnable { if (active) stop() }
 
     private val tracer = object : CompositionTracer {
         override fun isTraceInProgress() = true
@@ -116,13 +118,13 @@ internal object Recompositions {
         active = true
         startedAt = System.nanoTime()
         // A client that never says stop must not leave the tracer in the app.
-        Handler(Looper.getMainLooper()).postDelayed(autoStop, ms + 5_000)
+        main.postDelayed(autoStop, ms + 5_000)
         JSONObject().put("compositions", compositions.size)
     }
 
     fun stop(): JSONObject = onMain {
         if (!active) throw IllegalStateException("Not measuring: start first")
-        Handler(Looper.getMainLooper()).removeCallbacks(autoStop)
+        main.removeCallbacks(autoStop)
         // setTracer takes no null: "no tracer" goes back through the field it was read from.
         runCatching { tracerField().set(null, previousTracer) }.getOrElse { Composer.setTracer(previousTracer ?: idle) }
         handles.forEach { it.dispose() }

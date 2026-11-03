@@ -35,7 +35,7 @@ pub fn describe_node(node: &Value) -> String {
             None => format!("border {width} {}", py::str(&border["color"])),
         });
     }
-    for field in ["corner", "opacity", "source"] {
+    for field in ["corner", "opacity", "source", "tint"] {
         if py::truthy(node.get(field)) {
             parts.push(format!("{field} {}", py::str(&node[field])));
         }

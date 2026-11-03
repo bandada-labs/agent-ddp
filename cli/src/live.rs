@@ -37,11 +37,17 @@ pub struct AndroidDevice {
     adb: String,
     serial: String,
     app: String,
+    /// The app process the last request went to: a new process (an instrumentation, a restart) must be asked again.
+    asked: std::cell::RefCell<String>,
 }
 
 impl AndroidDevice {
     pub fn new(serial: &str, app: &str) -> Result<Self> {
-        Ok(AndroidDevice { adb: adb_path()?, serial: serial.into(), app: app.into() })
+        Ok(AndroidDevice { adb: adb_path()?, serial: serial.into(), app: app.into(), asked: Default::default() })
+    }
+
+    fn pid(&self) -> String {
+        self.shell(&["pidof", &self.app]).stdout.trim().to_string()
     }
 
     fn shell(&self, args: &[&str]) -> state::Output {
@@ -51,6 +57,7 @@ impl AndroidDevice {
     }
 
     fn send(&self, frames: i64) -> state::Output {
+        *self.asked.borrow_mut() = self.pid();
         self.shell(&[
             "am",
             "broadcast",
@@ -102,8 +109,18 @@ impl OfflineDevice for AndroidDevice {
         Ok(())
     }
 
-    /// The app ignores a request while it records, so asking again until its file shows up is safe.
+    /// The app ignores a request while it records, so asking again until its file shows up is safe. A new process
+    /// gets asked too, after its killed predecessor's partial file is removed.
     fn ask_again(&self, frames: i64) {
+        let pid = self.pid();
+        if pid.is_empty() {
+            return;
+        }
+        if pid != *self.asked.borrow() {
+            self.shell(&["run-as", &self.app, "rm", "-f", &format!("{ANDROID_DIR}/recording.partial")]);
+            self.send(frames);
+            return;
+        }
         let listing = self.shell(&["run-as", &self.app, "ls", ANDROID_DIR]);
         if !listing.stdout.contains("recording.") {
             self.send(frames);
@@ -1177,13 +1194,22 @@ pub fn recompositions(args: &mut Args) -> Result<i32> {
         say!("{}", py::dumps(&answer));
         return Ok(0);
     }
-    let composables = answer["composables"].as_array().cloned().unwrap_or_default();
+    let all = answer["composables"].as_array().cloned().unwrap_or_default();
     let seconds = py::fixed(&json!(f(&answer["ms"]) / 1000.0), 1);
-    if composables.is_empty() {
+    if all.is_empty() {
         say!("{seconds}s: no composable ran (nothing on screen changed state)");
         return Ok(0);
     }
-    say!("{seconds}s: {} composables ran", composables.len());
+    // The compiler's name starts with the package, so a composable from inside androidx says so itself.
+    let (composables, inside): (Vec<&Value>, Vec<&Value>) =
+        all.iter().partition(|c| args.full || !py::str(&c["name"]).starts_with("androidx."));
+    let library = if inside.is_empty() {
+        String::new()
+    } else {
+        format!(" ({} more inside androidx libraries: --full)", inside.len())
+    };
+    let whose = if args.full { "" } else { " of the app" };
+    say!("{seconds}s: {} composables{whose} ran{library}", composables.len());
     let limit = 20;
     for composable in composables.iter().take(limit) {
         let causes: Vec<String> = composable["invalidatedBy"]
