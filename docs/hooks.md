@@ -15,7 +15,8 @@ Kinds: `private` (an Apple symbol, class or selector without a public header), `
 | `uikit.touchRadius` (`contextWithPoint:radius:event:`) | private | the radius SwiftUI hit-tests a touch with | 20 pt, what iOS 27 gives every touch | iOS 26.5 and 27.0 simulators |
 | `input.hid` (IOHIDEvent functions, `_enqueueHIDEvent:`, `_contextId`) | private | tap, type, press, input.touch | those commands fail with the missing name | iOS 26.5 and 27.0 simulators |
 | `renderbox.displayList` (`RBDisplayList`, `drawInDisplayList:`, `RBXMLRecorderStart`) | private | `draw` nodes inside a SwiftUI `Canvas` or `drawingGroup` | no `draw` nodes; the `opaque-drawing` node and its pixels stay | iOS 26.5 simulator |
-| `swiftui.viewDebugData` (`_UIHostingView._viewDebugData`, `_ViewDebug.serializedData`, with `SWIFTUI_VIEW_DEBUG` at launch) | private | `ddp source` on SwiftUI | the element gets no source information | iOS 27.0 simulator (most app views are not in the tree there) |
+| `swiftui.viewDebugData` (`_UIHostingView._accessibilitySwiftUIDebugData`: the view tree with each node's type and the accessibility elements made from it, with `SWIFTUI_VIEW_DEBUG` at launch; `_viewDebugData()` traps on iOS 27 when called outside SwiftUI's update) | private | `ddp source` on SwiftUI | the element gets no source information | iOS 27.0 simulator (probe app and sample, 2026-11-03) |
+| `swiftui.viewTypes` (the tree's node types as metatypes; `_typeByName` for views only named in a body; `_typeName` of each body type; the nominal type descriptor in Swift's type metadata, to tell the app's types from Apple's) | internal | `ddp source` on SwiftUI: which app view wrote the element | the element's view is not known | iOS 27.0 simulator (probe app and sample, 2026-11-03) |
 
 ## Android
 

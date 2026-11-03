@@ -556,7 +556,7 @@ class FakeApp:
                     if params["id"] == "spinner":
                         result = {"status": "none", "why": "the app was built without Compose source information"}
                     elif params["id"] == "toast":
-                        result = {"status": "ok", "element": "Text", "views": [{"type": "Fake.Row<Text>", "depth": 2}],
+                        result = {"status": "ok", "element": "Text", "views": [{"type": "Fake.Row<Text>", "role": "writes"}],
                                   "modifiers": ["_PaddingLayout", "_BackgroundStyleModifier<Color>"]}
                     else:
                         result = {"status": "ok", "calls": [
@@ -816,7 +816,7 @@ with tempfile.TemporaryDirectory() as directory:
         "spinner: no source information: the app was built without Compose source information\n"
     # iOS: the app's views come with their body lines from the app's Debug image; without the image nothing is made up.
     ios_source = ddp_in(directory, "source", "toast").stdout
-    assert ios_source.startswith("toast: a Text in\n") and "no view of the app's own above it" in ios_source, ios_source
+    assert ios_source.startswith("toast: a Text\n") and "no view of the app's own around it" in ios_source, ios_source
     assert "modifiers around it (SwiftUI's types, innermost first): _PaddingLayout > _BackgroundStyleModifier<Color>" in ios_source
     assert ddp_in(directory, "animations").stdout == "spinner transform.rotation.z CABasicAnimation 1s repeat forever [10, 10, 40, 40]\n"
     # --set sends a number as JSON and a color as text, and prints what the app reads back.

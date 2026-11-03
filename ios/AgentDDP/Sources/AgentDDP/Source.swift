@@ -2,22 +2,20 @@
 import SwiftUI
 import UIKit
 
-/// `_UIHostingView` is generic over its root view; this protocol reaches its view debug data without naming that type.
-@MainActor
-protocol ViewDebugReading {
-    func _viewDebugData() -> [_ViewDebug.Data]
-}
-
-extension _UIHostingView: ViewDebugReading {}
-
-/// Where a SwiftUI element comes from (`screen.source`, `ddp source`): the app's own view types above it, innermost
-/// first, and the modifiers SwiftUI wrapped around it, from SwiftUI's view debug data (the tree Xcode's view
-/// debugger reads). SwiftUI records that tree only when the app starts with `SWIFTUI_VIEW_DEBUG` set. The lines of
-/// each view's `body` come from the app's debug info, which the CLI reads: the app keeps no source positions.
+/// Where a SwiftUI element comes from (`screen.source`, `ddp source`): the app's view whose `body` wrote it, the app's
+/// views around that one, and the modifiers SwiftUI wrapped around it. The data is SwiftUI's view debug tree, recorded
+/// only when the app starts with `SWIFTUI_VIEW_DEBUG` set, with the accessibility elements SwiftUI made from each node,
+/// and the static type of each app view's body; `ViewOwners` matches the two. The lines of each body come from the
+/// app's debug info, which the CLI reads: the app keeps no source positions.
 @MainActor
 enum SourceLocations {
-    /// type (0), position (3) and size (4): the property bits `_ViewDebug.Properties` names, all ddp needs.
-    static let debugMask = 25
+    /// The type bit of `_ViewDebug.Property`: the tree's types are all ddp reads.
+    static let debugMask = 1
+
+    /// The hosting view's tree as dictionaries (`kind`, `type` as a metatype, `children`, and `element` on an
+    /// accessibility element's node). Unlike `_viewDebugData()`, which traps on iOS 27 outside SwiftUI's update (`UpdateGroup.current` is nil
+    /// in `AGAttribute.syncMainIfReferences`), this one reads the tree inside it.
+    private static let debugData = NSSelectorFromString("_accessibilitySwiftUIDebugData")
 
     static func of(name: String) -> [String: Any] {
         let windows = FrameCapture.visibleWindows()
@@ -38,103 +36,150 @@ enum SourceLocations {
             return none("SwiftUI records its view tree only when the app starts with it: " +
                         "ddp launch <device> --app <id> --env SWIFTUI_VIEW_DEBUG=\(debugMask)")
         }
-        let frame = element.accessibilityFrame
-        for host in hostingViews(in: windows) {
-            guard let data = _ViewDebug.serializedData(host._viewDebugData()),
-                  let roots = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
-                Hooks.failed("swiftui.viewDebugData", "no view debug data from \(type(of: host))")
-                continue
+        let hosts = hostingViews(in: windows)
+        var trees: [[DebugNode]] = []
+        var metatypes: [Any.Type] = []
+        for host in hosts {
+            guard let data = host.view.perform(debugData)?.takeUnretainedValue() as? [[String: Any]],
+                  let roots = read(data, metatypes: &metatypes) else {
+                Hooks.failed("swiftui.viewDebugData", "no view debug data from \(type(of: host.view))")
+                return none("SwiftUI's view tree could not be read, so which view holds it is not known")
             }
-            Hooks.ok("swiftui.viewDebugData")
-            guard let view = host as? UIView, let path = path(to: frame, in: roots, host: view) else { continue }
-            return answer(path)
+            trees.append(roots)
         }
-        return none("no SwiftUI view in the view debug data has this element's frame")
+        if !hosts.isEmpty { Hooks.ok("swiftui.viewDebugData") }
+        let bodies = AppViews.bodies(metatypes: metatypes)
+        if bodies.isEmpty {
+            Hooks.failed("swiftui.viewTypes", "no view type of the app's own in the view debug tree")
+            return none("no view type of the app's own was found in SwiftUI's view tree, so which view holds it is not known")
+        }
+        Hooks.ok("swiftui.viewTypes")
+        let owners = ViewOwners(bodies: bodies)
+        zip(hosts.indices, trees).forEach { owners.match(roots: $1, host: $0, cellOf: hosts[$0].cellOf) }
+        switch owners.element(element, hosts: trees) {
+        case .noNode: return none("no node of SwiftUI's view debug data made this element")
+        case .notKnown: return none("SwiftUI's view tree does not prove which of the app's views wrote it, so it is not known")
+        case .found(let found): return answer(found)
+        }
     }
 
-    /// The deepest node with the element's frame (the Text, not a wrapper around it), and every node above it,
-    /// root first.
-    private static func path(to frame: CGRect, in nodes: [[String: Any]], host: UIView) -> [[String: Any]]? {
-        var best: [[String: Any]]?
-        func visit(_ node: [String: Any], above: [[String: Any]]) {
-            let here = above + [node]
-            if let rect = rect(of: node, in: host), close(rect, frame), here.count > (best?.count ?? 0) { best = here }
-            (node["children"] as? [[String: Any]] ?? []).forEach { visit($0, above: here) }
-        }
-        nodes.forEach { visit($0, above: []) }
-        return best
-    }
-
-    private static func answer(_ path: [[String: Any]]) -> [String: Any] {
-        let types = path.map(typeName)
-        let readable = path.map(readableName)
-        // App views: a type from a module that is not Apple's. The CLI keeps those whose body it finds in the app.
-        let views = types.enumerated().reversed().compactMap { index, type -> [String: Any]? in
-            guard let type, let module = type.split(separator: ".").first, !appleModules.contains(String(module)),
-                  !type.hasPrefix("(") else { return nil }
-            return ["type": type, "depth": index]
-        }
-        // iOS 27 records no node for most of the app's own views (they show only as generic arguments of SwiftUI's
-        // containers), so the view that holds the element is often not known: say that rather than half an answer.
-        if views.isEmpty {
-            return none("SwiftUI recorded no view of the app's own above it (iOS keeps the app's views out of its " +
-                        "view debug tree), so which view holds it is not known")
-        }
-        // The modifiers around the element are its parent nodes (_PaddingLayout, then _BackgroundStyleModifier<Color>).
-        // A parent counts only when the static type SwiftUI recorded above says so: some ancestor's type holds
-        // `ModifiedContent<what is below, that parent>`.
-        let known = readable.compactMap { $0 }.joined(separator: "\n")
+    private static func answer(_ found: ViewOwners.Found) -> [String: Any] {
+        let readable = found.path.map(\.readableType)
+        // The modifiers around the element: each parent that is `ModifiedContent<what is below, the modifier>`.
         var modifiers: [String] = []
-        var inner = readable.last ?? nil
+        var inner = readable.last ?? ""
         for parent in readable.dropLast().reversed() {
-            guard let parent, let inside = inner else { break }
-            let wrapped = "ModifiedContent<\(inside), \(parent)>"
-            guard known.contains(wrapped) else { break }
-            modifiers.append(parent)
-            inner = wrapped
+            let (base, args) = ViewOwners.split(parent)
+            guard base == "ModifiedContent", args.count == 2, args[0] == inner else { break }
+            modifiers.append(args[1])
+            inner = parent
         }
+        let views = [["type": found.owner, "role": "writes"]] + found.inside.map { ["type": $0, "role": "holds"] }
         // The path's types, innermost first, so an answer can be checked against what SwiftUI recorded.
-        let recorded = types.reversed().map { $0 ?? "?" }
-        return ["status": "ok", "element": (readable.last ?? nil) ?? "unknown", "views": views, "modifiers": modifiers,
-                "path": Array(recorded)]
+        return ["status": "ok", "element": readable.last ?? "unknown", "views": views, "modifiers": modifiers,
+                "path": Array(found.path.map(\.type).reversed())]
     }
 
-    private static let appleModules: Set<String> = ["SwiftUI", "SwiftUICore", "Swift", "__C", "Foundation", "UIKit",
-                                                     "CoreGraphics", "_Concurrency", "Combine", "Observation"]
-
-    private static func property(_ node: [String: Any], _ id: Int) -> [String: Any]? {
-        if let byId = node["properties"] as? [String: Any] { return byId[String(id)] as? [String: Any] }
-        return (node["properties"] as? [[String: Any]])?.first { ($0["id"] as? Int) == id }?["attribute"] as? [String: Any]
-    }
-
-    private static func typeName(_ node: [String: Any]) -> String? { property(node, 0)?["type"] as? String }
-
-    private static func readableName(_ node: [String: Any]) -> String? { property(node, 0)?["readableType"] as? String }
-
-    /// The node's frame in screen points, like an accessibility frame: position and size are in the hosting view's.
-    private static func rect(of node: [String: Any], in host: UIView) -> CGRect? {
-        guard let position = property(node, 3)?["value"] as? [Double], position.count == 2,
-              let size = property(node, 4)?["value"] as? [Double], size.count == 2 else { return nil }
-        let local = CGRect(x: position[0], y: position[1], width: size[0], height: size[1])
-        guard let window = host.window else { return nil }
-        return window.convert(host.convert(local, to: window), to: window.screen.coordinateSpace)
-    }
-
-    private static func close(_ a: CGRect, _ b: CGRect) -> Bool {
-        abs(a.minX - b.minX) < 1 && abs(a.minY - b.minY) < 1 && abs(a.width - b.width) < 1 && abs(a.height - b.height) < 1
-    }
-
-    @MainActor
-    private static func hostingViews(in windows: [UIWindow]) -> [ViewDebugReading] {
-        var found: [ViewDebugReading] = []
-        func visit(_ view: UIView) {
-            if let host = view as? ViewDebugReading { found.append(host) }
-            view.subviews.forEach(visit)
+    /// The tree with each node's type names, keeping the metatypes: they give the app's views, generic ones included.
+    private static func read(_ data: [[String: Any]], metatypes: inout [Any.Type]) -> [DebugNode]? {
+        DebugNode.tree(from: data) { value in
+            guard let type = value as? Any.Type else { return nil }
+            metatypes.append(type)
+            return (_typeName(type, qualified: true), _typeName(type, qualified: false))
         }
-        windows.forEach(visit)
+    }
+
+    /// Every hosting view, each after the one that holds it. `cellOf` is the host whose List cell holds this one.
+    private static func hostingViews(in windows: [UIWindow]) -> [(view: UIView, cellOf: Int?)] {
+        var found: [(view: UIView, cellOf: Int?)] = []
+        func visit(_ view: UIView, host: Int?, inCell: Bool) {
+            var host = host
+            var inCell = inCell || view is UICollectionViewCell || view is UITableViewCell
+            if view.responds(to: debugData) {
+                found.append((view, inCell ? host : nil))
+                host = found.count - 1
+                inCell = false
+            }
+            view.subviews.forEach { visit($0, host: host, inCell: inCell) }
+        }
+        windows.forEach { visit($0, host: nil, inCell: false) }
         return found
     }
 
     private static func none(_ why: String) -> [String: Any] { ["status": "none", "why": why] }
+}
+
+/// The app's own SwiftUI view types and the static type of each one's body.
+enum AppViews {
+    /// Views from the tree's node types, then by mangled name (`_typeByName`) the ones their bodies name: a view only
+    /// built in a closure (a ForEach row) has no node of its own.
+    static func bodies(metatypes: [Any.Type]) -> [String: String] {
+        var views: [String: any View.Type] = [:]
+        var checked: Set<String> = []
+        func add(_ type: Any.Type) {
+            guard let view = type as? any View.Type else { return }
+            let name = _typeName(type, qualified: true)
+            guard checked.insert(name).inserted, isAppType(type) else { return }
+            views[name] = view
+        }
+        metatypes.forEach(add)
+        var bodies: [String: String] = [:]
+        var pending: Set<String> = []
+        // Each body found can name more views; a few rounds reach every view the screen's bodies name.
+        for _ in 0..<8 {
+            for (name, view) in views where bodies[name] == nil {
+                let body = bodyName(view)
+                bodies[name] = body
+                pending.insert(body)
+            }
+            let before = views.count
+            Set(pending.flatMap(plainNames)).subtracting(checked).compactMap(lookUp).forEach(add)
+            pending = []
+            if views.count == before { break }
+        }
+        return bodies
+    }
+
+    private static func bodyName<V: View>(_: V.Type) -> String { _typeName(V.Body.self, qualified: true) }
+
+    private static let plainName = try! NSRegularExpression(
+        pattern: #"(?<![A-Za-z0-9_.)$])([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+)(?![A-Za-z0-9_<.])"#)
+
+    /// Names of non-generic types outside Apple's modules in a type string.
+    private static func plainNames(in type: String) -> [String] {
+        plainName.matches(in: type, range: NSRange(type.startIndex..., in: type)).compactMap { match in
+            Range(match.range(at: 1), in: type).map { String(type[$0]) }
+        }.filter { name in !ViewOwners.appleModules.contains(String(name.prefix { $0 != "." })) }
+    }
+
+    /// `_typeByName` takes mangled names: `App.Row` is `3App3RowV`. Views are structs; the types they nest in may be
+    /// structs, enums or classes.
+    private static func lookUp(_ name: String) -> Any.Type? {
+        let parts = name.split(separator: ".").map(String.init)
+        guard parts.count >= 2, parts.count <= 4, parts.allSatisfy({ $0.allSatisfy(\.isASCII) }) else { return nil }
+        var outer: [[String]] = [[]]
+        for _ in parts.dropFirst().dropLast() { outer = outer.flatMap { kinds in ["V", "O", "C"].map { kinds + [$0] } } }
+        for kinds in outer {
+            let mangled = parts.enumerated().map { index, part in
+                "\(part.utf8.count)\(part)" + (index == 0 ? "" : index == parts.count - 1 ? "V" : kinds[index - 1])
+            }.joined()
+            if let type = _typeByName(mangled), _typeName(type, qualified: true) == name { return type }
+        }
+        return nil
+    }
+
+    private static let bundlePath = Bundle.main.bundleURL.resolvingSymlinksInPath().path
+
+    /// A type whose nominal type descriptor lives in an image inside the app's bundle: the app's code or a framework it
+    /// ships, never Apple's. Struct and enum metadata start with their kind and then the descriptor (Swift's stable ABI).
+    private static func isAppType(_ type: Any.Type) -> Bool {
+        let metadata = unsafeBitCast(type, to: UnsafeRawPointer.self)
+        let kind = metadata.load(as: Int.self)
+        guard kind == 0x200 || kind == 0x201 else { return false }
+        let descriptor = metadata.load(fromByteOffset: MemoryLayout<Int>.size, as: UnsafeRawPointer.self)
+        var info = Dl_info()
+        guard dladdr(descriptor, &info) != 0, let file = info.dli_fname else { return false }
+        return URL(fileURLWithPath: String(cString: file)).resolvingSymlinksInPath().path.hasPrefix(bundlePath + "/")
+    }
 }
 #endif

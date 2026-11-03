@@ -1246,8 +1246,13 @@ pub fn recompositions(args: &mut Args) -> Result<i32> {
 /// The app's view types above a SwiftUI element (innermost first) get their `body` place and the modifier calls in it,
 /// from the app's debug image. A type whose body is not in the image (a framework's view) is left out.
 fn swiftui_bodies(session: &Value, answer: &mut Value) {
-    let types: Vec<String> =
-        answer["views"].as_array().into_iter().flatten().filter_map(|v| v["type"].as_str()).map(swift_type).collect();
+    let roles: Vec<(String, String)> = answer["views"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|v| Some((swift_type(v["type"].as_str()?), py::str(&v["role"]))))
+        .collect();
+    let types: Vec<String> = roles.iter().map(|(view, _)| view.clone()).collect();
     let image = crate::swift_source::app_image(&py::str(&session["device"]), &py::str(&session["app"]));
     if types.is_empty() {
         return;
@@ -1258,12 +1263,12 @@ fn swiftui_bodies(session: &Value, answer: &mut Value) {
         return;
     };
     let bodies = crate::swift_source::bodies(&image, &types);
-    let views: Vec<Value> = types
+    let views: Vec<Value> = roles
         .iter()
-        .filter_map(|view| {
+        .filter_map(|(view, role)| {
             let body = bodies.get(view)?;
             let calls: Vec<Value> = body.calls.iter().map(|(name, line)| json!({"name": name, "line": line})).collect();
-            Some(json!({"type": view, "file": body.file, "line": body.line, "calls": calls}))
+            Some(json!({"type": view, "role": role, "file": body.file, "line": body.line, "calls": calls}))
         })
         .collect();
     answer["views"] = json!(views);
@@ -1295,14 +1300,15 @@ fn uikit_creation(session: &Value, answer: &mut Value) -> Result<()> {
 
 fn say_swiftui_source(id: &str, answer: &Value) -> Result<i32> {
     let views = answer["views"].as_array().cloned().unwrap_or_default();
-    say!("{id}: a {} in", py::str(&answer["element"]));
+    say!("{id}: a {}", py::str(&answer["element"]));
     if views.is_empty() {
-        say!("  no view of the app's own above it with a body in the app's Debug image");
+        say!("  no view of the app's own around it with a body in the app's Debug image");
     }
     for view in views.iter().take(6) {
         let short = py::str(&view["type"]);
         let short = short.split_once('.').map(|(_, rest)| rest.to_string()).unwrap_or(short);
-        say!("  {short}.body  {}:{}", py::str(&view["file"]), py::str(&view["line"]));
+        let role = if view["role"] == "writes" { "written in" } else { "inside" };
+        say!("  {role} {short}.body  {}:{}", py::str(&view["file"]), py::str(&view["line"]));
         let calls: Vec<String> = view["calls"]
             .as_array()
             .into_iter()
