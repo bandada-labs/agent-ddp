@@ -32,5 +32,7 @@ Kinds: `private` (an Apple symbol, class or selector without a public header), `
 | `compose.interopLayout` (`AndroidViewHolder.getLayoutNode`) | internal | an AndroidView inside Compose | its View is not reached | Compose UI 1.7.6 on API 29, 33 and 35 |
 | `compose.textColor` (BasicText's color producer) | internal | whether a text's color is known | the text is left out of pixel checks | Compose UI 1.7.6 on API 29, 33 and 35 |
 | `compose.drawCache` (`CacheDrawScope()`, `setCacheParams`, `DrawResult.getBlock`) | internal | what a `drawWithCache` lambda draws | its draws are not read; a cache that needs a graphics layer fails it too | Compose UI 1.7.6 on API 35 |
+| `compose.inspectionTables` (the `inspection_slot_table_set` view tag) | internal | `ddp source` | the element gets no source information | Compose UI 1.7.6 on API 35 |
+| `compose.sourceInformation` (ui-tooling-data `CompositionData.asTree`, the app's own copy) | internal | `ddp source` | the element gets no source information; a missing library says to add `ui-tooling-data` | Compose UI 1.7.6 on API 35 |
 
 Not hooks: `drawHierarchy`, `PixelCopy`, `CADisplayLink`, Choreographer, `UIView.hitTest`, `onInterceptTouchEvent` and Compose `PointerInputModifierNode` are public API.

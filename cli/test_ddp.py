@@ -543,6 +543,15 @@ class FakeApp:
                 elif method == "screen.animations":
                     result = {"animations": [{"key": "spin", "type": "CABasicAnimation", "keyPath": "transform.rotation.z",
                                               "duration": 1, "repeat": "forever", "frame": [10, 10, 40, 40], "id": "spinner"}]}
+                elif method == "screen.source":
+                    if params["id"] == "spinner":
+                        result = {"status": "none", "why": "the app was built without Compose source information"}
+                    else:
+                        result = {"status": "ok", "calls": [
+                            {"name": "Surface", "file": "Button.kt", "line": 120, "library": "androidx.compose.material3"},
+                            {"name": "Button", "file": "Cart.kt", "line": 57, "offset": 1834, "length": 120},
+                            {"name": "CartRow", "file": "Cart.kt", "line": 42}],
+                            "modifiers": [{"name": "padding", "all": 8}, {"name": "GlowElement", "inspector": False}]}
                 elif method == "screen.setValue":
                     self.set_value = params
                     result = {"path": params["path"], "value": params["value"]}
@@ -773,6 +782,12 @@ with tempfile.TemporaryDirectory() as directory:
     assert ddp_in(directory, "storage", "read").returncode == 1
     shown = ddp_in(directory, "highlight", "button", "--for", "500ms")
     assert shown.stdout == "highlighted button [0, 0, 100, 50] for 500ms\n" and app.highlighted == {"rect": [0, 0, 100, 50], "ms": 500}, shown.stdout
+    # source: the app's own calls innermost first, library calls counted; no source information is said, not guessed.
+    assert ddp_in(directory, "source", "@e1").stdout == ("button: called from\n  Button  Cart.kt:57\n  CartRow  Cart.kt:42\n"
+        "  (1 call inside androidx libraries: --full)\nmodifiers: padding(all=8) > GlowElement\n")
+    assert "Surface  Button.kt:120  (androidx.compose.material3)" in ddp_in(directory, "source", "button", "--full").stdout
+    assert ddp_in(directory, "source", "spinner").stdout == \
+        "spinner: no source information: the app was built without Compose source information\n"
     assert ddp_in(directory, "animations").stdout == "spinner transform.rotation.z CABasicAnimation 1s repeat forever [10, 10, 40, 40]\n"
     # --set sends a number as JSON and a color as text, and prints what the app reads back.
     assert ddp_in(directory, "eval", "button", "layer.cornerRadius", "--set", "12").stdout == "12\n"

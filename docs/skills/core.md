@@ -35,6 +35,7 @@ ddp crash                        # the last crash with its stack, even when the 
 ddp audits --since 10m           # warnings the platform logged (default 5m): SwiftUI, Auto Layout, Main Thread Checker, StrictMode
 ddp debug Cart.swift:42 --then "ddp tap @e3"   # stop once at a line: stack and locals, then the app goes on by itself (Android: com.example.Cart:42)
 ddp logs --follow --source       # live log lines; iOS adds subsystem and the library that wrote it
+ddp source @e3                   # which line of the app made it: the calls above it with file:line, its modifiers
 
 # What the app holds
 ddp state                        # values the app added in Debug (a total, a mode); get, set, watch

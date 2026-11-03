@@ -64,6 +64,7 @@ fn handler(command: &str) -> fn(&mut Args) -> Result<i32> {
         "perf" => live::perf,
         "media" => live::media,
         "animations" => live::animations,
+        "source" => live::source,
         "swipe" | "drag" | "double-tap" | "long-press" => hit::gesture,
         "crash" => crash::crash,
         "wait" => device::wait,

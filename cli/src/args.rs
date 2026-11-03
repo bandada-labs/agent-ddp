@@ -96,7 +96,7 @@ Start here (for agents): ddp skills get core
   biometric | push | job                   simulated Face ID or fingerprint, a push (iOS), a background job (Android)
   check overlap|corners|jank|settle|a11y|timeline|parity|baseline|tappable|all
   history | crash | audits | logs          the last 15 minutes; the last crash; the platform's runtime warnings; app logs
-  profile | memory | perf | debug          where time goes; memory and leaks; missed frames; stop at FILE:LINE
+  profile | memory | perf | debug | source   where time goes; memory and leaks; missed frames; stop at FILE:LINE; the line that made it
   state | events | run | prefs | storage   the app's Debug values, events and commands; preferences; files, SQLite, keys
   net | media | animations | time          requests (mock, fail, cookies); players; Core Animation; pause and step
   inspect | highlight | annotate | view    which element a person taps; a box on the phone; a numbered screenshot; a page
@@ -286,6 +286,9 @@ pub fn parser() -> Command {
         .subcommand(device_options(sub("crash", "the app's last crash as the platform recorded it, with its stack (the app may be gone)")))
         .subcommand(sub("media", "live: the players the platform shows (video layers, now playing), with their state"))
         .subcommand(sub("animations", "live, iOS: the Core Animation animations on screen, by layer"))
+        .subcommand(sub("source", "live: where an element comes from in the app's code: the calls above it with file:line, and its modifiers")
+            .arg(positional("id", "element id, label or @ref").required(true))
+            .arg(flag("full", "also the calls inside androidx libraries")))
         .subcommand(sub("perf", "live: refreshes the main thread missed and draw time, for whatever is on screen")
             .arg(opt("for", "how long to measure (default 5s)").id("duration")))
         .subcommand(sub("events", "live: events the app sent in Debug (a rule that fired, a sync that ended)")

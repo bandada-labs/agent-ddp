@@ -38,7 +38,7 @@ internal object LiveEval {
             if (property !in properties) return error("'$scope' has: ${properties.keys.joinToString()}")
             properties[property]
         }
-        return JSONObject().put("type", "value").put("path", path).put("value", jsonValue(value))
+        return JSONObject().put("type", "value").put("path", path).put("value", plainValue(value) ?: value?.toString() ?: JSONObject.NULL)
     }
 
     private fun composeRoots(view: View): List<ViewRootForTest> = when (view) {
@@ -54,14 +54,6 @@ internal object LiveEval {
         return node.children.firstNotNullOfOrNull { find(it, name) }
     }
 
-    private fun jsonValue(value: Any?): Any = when (value) {
-        null -> JSONObject.NULL
-        is Number, is Boolean, is String -> value
-        is Dp -> value.value
-        is Color -> hex(value.toArgb()) ?: "transparent"
-        else -> colorOf(value) ?: value.toString()
-    }
-
     private fun error(message: String) = JSONObject().put("type", "error").put("error", message)
 }
 
@@ -73,3 +65,11 @@ internal fun <T> onMain(block: () -> T): T =
     } catch (wrapped: ExecutionException) {
         throw wrapped.cause ?: wrapped
     }
+
+/** A value as JSON when it is a plain one (number, flag, text, dp, color); null for anything else (a lambda, a shape). */
+internal fun plainValue(value: Any?): Any? = when (value) {
+    is Number, is Boolean, is String -> value
+    is Dp -> value.value
+    is Color -> hex(value.toArgb()) ?: "transparent"
+    else -> colorOf(value)
+}

@@ -1093,6 +1093,65 @@ pub fn storage(args: &mut Args) -> Result<i32> {
 }
 
 /// Players the platform shows the library, and the now-playing info the app gave the system.
+/// `ddp source`: the composable calls above an element, innermost first, each with where it is called from, then the
+/// element's modifiers in chain order. Calls inside androidx libraries are counted, shown with --full.
+pub fn source(args: &mut Args) -> Result<i32> {
+    let session = require_session()?;
+    let id = args.id.clone().unwrap_or_default();
+    let answer = open(&session)?.call("screen.source", json!({"id": id}))?;
+    if ctx().json {
+        say!("{}", py::dumps(&answer));
+        return Ok(0);
+    }
+    if answer["status"] != "ok" {
+        say!("{id}: no source information: {}", py::str(&answer["why"]));
+        return Ok(0);
+    }
+    let calls = answer["calls"].as_array().cloned().unwrap_or_default();
+    let (shown, hidden): (Vec<&Value>, Vec<&Value>) =
+        calls.iter().partition(|call| args.full || (call.get("library").is_none() && call.get("line").is_some()));
+    say!("{id}: called from");
+    let limit = 12;
+    for call in shown.iter().take(limit) {
+        let place = match (call.get("file"), call.get("line")) {
+            (Some(file), Some(line)) => format!("{}:{}", py::str(file), py::str(line)),
+            _ => "(no position)".to_string(),
+        };
+        let library = call.get("library").map(|name| format!("  ({})", py::str(name))).unwrap_or_default();
+        say!("  {}  {place}{library}", py::str(&call["name"]));
+    }
+    if shown.len() > limit {
+        say!("  ... {} more", shown.len() - limit);
+    }
+    if !hidden.is_empty() {
+        let calls = if hidden.len() == 1 { "call" } else { "calls" };
+        say!("  ({} {calls} inside androidx libraries: --full)", hidden.len());
+    }
+    let modifiers: Vec<String> = answer["modifiers"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|modifier| {
+            let values: Vec<String> = modifier
+                .as_object()
+                .into_iter()
+                .flatten()
+                .filter(|(key, _)| *key != "name" && *key != "inspector")
+                .map(|(key, value)| format!("{key}={}", py::str(value)))
+                .collect();
+            if values.is_empty() {
+                py::str(&modifier["name"])
+            } else {
+                format!("{}({})", py::str(&modifier["name"]), values.join(", "))
+            }
+        })
+        .collect();
+    if !modifiers.is_empty() {
+        say!("modifiers: {}", modifiers.join(" > "));
+    }
+    Ok(0)
+}
+
 pub fn animations(_args: &mut Args) -> Result<i32> {
     let session = require_session()?;
     let answer = open(&session)?.call("screen.animations", json!({}))?;

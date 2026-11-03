@@ -149,6 +149,7 @@ internal class ControlSession(private val app: ControlApp, private val send: (St
         "screen.frame" to { _ -> onMain { FrameCapture.frame(0, 0.0) } },
         "screen.watch" to { params -> watchScreen(params.optInt("frames", 0)); JSONObject() },
         "screen.unwatch" to { _ -> onMain { screenStream?.stop() }; JSONObject() },
+        "screen.source" to { params -> onMain { SourceLocations.of(params.getString("id")) } },
         "screen.value" to { params -> Control.answer(onMain { LiveEval.evaluate(params.getString("id"), params.getString("path")) }) },
         // Compose draws what the app's state says, so a value set from outside would not be the app's; ddp does not.
         "screen.setValue" to { _ ->

@@ -19,6 +19,9 @@ android {
 dependencies {
     // The app's own Compose version wins at resolution; this only sets a floor.
     implementation("androidx.compose.ui:ui:1.7.6")
+    // Only for `ddp source`: Google's parser of the compiler's source information. The app brings its own copy
+    // (ui-tooling, for @Preview), so ddp ships no Compose version of its own; without it ddp says so.
+    compileOnly("androidx.compose.ui:ui-tooling-data:1.7.6")
     // Only for AgentDdpInterceptor; the app brings its own OkHttp, an app without it never loads that class.
     compileOnly("com.squareup.okhttp3:okhttp:4.12.0")
     testImplementation("junit:junit:4.13.2")

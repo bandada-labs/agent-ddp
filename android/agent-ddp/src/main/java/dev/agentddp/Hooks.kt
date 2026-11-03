@@ -28,6 +28,8 @@ internal object Hooks {
         Hook("compose.interopLayout", "internal", "AndroidView inside Compose (AndroidViewHolder.getLayoutNode)"),
         Hook("compose.textColor", "internal", "whether BasicText paints another color (its color producer)"),
         Hook("compose.drawCache", "internal", "drawWithCache draws (CacheDrawScope, DrawResult.block)"),
+        Hook("compose.inspectionTables", "internal", "ddp source (the composition's inspection_slot_table_set tag)"),
+        Hook("compose.sourceInformation", "internal", "ddp source (the app's ui-tooling-data reading the slot table)"),
     )
 
     private class Count(var ok: Int = 0, var failed: Int = 0, var fallback: Int = 0, var why: String? = null)
