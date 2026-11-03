@@ -49,11 +49,27 @@ impl AndroidDevice {
         all.extend_from_slice(args);
         capture(&self.adb, &all)
     }
+
+    fn send(&self, frames: i64) -> state::Output {
+        self.shell(&[
+            "am",
+            "broadcast",
+            "-a",
+            "dev.agentddp.RECORD",
+            "-p",
+            &self.app,
+            "--ei",
+            "frames",
+            &frames.to_string(),
+        ])
+    }
 }
 
 pub trait OfflineDevice {
     fn request(&self, frames: i64) -> Result<()>;
     fn fetch(&self) -> Option<String>;
+    /// Ask again while no recording has started: the app was not listening yet, or a new process replaced it.
+    fn ask_again(&self, _frames: i64) {}
 }
 
 impl OfflineDevice for IosDevice {
@@ -72,18 +88,10 @@ impl OfflineDevice for IosDevice {
 
 impl OfflineDevice for AndroidDevice {
     fn request(&self, frames: i64) -> Result<()> {
-        self.shell(&["run-as", &self.app, "rm", "-f", &format!("{ANDROID_DIR}/recording.jsonl")]);
-        let sent = self.shell(&[
-            "am",
-            "broadcast",
-            "-a",
-            "dev.agentddp.RECORD",
-            "-p",
-            &self.app,
-            "--ei",
-            "frames",
-            &frames.to_string(),
-        ]);
+        // A partial file left by a killed run would read as a recording that started.
+        let (done, partial) = (format!("{ANDROID_DIR}/recording.jsonl"), format!("{ANDROID_DIR}/recording.partial"));
+        self.shell(&["run-as", &self.app, "rm", "-f", &done, &partial]);
+        let sent = self.send(frames);
         if sent.code != 0 {
             fail!(
                 format!("broadcast failed: {}", sent.stderr.trim()),
@@ -92,6 +100,14 @@ impl OfflineDevice for AndroidDevice {
             );
         }
         Ok(())
+    }
+
+    /// The app ignores a request while it records, so asking again until its file shows up is safe.
+    fn ask_again(&self, frames: i64) {
+        let listing = self.shell(&["run-as", &self.app, "ls", ANDROID_DIR]);
+        if !listing.stdout.contains("recording.") {
+            self.send(frames);
+        }
     }
 
     fn fetch(&self) -> Option<String> {
@@ -184,7 +200,8 @@ pub fn connect(args: &mut Args) -> Result<i32> {
     let device = args.device.clone().unwrap_or_default();
     let app = args.app.clone().unwrap_or_default();
     let platform = platform_of(args.platform.as_deref(), &device);
-    let (session, snapshot) = attach(&platform, &device, &app)?;
+    let patience = args.connect_wait.as_deref().map(parse_ms).transpose()?.unwrap_or(0.0);
+    let (session, snapshot) = attach_within(&platform, &device, &app, Duration::from_secs_f64(patience / 1000.0))?;
     keep_session(&session, &snapshot)
 }
 
@@ -242,14 +259,7 @@ pub fn launch(args: &mut Args) -> Result<i32> {
         );
     }
     // The old run's endpoint may still be on disk: wait until the new run's answers.
-    let deadline = Instant::now() + Duration::from_secs(15);
-    let (session, snapshot) = loop {
-        match attach(&platform, &device, &app) {
-            Ok(attached) => break attached,
-            Err(failure) if Instant::now() >= deadline => return Err(failure),
-            Err(_) => std::thread::sleep(Duration::from_millis(250)),
-        }
-    };
+    let (session, snapshot) = attach_within(&platform, &device, &app, Duration::from_secs(15))?;
     say!("launched {app} on {platform} {device}");
     if !values.is_empty() {
         let names: Vec<&str> = values.iter().map(|(key, _)| key.as_str()).collect();
@@ -338,6 +348,18 @@ fn shell_quoted(text: &str) -> String {
 }
 
 /// The session for the app's control endpoint, and what is on screen, when it answers.
+/// [attach], tried again until `patience` runs out: the app may still be starting.
+fn attach_within(platform: &str, device: &str, app: &str, patience: Duration) -> Result<(Value, Vec<Value>)> {
+    let deadline = Instant::now() + patience;
+    loop {
+        match attach(platform, device, app) {
+            Ok(attached) => return Ok(attached),
+            Err(failure) if Instant::now() >= deadline => return Err(failure),
+            Err(_) => std::thread::sleep(Duration::from_millis(250)),
+        }
+    }
+}
+
 fn attach(platform: &str, device: &str, app: &str) -> Result<(Value, Vec<Value>)> {
     let session = if platform == "ios" {
         let endpoint_file = Path::new(&model::app_container(device, app)?).join(IOS_DIR).join("control.json");

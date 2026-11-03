@@ -25,8 +25,15 @@ pub fn describe_node(node: &Value) -> String {
     if py::truthy(node.get("fill")) {
         parts.push(format!("fill {}", py::str(&node["fill"])));
     }
-    if py::truthy(node.get("border")) {
-        parts.push(format!("border {} {}", py::str(&node["border"]["width"]), py::str(&node["border"]["color"])));
+    if py::truthy(node.get("fillBeforeEffects")) {
+        parts.push(format!("fill before effects {}", py::str(&node["fillBeforeEffects"])));
+    }
+    if let Some(border) = node.get("border").filter(|b| py::truthy(Some(b))) {
+        let width = py::str(&border["width"]);
+        parts.push(match border.get("colorBeforeEffects") {
+            Some(color) => format!("border {width} (color before effects {})", py::str(color)),
+            None => format!("border {width} {}", py::str(&border["color"])),
+        });
     }
     for field in ["corner", "opacity", "source"] {
         if py::truthy(node.get(field)) {
@@ -168,6 +175,21 @@ pub fn tree(args: &mut Args) -> Result<i32> {
     }
     let unowned: Vec<&Value> =
         if args.interactive || shown.is_some() || root_id.is_some() { Vec::new() } else { frame.owned(None) };
+    // --within: what draws inside the element's frame but belongs elsewhere (an unlabeled view beside it, an overlay
+    // on its icon) is still on that element, so it is listed with its real owner.
+    let listed: HashSet<String> = rows.iter().map(|(e, _)| element_key(e)).collect();
+    let inside: Vec<&Value> = match (&args.within, &root_id, args.interactive) {
+        (Some(_), Some(root_id), false) => {
+            let root_frame = rect(&frame.element(root_id).map(|e| e["frame"].clone()).unwrap_or(Value::Null));
+            frame
+                .nodes()
+                .iter()
+                .filter(|n| !n["owner"].as_str().is_some_and(|owner| listed.contains(owner)))
+                .filter(|n| contains(root_frame, rect(n.get("visible").unwrap_or(&n["frame"])), recording.tolerance))
+                .collect()
+        }
+        _ => Vec::new(),
+    };
 
     if ctx().json {
         let elements: Vec<Value> = rows
@@ -199,6 +221,9 @@ pub fn tree(args: &mut Args) -> Result<i32> {
         if !unowned.is_empty() {
             out["unowned"] = json!(unowned.into_iter().map(public_node).collect::<Vec<_>>());
         }
+        if !inside.is_empty() {
+            out["inside"] = json!(inside.into_iter().map(public_node).collect::<Vec<_>>());
+        }
         say!("{}", py::dumps(&out));
         return Ok(0);
     }
@@ -228,6 +253,12 @@ pub fn tree(args: &mut Args) -> Result<i32> {
         say!("(owned by no element)");
         for node in unowned {
             say!("  {}", describe_node(node));
+        }
+    }
+    if !inside.is_empty() {
+        say!("(inside its frame, owned by another element)");
+        for node in inside {
+            say!("  {} owner {}", describe_node(node), py::str(&node["owner"]));
         }
     }
     Ok(0)

@@ -7,7 +7,7 @@ Works only in Debug builds. Release builds contain none of it.
 ## Live mode
 
 ```
-ddp connect <sim UDID | adb serial> --app <bundle or application id>
+ddp connect <sim UDID | adb serial> --app <bundle or application id> [--wait 15s]   --wait: keep trying while the app starts
 ddp launch <device> --app <id> [--env KEY=VALUE ...]   start the app fresh with values for it, then connect
 ddp state [list] | get <name> | set <name> <value> | watch <name> [--until '>100'] [--for 10s]   the app's own values
 ddp events [--follow] [--for 10s] [--grep <text>]   events the app sent in Debug, also in ddp history
@@ -122,7 +122,7 @@ ddp check parity --file ios.jsonl --against android.jsonl
 ddp diff ios.jsonl android.jsonl --id <element> [--ignore frame]
 ```
 
-Without a session, `record` asks the app by Darwin notification (iOS) or broadcast (Android, needs the DUMP permission adb has) and fetches the file with `simctl` / `run-as`. `--frames` is 1..600 there. Queries read `.ddp/last.jsonl` unless `--file` says otherwise. `--device` can come from env `DDP_DEVICE`.
+Without a session, `record` asks the app by Darwin notification (iOS) or broadcast (Android, needs the DUMP permission adb has) and fetches the file with `simctl` / `run-as`. `--frames` is 1..600 there. The `--then` command runs while ddp waits for the file, and Android asks again each second until the app starts recording: `--then "adb shell am instrument -w ..."` starts a new app process that was not listening when the first request went out. Queries read `.ddp/last.jsonl` unless `--file` says otherwise. `--device` can come from env `DDP_DEVICE`.
 
 ## What the commands report
 
@@ -136,7 +136,7 @@ Two rules decide what a check may say (ARCHITECTURE.md). It reports a problem on
 
 ### tree, get, find, diff
 
-`tree` prints each element and the nodes it owns at one moment; `get` the per-frame rows of one element (repeated rows skipped); `find` the nodes matching `--where` (fields: `t z kind op owner source fill border borderColor corner opacity alpha x y w h`; operators `= != > < >= <= ~`, `~` is contains), with a count and the first `--limit` rows; `diff` one element across two recordings lined up on their first change, sizes in pt.
+`tree` prints each element and the nodes it owns at one moment (with `--within`, also the nodes drawn inside that element's frame that another element owns, such as an overlay on its icon, each with its `owner`; `inside` in `--json`); `get` the per-frame rows of one element (repeated rows skipped); `find` the nodes matching `--where` (fields: `t z kind op owner source fill border borderColor corner opacity alpha x y w h`; operators `= != > < >= <= ~`, `~` is contains), with a count and the first `--limit` rows; `diff` one element across two recordings lined up on their first change, sizes in pt.
 
 ### check overlap
 
@@ -365,7 +365,7 @@ A drawn node belongs to the element whose subtree drew it when the recorder know
 - `nodes` are in paint order, `z` 0 first; a higher `z` paints over a lower one. Only nodes that draw something are listed.
 - `kind`: `layer` (fill and/or border), `shape` (custom SwiftUI `Path` shapes), `gradient` (`gradient` holds the colors), `bitmap` (text, images, drawables), `opaque-drawing` (SwiftUI `Canvas` or `drawingGroup`: the shapes inside are gone, so `pixels` reads what it shows: `colors` (top 3 with their `share` of painted pixels), `peakAlpha`, `coverage` of its box), `draw` (one shape drawn this frame, with `op` such as `circle`, `rect`, `roundRect`, `oval`, `path`, `line` or `text`, and its fill or stroke; color alpha shows fades; `shader` for a gradient or image paint. Android: what a Compose `Canvas`, `drawBehind`, `drawWithContent` or `drawWithCache` drew; `text` with its string where the platform's call carries it (Android 10 and up draw text through `MeasuredText`, which gives its bounds only). iOS: what a SwiftUI `Canvas` or `drawingGroup` drew, from RenderBox, after its `opaque-drawing` node; text, images and nested layers in it are not read and show as `unread` (a count) on that node, and a clip or a transform it does not know leaves out all its draws). Tag the Canvas with `testTag` (Android) so it is reached. `read` reports `draws`, the number of visible draw ops an element owns, so a ring that flashes shows as `draws: 1 -> 1 ... max 2 TRANSIENT`.
 - `corner` is the largest corner radius; `corners` (`[top-left, top-right, bottom-right, bottom-left]`) when they differ (iOS `maskedCorners`, Android per-corner radii).
-- `effects` when the node is under something that changes its pixels on screen: a filter, a compositing filter or a mask (iOS), a layer with its own paint, a render effect, a blend mode or a blur (Android). Pixel checks leave it out.
+- `effects` when the node is under something that changes its pixels on screen: a filter, a compositing filter or a mask (iOS), a layer with its own paint, a render effect, a blend mode or a blur (Android). Pixel checks leave it out. Its own fill and border color are from before the effect (a toolbar item under Liquid Glass records white), so ddp shows them as `fill before effects` and `color before effects`, and no state, query or check reads them as the drawn color.
 - `missed` on a frame: refreshes the app missed before it, its own work alone, with the library's capture left out. The header says `"missed": true` when frames count them.
 - The `inspect` line, after the frames of a take a check recorded live: the app's hit test (`hit`, with `reach` for a control a touch reaches over less than `minimum`), the frame it was taken on, and per text and per corner place what the app's pixels show (`texts`, `corners`). The checks read only this line for overlap, corners, touch size and contrast.
 - `points` (Android `draw` lines): `[x0, y0, x1, y1]` in window coordinates. `clipRound` (Android): `[x, y, w, h, radius]` of the rounded clip around the node.

@@ -60,6 +60,10 @@ with tempfile.TemporaryDirectory() as directory:
     assert refused.returncode == 1 and json.loads(refused.stdout)["code"] == "protocol_too_new", refused.stdout
     assert "agent-ddp@latest" in json.loads(refused.stdout)["next"], refused.stdout
 
+    # connect --wait takes a time like every other duration, and says so before it touches a device.
+    bad_wait = ddp_in(directory, "connect", "emulator-5554", "--app", "dev.agentddp.sample", "--wait", "soon", "--json")
+    assert bad_wait.returncode == 1 and json.loads(bad_wait.stdout)["code"] == "bad_time", bad_wait.stdout
+
     # Launch arguments are iOS only: Android refuses before it touches a device.
     no_args = ddp_in(directory, "launch", "emulator-5554", "--app", "dev.agentddp.sample", "--arg", "-Flag", "--json")
     assert no_args.returncode == 1 and json.loads(no_args.stdout)["code"] == "not_supported", no_args.stdout
@@ -847,5 +851,40 @@ with tempfile.TemporaryDirectory() as directory:
     Path(history_dir, f"{now}.jsonl").write_text("\n".join(map(json.dumps, third)) + "\n")
     inspected = waiting.communicate(timeout=10)[0]
     assert waiting.returncode == 0 and 'tapped Total 12 [0, 100, 200, 30] at (40, 110)' in inspected, inspected
+
+# Under a filter or a material (Liquid Glass) a layer's own fill is from before the effect, not what shows:
+# it is named that way and no state or check reads it as the drawn color.
+with tempfile.TemporaryDirectory() as directory:
+    recording = Path(directory, "effects.jsonl")
+    nodes = [{"z": 0, "kind": "layer", "fill": "#FFFFFFFF", "effects": True, "frame": [10, 10, 14, 14],
+              "border": {"width": 1, "color": "#FFFFFFFF"}},
+             {"z": 1, "kind": "layer", "fill": "#00FF00FF", "frame": [40, 10, 14, 14]}]
+    lines = [{"type": "header", "platform": "ios", "unit": "pt", "scale": 3, "frames": 1},
+             {"type": "frame", "i": 0, "t": 0, "nodes": nodes,
+              "elements": [{"id": "dot", "frame": [10, 10, 14, 14]}, {"id": "plain", "frame": [40, 10, 14, 14]}]}]
+    recording.write_text("\n".join(json.dumps(line) for line in lines))
+    tree = run("tree", recording=recording)
+    assert "fill before effects #FFFFFFFF" in tree and "(color before effects #FFFFFFFF)" in tree, tree
+    assert "fill #00FF00FF" in tree and "fill #FFFFFFFF" not in tree, tree
+    dot = json.loads(run("get", "dot", "--json", recording=recording))
+    assert "#FFFFFFFF" not in json.dumps(dot), dot
+
+# tree --within: a dot drawn inside a button's frame but owned by another element (an unlabeled overlay beside the
+# icon) still shows under the button, with its real owner. What lies outside the frame stays out.
+with tempfile.TemporaryDirectory() as directory:
+    recording = Path(directory, "within.jsonl")
+    nodes = [{"z": 0, "kind": "layer", "fill": "#EEEEEEFF", "frame": [40, 180, 120, 40], "own": 0},
+             {"z": 1, "kind": "layer", "fill": "#FFC107FF", "frame": [54, 194, 14, 14], "own": 1},
+             {"z": 2, "kind": "layer", "fill": "#123456FF", "frame": [300, 194, 14, 14], "own": 1}]
+    lines = [{"type": "header", "platform": "android", "unit": "px", "scale": 1, "frames": 1},
+             {"type": "frame", "i": 0, "t": 0, "nodes": nodes,
+              "elements": [{"id": "card", "frame": [40, 180, 120, 40]}, {"id": "badge", "frame": [0, 0, 400, 300]}]}]
+    recording.write_text("\n".join(json.dumps(line) for line in lines))
+    within = run("tree", "--within", "card", recording=recording)
+    assert "(inside its frame, owned by another element)" in within and "fill #FFC107FF" in within, within
+    assert "owner badge" in within and "#123456FF" not in within, within
+    inside = json.loads(run("tree", "--within", "card", "--json", recording=recording))["inside"]
+    assert [n["fill"] for n in inside] == ["#FFC107FF"] and inside[0]["owner"] == "badge", inside
+    assert "inside its frame" not in run("tree", recording=recording)
 
 print("ok")

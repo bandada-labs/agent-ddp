@@ -3,7 +3,7 @@ use crate::args::Args;
 use crate::checks::{check_parity, RECORDING_CHECKS};
 use crate::control::Control;
 use crate::live::{
-    follow_logs, live_session, open, platform_of, record_live_inspected, require_session, run_then, snapshot_live,
+    follow_logs, live_session, open, platform_of, record_live_inspected, require_session, snapshot_live, spawn_then,
     stream_frames, AndroidDevice, IosDevice, OfflineDevice,
 };
 use crate::model::{
@@ -56,14 +56,17 @@ pub fn record(args: &mut Args) -> Result<i32> {
         Box::new(AndroidDevice::new(&device_id, &app)?)
     };
     device.request(frames)?;
-    if let Some(then) = &args.then {
-        if !run_then(then) {
-            warn!("ddp: warning: --then command failed, the recording may show no change");
-        }
+    // The action runs while ddp waits: `am instrument -w` returns only when its test ends, and the app it starts is
+    // a new process that must be asked again.
+    let mut then = args.then.as_deref().and_then(spawn_then);
+    if args.then.is_some() && then.is_none() {
+        warn!("ddp: warning: --then command failed, the recording may show no change");
     }
-    // A recording runs at the display rate; allow slow frames plus app startup jitter.
-    let deadline = Instant::now() + Duration::from_secs_f64(frames as f64 / 30.0 + 10.0);
-    while Instant::now() < deadline {
+    // A recording runs at the display rate; allow slow frames plus app startup jitter, counted after the action.
+    let allowance = Duration::from_secs_f64(frames as f64 / 30.0 + 10.0);
+    let mut deadline = Instant::now() + allowance;
+    let mut nudged = Instant::now();
+    while Instant::now() < deadline || then.is_some() {
         if let Some(content) = device.fetch() {
             save_recording(&content, args.name.as_deref())?;
             if let Some(file) = &args.file {
@@ -80,6 +83,19 @@ pub fn record(args: &mut Args) -> Result<i32> {
             );
             warn_if_empty(&recording);
             return Ok(0);
+        }
+        if let Some(child) = then.as_mut() {
+            if let Ok(Some(status)) = child.try_wait() {
+                if !status.success() {
+                    warn!("ddp: warning: --then command failed, the recording may show no change");
+                }
+                then = None;
+                deadline = deadline.max(Instant::now() + allowance);
+            }
+        }
+        if nudged.elapsed() >= Duration::from_secs(1) {
+            device.ask_again(frames);
+            nudged = Instant::now();
         }
         std::thread::sleep(Duration::from_millis(250));
     }

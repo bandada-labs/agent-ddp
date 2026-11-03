@@ -74,6 +74,9 @@ internal class Capture(private val density: Float) {
      * paint, a render effect, a blend mode, a blur): what a node draws is then not what shows.
      */
     private var effects = false
+    /** Merged semantics of the compose view being walked, by id: what TalkBack reads. Built on first need. */
+    private var mergedRoot: SemanticsNode? = null
+    private var merged: Map<Int, SemanticsNode>? = null
     private val composeDensity = Density(density)
 
     fun walkView(view: View, clip: RectF, parentAlpha: Float) {
@@ -102,6 +105,8 @@ internal class Capture(private val density: Float) {
             composeView = view
             val semantics = mutableMapOf<Int, SemanticsNode>()
             collectSemantics(view.semanticsOwner.unmergedRootSemanticsNode, semantics)
+            mergedRoot = view.semanticsOwner.rootSemanticsNode
+            merged = null
             walkLayout(view.semanticsOwner.unmergedRootSemanticsNode.layoutInfo, semantics, visible, alpha)
         }
         if (view is ViewGroup) {
@@ -255,7 +260,7 @@ internal class Capture(private val density: Float) {
         val tag = node?.config?.getOrNull(SemanticsProperties.TestTag)
         val merges = node != null && !insideMerged && node.config.isMergingSemanticsOfDescendants
         val label = text ?: node?.config?.getOrNull(SemanticsProperties.ContentDescription)?.joinToString()
-            ?: if (merges) childrenText(node!!) else null
+            ?: if (merges) childrenText(node!!) ?: mergedDescription(node) else null
         val outerOwner = owner
         val outerEffects = effects
         effects = effects || modifiers.any { modifier ->
@@ -396,6 +401,18 @@ internal class Capture(private val density: Float) {
 
     private fun textOf(node: SemanticsNode) =
         node.config.getOrNull(SemanticsProperties.Text)?.joinToString { it.text }
+
+    /**
+     * A control that merges its children (IconButton) and has no text: the contentDescription Compose merged into
+     * it from a child (the Icon's), the label TalkBack reads.
+     */
+    private fun mergedDescription(node: SemanticsNode): String? {
+        val byId = merged ?: mutableMapOf<Int, SemanticsNode>().also { all ->
+            mergedRoot?.let { collectSemantics(it, all) }
+            merged = all
+        }
+        return byId[node.id]?.config?.getOrNull(SemanticsProperties.ContentDescription)?.joinToString()?.ifEmpty { null }
+    }
 
     private fun childrenText(node: SemanticsNode): String? =
         node.children.filterNot { it.config.isMergingSemanticsOfDescendants }

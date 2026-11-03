@@ -327,12 +327,29 @@ fn assign_owners(frame: &mut Value, tolerance: f64) -> (HashMap<String, usize>, 
                     .find(|&&e| contains(rect(&elements[e]["frame"]), frame, tolerance))
                     .map(|&e| keys[e].clone())
             };
+            if truthy(node.get("effects")) {
+                set_aside_colors_before_effects(node);
+            }
             node["owner"] = owner.clone().map(Value::from).unwrap_or(Value::Null);
             by_owner.entry(owner).or_default().push(index);
         }
     }
     let by_key = keys.into_iter().enumerate().map(|(i, k)| (k, i)).collect();
     (by_key, by_owner)
+}
+
+/// Under a filter, a blend or a material (Liquid Glass) the recorded colors are the layer's own, from before the
+/// effect, not what shows. They move to their own names so no check, state or query reads them as drawn colors.
+fn set_aside_colors_before_effects(node: &mut Value) {
+    let Some(node) = node.as_object_mut() else { return };
+    if let Some(fill) = node.remove("fill") {
+        node.insert("fillBeforeEffects".into(), fill);
+    }
+    if let Some(border) = node.get_mut("border").and_then(Value::as_object_mut) {
+        if let Some(color) = border.remove("color") {
+            border.insert("colorBeforeEffects".into(), color);
+        }
+    }
 }
 
 pub fn element_state(frame: &Frame, key: &str) -> Option<Value> {

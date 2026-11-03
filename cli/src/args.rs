@@ -35,6 +35,8 @@ pub struct Args {
     pub junit: Option<PathBuf>,
     pub settled: Option<String>,
     pub timeout: String,
+    /// `connect --wait`: how long to keep trying while the app starts.
+    pub connect_wait: Option<String>,
     pub ignore: Vec<String>,
     pub grep: Option<String>,
     pub limit: Option<usize>,
@@ -170,7 +172,8 @@ pub fn parser() -> Command {
         .subcommand(sub("connect", "attach to the running app (live mode)")
             .arg(positional("device", "simulator UDID or adb serial").required(true))
             .arg(opt("app", "bundle id / application id").required(true))
-            .arg(opt("platform", "default: guessed from the device id").value_parser(["ios", "android"])))
+            .arg(opt("platform", "default: guessed from the device id").value_parser(["ios", "android"]))
+            .arg(opt("wait", "keep trying this long while the app starts (15s): an `am instrument` run opens its endpoint seconds later").id("connect-wait")))
         .subcommand(sub("launch", "start the app fresh, with values for it, then connect (live mode)")
             .arg(positional("device", "simulator UDID or adb serial").required(true))
             .arg(opt("app", "bundle id / application id").required(true))
@@ -464,6 +467,7 @@ pub fn parse(argv: &[String]) -> Result<Args, clap::Error> {
         junit: string(m, "junit").map(PathBuf::from),
         settled: string(m, "settled"),
         timeout: string(m, "timeout").unwrap_or_else(|| "10s".into()),
+        connect_wait: string(m, "connect-wait"),
         ignore: strings(m, "ignore"),
         grep: string(m, "grep"),
         limit: number::<usize>(m, "limit"),

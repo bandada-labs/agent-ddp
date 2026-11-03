@@ -4,6 +4,11 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 
 ## Unreleased
 
+- Fixed: `tree --within` left out what draws inside the element's frame but belongs to another element, such as an unlabeled overlay on an icon inside a button. Those nodes now show after the element, each with its owner (`inside` in `--json`).
+- Fixed: Android `record --then "am instrument ..."` said "no recording arrived". The instrumentation starts a new app process after the request went out. ddp now runs the `--then` command while it waits and asks again each second until the app starts recording.
+- `ddp connect --wait 15s` keeps trying while the app starts, for a test run that opens the app's endpoint seconds later. `ddp launch` uses the same wait.
+- Fixed: on iOS a layer under a filter, a blend or a material (a toolbar item under Liquid Glass) showed its own fill, white, as if it were the drawn color. Colors from before an effect now show as `fill before effects` and `color before effects`, and no state, query or check reads them. This applies on both platforms.
+- Fixed: Android `check a11y` said NO LABEL for an `IconButton` named only by its `Icon`'s `contentDescription`. A control that merges its children and has no text now takes the description Compose merged into it, the one TalkBack reads.
 - `ddp skills get core` now starts with which command answers which question: slow, leaking, crashed, platform warnings, a breakpoint, the app's storage and network, motion, and device actions. Before, most of the 0.3.0 commands were only in `--full`. The `ddp --help` summary lists every command, and each MCP tool says what its command does instead of pointing to the guide.
 
 ## 0.3.0 (2026-10-30)

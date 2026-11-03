@@ -18,6 +18,10 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.ui.Alignment
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.withFrameMillis
@@ -219,6 +223,15 @@ fun SampleScreen(initialAction: String = "none") {
                         DropdownMenuItem(text = { Text("Rename") }, onClick = { lastAction = "rename"; menuOpen = false })
                         DropdownMenuItem(text = { Text("Delete") }, onClick = { lastAction = "delete"; menuOpen = false })
                     }
+                }
+            }
+            item {
+                // An icon button named only by its Icon's contentDescription (TalkBack reads "More"), with a dot drawn
+                // over the glyph's top corner.
+                Box(Modifier.padding(horizontal = 16.dp)) {
+                    IconButton({ lastAction = "more" }) { Icon(Icons.Default.MoreVert, contentDescription = "More") }
+                    Box(Modifier.testTag("moreDot").align(Alignment.TopEnd).padding(10.dp).size(10.dp)
+                        .background(Color(0xFFFFC107), CircleShape))
                 }
             }
             item {
