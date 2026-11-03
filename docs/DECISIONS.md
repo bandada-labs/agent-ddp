@@ -66,3 +66,4 @@ A line leaves this file when the maintainer replaces it or when its work has lan
 
 - Reply to the maintainer in English, even when they write in Spanish. (2026-10-23, "please keep talking to me in English")
 - Human-facing text (docs, commits, pull requests) is plain English, short, and never mentions AI.
+- Compose source locations use androidx ui-tooling-data as `compileOnly`: Google's parser, no dependency shipped, no parser of our own. An app without it gets "no source information". (2026-11-03, "usemos eso")
