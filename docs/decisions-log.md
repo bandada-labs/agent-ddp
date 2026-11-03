@@ -136,7 +136,7 @@ Done: the guard (the attribute must still be a one-argument `WeakAttribute` stru
 ## 2026-10-27
 
 ### 0.2.1 published before the two-phone test
-Mimbre's asks were cut to a patch: `ddp compare` and a note on headless simulators. The other asks wait for a later release. Asked whether to wait for a free device slot to run `compare <element> --on ios,android` on a real simulator and emulator. Answer: "ve haciendolo tu lo de publicar el nuevo release". Published with the fake-app tests and a live screen compare on the iOS simulator. The two-phone run happens when a slot is free, and a bug there ships as 0.2.2.
+An app team's asks were cut to a patch: `ddp compare` and a note on headless simulators. The other asks wait for a later release. Asked whether to wait for a free device slot to run `compare <element> --on ios,android` on a real simulator and emulator. Answer: "ve haciendolo tu lo de publicar el nuevo release". Published with the fake-app tests and a live screen compare on the iOS simulator. The two-phone run happens when a slot is free, and a bug there ships as 0.2.2.
 
 ## 2026-10-29
 
@@ -158,9 +158,12 @@ Proposed: iOS finds players itself (an `AVPlayerLayer` on screen, the system's n
 Proposed: skip WebSocket frames and network throttling until an app needs them; add launch arguments to `ddp launch` (for the iOS 27 Auto Layout log flag); keep building the 0.3.0 list. Answer: "1. ok 2. ok 3. ok". No push asked, so nothing is pushed.
 
 ### 2026-10-30: finish and ship 0.3.0
-Asked whether tickets were left for 0.3.0. Answer: "los puedes resolver y probar? desarrollalos los metes al rlease creas el rlease lo certificas y lo publicar para npm git etc changelog y todo eso" (solve and test them, put them in the release, create it, certify it and publish it to npm, git, with the changelog). Done: Canvas shapes on iOS. Left out, because they wait on something outside the repo: the older-OS hook matrix (no downloads until Mimbre's store build), Mimbre's timeline fixture (never made), a physical iPhone (no test device), and the known-answer probe (parked 2026-10-24).
+Asked whether tickets were left for 0.3.0. Answer: "los puedes resolver y probar? desarrollalos los metes al rlease creas el rlease lo certificas y lo publicar para npm git etc changelog y todo eso" (solve and test them, put them in the release, create it, certify it and publish it to npm, git, with the changelog). Done: Canvas shapes on iOS. Left out, because they wait on something outside the repo: the older-OS hook matrix (no image downloads for now), an app's timeline fixture (never made), a physical iPhone (no test device), and the known-answer probe (parked 2026-10-24).
 
 GitHub's macOS 14 runners were in a scheduled brownout on release day and retire on November 2, which cancelled the iOS check and would have broken the macOS binaries. CI and the release moved to macOS 15. Its oldest Xcode with an iOS simulator runtime is 16.4 (16.0 to 16.3 have only the SDK), so the supported Xcode went from 15.4 to 16.4: older ones can no longer be checked.
 
 ### 2026-11-03: how Android reads source locations
 Asked on Reddit how ddp maps elements back to source when modifiers chain deeply. Compose already keeps the compiler's source information in the slot table; ui-tooling-data (androidx) parses it. Options: ship it as a dependency (raises an older app's Compose in Debug only), parse it ourselves (format changes between Compose versions), or `compileOnly` so the app's own copy is used. Answer: "ui-tooling-data es oficial de google" (it's Google's official library), then "usemos eso" (let's use that), for `compileOnly`. Ticket ddp-lee.1.
+
+### 2026-11-03: ship 0.4.0
+Asked whether the 0.4.0 work was finished. Answer: "push", then "do it" for the version bump and the tag. CI's first run on the pushed branch failed on Android: `Recompositions` made its main-thread handler when its class loaded, and the JVM unit tests have no main looper. It now makes it when first used. Left out, because they wait on something outside the repo: the older-OS hook matrix and a physical iPhone.

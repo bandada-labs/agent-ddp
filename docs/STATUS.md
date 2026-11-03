@@ -1,12 +1,14 @@
 # Status
 
-Last update: 2026-10-30. Read this after a break, then [DECISIONS.md](DECISIONS.md).
+Last update: 2026-11-03. Read this after a break, then [DECISIONS.md](DECISIONS.md).
 
 ## In one paragraph
 
 A small library inside a Debug build of an iOS or Android app serves what the app draws, frame by frame (ADR 0001). The `ddp` CLI, one Rust binary on npm (ADR 0002, 0003), reads it live or from recordings and prints short text for coding agents (ADR 0006). The protocol between them is versioned (ADR 0004). A flight recorder keeps the last 15 minutes on both platforms (ADR 0005).
 
 ## Released
+
+0.4.0 on 2026-11-03 (CLI and both libraries; npm, GitHub release with 5 binaries, JitPack `v0.4.0`, SwiftPM from the repo URL): `ddp source`, which names the line of the app's code that made an element (Android: the composable calls and modifiers, from the compiler's source information; iOS: the SwiftUI view that wrote it, with its modifiers, or where a UIKit view was created), `ddp recompositions` on Android, Compose `Icon` and `Image` as bitmap nodes, `connect --wait`, and fixes from both device passes. Checked before the tag: CI's three jobs, and the new commands live on the Android emulator and on the iOS 27.0 simulator with the sample apps. What is in it: [CHANGELOG.md](../CHANGELOG.md).
 
 0.3.0 on 2026-10-30 (CLI and both libraries; npm, GitHub release with 5 binaries, JitPack `v0.3.0`, SwiftPM from the repo URL): app state and events, gestures with a real finger, `perf`, `storage`, `media`, `crash`, `debug`, `profile`, `memory`, `audits`, `inspect`, `animations`, `eval --set`, device actions, network timing and cookies, a structure compare across phones, Compose `drawWithCache`, and the shapes inside a SwiftUI `Canvas`. Checked before the tag: CI's three jobs, the new commands live on both sample apps, and the hook matrix on iOS 26.5 and API 35. iOS 27.0 was checked for the device commands the same day, but its simulator runtime stopped booting after a CoreSimulator update before the hook matrix ran. What is in it: [CHANGELOG.md](../CHANGELOG.md).
 
@@ -18,7 +20,7 @@ A small library inside a Debug build of an iOS or Android app serves what the ap
 
 ## Next
 
-0. After 0.3.0: the hook matrix on older versions (API 26 to 28, iOS 17 and 18) once the images can be downloaded, iOS 27.0 again when its runtime boots, Mimbre's timeline fixture when it exists, and a physical iPhone when there is a test device.
+0. After 0.4.0: the hook matrix on older versions (API 26 to 28, iOS 17 and 18) once the images can be downloaded, and a physical iPhone when there is a test device.
 1. The control endpoint in the library (ADR 0008, which replaced the CDP plan of ADR 0007). Seven phases, in order:
    1. Transport. Done.
    2. Reading: `app.info`, `screen.*`, `net.list`/`net.get`/`net.watch`, `log.watch`. Done.
