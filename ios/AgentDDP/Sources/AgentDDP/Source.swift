@@ -52,15 +52,17 @@ enum SourceLocations {
         return none("no SwiftUI view in the view debug data has this element's frame")
     }
 
-    /// The outermost node with the element's frame, and every node above it, root first.
+    /// The deepest node with the element's frame (the Text, not a wrapper around it), and every node above it,
+    /// root first.
     private static func path(to frame: CGRect, in nodes: [[String: Any]], host: UIView) -> [[String: Any]]? {
-        for node in nodes {
-            if let rect = rect(of: node, in: host), close(rect, frame) { return [node] }
-            if let below = path(to: frame, in: node["children"] as? [[String: Any]] ?? [], host: host) {
-                return [node] + below
-            }
+        var best: [[String: Any]]?
+        func visit(_ node: [String: Any], above: [[String: Any]]) {
+            let here = above + [node]
+            if let rect = rect(of: node, in: host), close(rect, frame), here.count > (best?.count ?? 0) { best = here }
+            (node["children"] as? [[String: Any]] ?? []).forEach { visit($0, above: here) }
         }
-        return nil
+        nodes.forEach { visit($0, above: []) }
+        return best
     }
 
     private static func answer(_ path: [[String: Any]]) -> [String: Any] {
@@ -71,6 +73,12 @@ enum SourceLocations {
             guard let type, let module = type.split(separator: ".").first, !appleModules.contains(String(module)),
                   !type.hasPrefix("(") else { return nil }
             return ["type": type, "depth": index]
+        }
+        // iOS 27 records no node for most of the app's own views (they show only as generic arguments of SwiftUI's
+        // containers), so the view that holds the element is often not known: say that rather than half an answer.
+        if views.isEmpty {
+            return none("SwiftUI recorded no view of the app's own above it (iOS keeps the app's views out of its " +
+                        "view debug tree), so which view holds it is not known")
         }
         // The modifiers around the element are its parent nodes (_PaddingLayout, then _BackgroundStyleModifier<Color>).
         // A parent counts only when the static type SwiftUI recorded above says so: some ancestor's type holds
@@ -85,7 +93,10 @@ enum SourceLocations {
             modifiers.append(parent)
             inner = wrapped
         }
-        return ["status": "ok", "element": (readable.last ?? nil) ?? "unknown", "views": views, "modifiers": modifiers]
+        // The path's types, innermost first, so an answer can be checked against what SwiftUI recorded.
+        let recorded = types.reversed().map { $0 ?? "?" }
+        return ["status": "ok", "element": (readable.last ?? nil) ?? "unknown", "views": views, "modifiers": modifiers,
+                "path": Array(recorded)]
     }
 
     private static let appleModules: Set<String> = ["SwiftUI", "SwiftUICore", "Swift", "__C", "Foundation", "UIKit",

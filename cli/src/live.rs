@@ -1249,7 +1249,10 @@ fn swiftui_bodies(session: &Value, answer: &mut Value) {
     let types: Vec<String> =
         answer["views"].as_array().into_iter().flatten().filter_map(|v| v["type"].as_str()).map(swift_type).collect();
     let image = crate::swift_source::app_image(&py::str(&session["device"]), &py::str(&session["app"]));
-    let Some(image) = image.filter(|_| !types.is_empty()) else {
+    if types.is_empty() {
+        return;
+    }
+    let Some(image) = image else {
         answer["views"] = json!([]);
         answer["why"] = json!("the app's Debug image was not found in the simulator");
         return;
