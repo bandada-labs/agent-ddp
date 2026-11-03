@@ -51,7 +51,8 @@ internal object Recompositions {
     private val handles = mutableListOf<CompositionObserverHandle>()
     private var startingScope: RecomposeScope? = null
     private var startedAt = 0L
-    private val main = Handler(Looper.getMainLooper())
+    // Lazy: the control session names this object at start, and unit tests have no main looper.
+    private val main by lazy { Handler(Looper.getMainLooper()) }
     // Removed through the same handler that posted it; a no-op when a stop already came.
     private val autoStop = Runnable { if (active) stop() }
 
