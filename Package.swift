@@ -8,6 +8,7 @@ let package = Package(
     products: [.library(name: "AgentDDP", targets: ["AgentDDP"])],
     targets: [
         .target(name: "AgentDDP", path: "ios/AgentDDP/Sources/AgentDDP"),
-        .testTarget(name: "AgentDDPTests", dependencies: ["AgentDDP"], path: "ios/AgentDDP/Tests/AgentDDPTests"),
+        .testTarget(name: "AgentDDPTests", dependencies: ["AgentDDP"], path: "ios/AgentDDP/Tests/AgentDDPTests",
+                    resources: [.copy("Fixtures")]),
     ]
 )
