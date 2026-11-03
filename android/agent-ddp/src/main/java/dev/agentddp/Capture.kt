@@ -19,6 +19,8 @@ import android.widget.Switch
 import android.widget.TextView
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.BlendModeColorFilter
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
@@ -297,6 +299,16 @@ internal class Capture(private val density: Float) {
                 colorOf(modifier.props["color"] ?: modifier.props["brush"])?.let { paint.put("fill", it) }
                 cornersOf(modifier.props["shape"], modifier.size)?.let { putCorners(paint, it) }
                 addNode(paint, modifier.frame, paintVisible, alpha, clipRound)
+            }
+            // Modifier.paint: what Icon and Image draw (a vector glyph, a bitmap) inside their layout box.
+            modifiers.filter { it.name == "paint" }.forEach { modifier ->
+                val paintVisible = RectF(modifier.frame).takeIf { it.intersect(clip) } ?: return@forEach
+                val glyph = JSONObject().put("kind", "bitmap")
+                modifier.props["painter"]?.let { glyph.put("source", it.javaClass.simpleName) }
+                // Icon's tint is SrcIn: every pixel the painter draws takes that color.
+                (modifier.props["colorFilter"] as? BlendModeColorFilter)?.takeIf { it.blendMode == BlendMode.SrcIn }
+                    ?.let { hex(it.color.toArgb()) }?.let { glyph.put("tint", it) }
+                addNode(glyph, modifier.frame, paintVisible, alpha, clipRound)
             }
             // Canvas and drawBehind, drawWithContent, drawWithCache: each lambda replayed into a recording canvas.
             modifiers.filter { it.name in DRAW_MODIFIERS }.forEach { modifier ->

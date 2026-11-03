@@ -4,6 +4,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 
 ## Unreleased
 
+- Android: a Compose `Icon` or `Image` is a `bitmap` node, with the painter's class and the icon's `tint`. Before, a glyph inside an `IconButton` had no node, so nothing showed under a badge drawn over it.
 - Fixed: `tree --within` left out what draws inside the element's frame but belongs to another element, such as an unlabeled overlay on an icon inside a button. Those nodes now show after the element, each with its owner (`inside` in `--json`).
 - Fixed: Android `record --then "am instrument ..."` said "no recording arrived". The instrumentation starts a new app process after the request went out. ddp now runs the `--then` command while it waits and asks again each second until the app starts recording.
 - `ddp connect --wait 15s` keeps trying while the app starts, for a test run that opens the app's endpoint seconds later. `ddp launch` uses the same wait.
