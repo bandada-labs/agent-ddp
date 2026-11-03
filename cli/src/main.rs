@@ -14,6 +14,7 @@ mod py;
 mod queries;
 mod state;
 mod summary;
+mod swift_source;
 mod tools;
 
 use args::Args;

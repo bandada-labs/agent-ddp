@@ -37,7 +37,7 @@ pub fn memory(args: &mut Args) -> Result<i32> {
 }
 
 /// The app's pid on the simulator, from its launchd job (`UIKitApplication:<bundle id>[...]`).
-fn ios_pid(device: &str, app: &str) -> Result<String> {
+pub fn ios_pid(device: &str, app: &str) -> Result<String> {
     let jobs = state::run(&["xcrun", "simctl", "spawn", device, "launchctl", "list"])?;
     let label = format!("UIKitApplication:{app}[");
     match jobs.lines().find(|line| line.contains(&label)).and_then(|line| line.split_whitespace().next()) {

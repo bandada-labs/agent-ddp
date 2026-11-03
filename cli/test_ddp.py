@@ -555,6 +555,9 @@ class FakeApp:
                 elif method == "screen.source":
                     if params["id"] == "spinner":
                         result = {"status": "none", "why": "the app was built without Compose source information"}
+                    elif params["id"] == "toast":
+                        result = {"status": "ok", "element": "Text", "views": [{"type": "Fake.Row<Text>", "depth": 2}],
+                                  "modifiers": ["_PaddingLayout", "_BackgroundStyleModifier<Color>"]}
                     else:
                         result = {"status": "ok", "calls": [
                             {"name": "Surface", "file": "Button.kt", "line": 120, "library": "androidx.compose.material3"},
@@ -806,11 +809,15 @@ with tempfile.TemporaryDirectory() as directory:
     assert full.startswith("0.3s: 3 composables ran\n") and "androidx.compose.runtime.SideEffect" in full, full
     assert app.measuring == {"ms": 200}, app.measuring
     # source: the app's own calls innermost first, library calls counted; no source information is said, not guessed.
-    assert ddp_in(directory, "source", "@e1").stdout == ("button: called from\n  Button  Cart.kt:57\n  CartRow  Cart.kt:42\n"
+    assert ddp_in(android_dir, "source", "button").stdout == ("button: called from\n  Button  Cart.kt:57\n  CartRow  Cart.kt:42\n"
         "  (1 call inside androidx libraries: --full)\nmodifiers: padding(all=8) > GlowElement\n")
-    assert "Surface  Button.kt:120  (androidx.compose.material3)" in ddp_in(directory, "source", "button", "--full").stdout
+    assert "Surface  Button.kt:120  (androidx.compose.material3)" in ddp_in(android_dir, "source", "button", "--full").stdout
     assert ddp_in(directory, "source", "spinner").stdout == \
         "spinner: no source information: the app was built without Compose source information\n"
+    # iOS: the app's views come with their body lines from the app's Debug image; without the image nothing is made up.
+    ios_source = ddp_in(directory, "source", "toast").stdout
+    assert ios_source.startswith("toast: a Text in\n") and "no view of the app's own above it" in ios_source, ios_source
+    assert "modifiers around it (SwiftUI's types, innermost first): _PaddingLayout > _BackgroundStyleModifier<Color>" in ios_source
     assert ddp_in(directory, "animations").stdout == "spinner transform.rotation.z CABasicAnimation 1s repeat forever [10, 10, 40, 40]\n"
     # --set sends a number as JSON and a color as text, and prints what the app reads back.
     assert ddp_in(directory, "eval", "button", "layer.cornerRadius", "--set", "12").stdout == "12\n"

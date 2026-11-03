@@ -20,6 +20,8 @@ enum Hooks {
         Hook(name: "swiftui.responders", kind: "internal", feeds: "whose gesture takes a touch (AGGraphGetWeakValue)"),
         Hook(name: "uikit.touchRadius", kind: "private", feeds: "the touch radius SwiftUI hit-tests with"),
         Hook(name: "input.hid", kind: "private", feeds: "tap, type, press (IOHIDEvent, _enqueueHIDEvent:)"),
+        Hook(name: "swiftui.viewDebugData", kind: "private",
+             feeds: "ddp source: SwiftUI's view tree with types and frames (_UIHostingView._viewDebugData, SWIFTUI_VIEW_DEBUG)"),
         Hook(name: "renderbox.displayList", kind: "private",
              feeds: "draw nodes inside a SwiftUI Canvas or drawingGroup (RBDisplayList XML recorder)"),
     ]

@@ -1115,7 +1115,13 @@ pub fn storage(args: &mut Args) -> Result<i32> {
 pub fn source(args: &mut Args) -> Result<i32> {
     let session = require_session()?;
     let id = args.id.clone().unwrap_or_default();
-    let answer = open(&session)?.call("screen.source", json!({"id": id}))?;
+    let mut answer = open(&session)?.call("screen.source", json!({"id": id}))?;
+    if session["platform"] == "ios" && answer["status"] == "ok" {
+        swiftui_bodies(&session, &mut answer);
+    }
+    if answer["status"] == "uikit" {
+        uikit_creation(&session, &mut answer)?;
+    }
     if ctx().json {
         say!("{}", py::dumps(&answer));
         return Ok(0);
@@ -1123,6 +1129,16 @@ pub fn source(args: &mut Args) -> Result<i32> {
     if answer["status"] != "ok" {
         say!("{id}: no source information: {}", py::str(&answer["why"]));
         return Ok(0);
+    }
+    if answer.get("created").is_some() {
+        say!("{id}: a {} created in", py::str(&answer["class"]));
+        for frame in answer["created"].as_array().into_iter().flatten().take(6) {
+            say!("  {}  {}:{}", py::str(&frame["function"]), py::str(&frame["file"]), py::str(&frame["line"]));
+        }
+        return Ok(0);
+    }
+    if session["platform"] == "ios" {
+        return say_swiftui_source(&id, &answer);
     }
     let calls = answer["calls"].as_array().cloned().unwrap_or_default();
     let (shown, hidden): (Vec<&Value>, Vec<&Value>) =
@@ -1223,6 +1239,80 @@ pub fn recompositions(args: &mut Args) -> Result<i32> {
     }
     if composables.len() > limit {
         say!("  ... {} more", composables.len() - limit);
+    }
+    Ok(0)
+}
+
+/// The app's view types above a SwiftUI element (innermost first) get their `body` place and the modifier calls in it,
+/// from the app's debug image. A type whose body is not in the image (a framework's view) is left out.
+fn swiftui_bodies(session: &Value, answer: &mut Value) {
+    let types: Vec<String> =
+        answer["views"].as_array().into_iter().flatten().filter_map(|v| v["type"].as_str()).map(swift_type).collect();
+    let image = crate::swift_source::app_image(&py::str(&session["device"]), &py::str(&session["app"]));
+    let Some(image) = image.filter(|_| !types.is_empty()) else {
+        answer["views"] = json!([]);
+        answer["why"] = json!("the app's Debug image was not found in the simulator");
+        return;
+    };
+    let bodies = crate::swift_source::bodies(&image, &types);
+    let views: Vec<Value> = types
+        .iter()
+        .filter_map(|view| {
+            let body = bodies.get(view)?;
+            let calls: Vec<Value> = body.calls.iter().map(|(name, line)| json!({"name": name, "line": line})).collect();
+            Some(json!({"type": view, "file": body.file, "line": body.line, "calls": calls}))
+        })
+        .collect();
+    answer["views"] = json!(views);
+}
+
+/// `Module.Row<Content>` names its body getter `Module.Row.body.getter`.
+fn swift_type(name: &str) -> String {
+    name.split('<').next().unwrap_or(name).to_string()
+}
+
+/// A UIKit view: the app's frames of its allocation stack, from the stack log the app was started with.
+fn uikit_creation(session: &Value, answer: &mut Value) -> Result<()> {
+    let (device, app) = (py::str(&session["device"]), py::str(&session["app"]));
+    let pid = crate::process::ios_pid(&device, &app)?;
+    let image = crate::swift_source::app_image(&device, &app);
+    let name = image.as_ref().and_then(|i| i.file_name()).map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let created = crate::swift_source::creation(&pid, &py::str(&answer["address"]), &name);
+    if created.is_empty() {
+        *answer = json!({"status": "none", "why": format!("the stack log has no frame of the app's code for this {}", py::str(&answer["class"]))});
+        return Ok(());
+    }
+    let frames: Vec<Value> = created
+        .iter()
+        .map(|(function, file, line)| json!({"function": function, "file": file, "line": line}))
+        .collect();
+    *answer = json!({"status": "ok", "class": answer["class"].clone(), "created": frames});
+    Ok(())
+}
+
+fn say_swiftui_source(id: &str, answer: &Value) -> Result<i32> {
+    let views = answer["views"].as_array().cloned().unwrap_or_default();
+    say!("{id}: a {} in", py::str(&answer["element"]));
+    if views.is_empty() {
+        say!("  no view of the app's own above it with a body in the app's Debug image");
+    }
+    for view in views.iter().take(6) {
+        let short = py::str(&view["type"]);
+        let short = short.split_once('.').map(|(_, rest)| rest.to_string()).unwrap_or(short);
+        say!("  {short}.body  {}:{}", py::str(&view["file"]), py::str(&view["line"]));
+        let calls: Vec<String> = view["calls"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|c| format!("{} :{}", py::str(&c["name"]), py::str(&c["line"])))
+            .collect();
+        if !calls.is_empty() {
+            say!("    modifier calls in it: {}", calls.join(", "));
+        }
+    }
+    let modifiers: Vec<String> = answer["modifiers"].as_array().into_iter().flatten().map(py::str).collect();
+    if !modifiers.is_empty() {
+        say!("modifiers around it (SwiftUI's types, innermost first): {}", modifiers.join(" > "));
     }
     Ok(0)
 }

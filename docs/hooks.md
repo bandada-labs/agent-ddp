@@ -15,6 +15,7 @@ Kinds: `private` (an Apple symbol, class or selector without a public header), `
 | `uikit.touchRadius` (`contextWithPoint:radius:event:`) | private | the radius SwiftUI hit-tests a touch with | 20 pt, what iOS 27 gives every touch | iOS 26.5 and 27.0 simulators |
 | `input.hid` (IOHIDEvent functions, `_enqueueHIDEvent:`, `_contextId`) | private | tap, type, press, input.touch | those commands fail with the missing name | iOS 26.5 and 27.0 simulators |
 | `renderbox.displayList` (`RBDisplayList`, `drawInDisplayList:`, `RBXMLRecorderStart`) | private | `draw` nodes inside a SwiftUI `Canvas` or `drawingGroup` | no `draw` nodes; the `opaque-drawing` node and its pixels stay | iOS 26.5 simulator |
+| `swiftui.viewDebugData` (`_UIHostingView._viewDebugData`, `_ViewDebug.serializedData`, with `SWIFTUI_VIEW_DEBUG` at launch) | private | `ddp source` on SwiftUI | the element gets no source information | iOS 26.5 simulator (pending) |
 
 ## Android
 

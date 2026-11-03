@@ -277,6 +277,11 @@ final class ControlSession {
         "app.run": { try await Commands.shared.run($0) },
         "net.send": { try await AppClient.shared.send($0) },
         "perf.metrics": { try await Perf.measure($0) },
+        "screen.source": { params in
+            let answer = await SourceLocations.of(name: params["id"] as? String ?? "")
+            if let error = answer["error"] as? String { throw Control.Failure(description: error) }
+            return answer
+        },
     ]
 
     init(app: ControlApp, send: @escaping (String) -> Void) {
