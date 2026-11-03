@@ -29,6 +29,7 @@ The loop covers what is drawn. When the question is about something else, go str
 ```
 # Slow, stuck, leaking, crashing
 ddp perf --for 5s                # missed refreshes now (Android also draw time)
+ddp recompositions --for 3s --then "ddp tap @e3"   # Android: which composables ran, how often, and the state that made them
 ddp profile --for 3s             # the functions the app spends its time in (sample / simpleperf)
 ddp memory                       # footprint now; `memory leaks` (iOS); `memory heap`: classes by size (iOS), an .hprof (Android)
 ddp crash                        # the last crash with its stack, even when the app is gone

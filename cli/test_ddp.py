@@ -543,6 +543,14 @@ class FakeApp:
                 elif method == "screen.animations":
                     result = {"animations": [{"key": "spin", "type": "CABasicAnimation", "keyPath": "transform.rotation.z",
                                               "duration": 1, "repeat": "forever", "frame": [10, 10, 40, 40], "id": "spinner"}]}
+                elif method == "compose.recompositions.start":
+                    self.measuring = params
+                    result = {"compositions": 1}
+                elif method == "compose.recompositions.stop":
+                    result = {"ms": 300, "composables": [
+                        {"name": "dev.example.Cart (Cart.kt:40)", "runs": 48,
+                         "invalidatedBy": [{"state": "MutableState<Integer>", "times": 46}]},
+                        {"name": "dev.example.Row (Cart.kt:80)", "runs": 2}]}
                 elif method == "screen.source":
                     if params["id"] == "spinner":
                         result = {"status": "none", "why": "the app was built without Compose source information"}
@@ -782,6 +790,17 @@ with tempfile.TemporaryDirectory() as directory:
     assert ddp_in(directory, "storage", "read").returncode == 1
     shown = ddp_in(directory, "highlight", "button", "--for", "500ms")
     assert shown.stdout == "highlighted button [0, 0, 100, 50] for 500ms\n" and app.highlighted == {"rect": [0, 0, 100, 50], "ms": 500}, shown.stdout
+    # recompositions: Android only; counts and the state that invalidated, most runs first.
+    refused = ddp_in(directory, "recompositions", "--for", "200ms")
+    assert refused.returncode == 1 and "SwiftUI keeps no runtime record" in refused.stderr, refused.stderr
+    android_dir = Path(directory, "android-session")
+    Path(android_dir, ".ddp").mkdir(parents=True)
+    Path(android_dir, ".ddp", "session.json").write_text(json.dumps(
+        {"platform": "android", "app": "fake", "device": "fake", "port": app.port}))
+    ran = ddp_in(android_dir, "recompositions", "--for", "200ms").stdout
+    assert ran == ("0.3s: 2 composables ran\n  dev.example.Cart (Cart.kt:40)  48 runs, invalidated by "
+                   "MutableState<Integer> x46\n  dev.example.Row (Cart.kt:80)  2 runs\n"), ran
+    assert app.measuring == {"ms": 200}, app.measuring
     # source: the app's own calls innermost first, library calls counted; no source information is said, not guessed.
     assert ddp_in(directory, "source", "@e1").stdout == ("button: called from\n  Button  Cart.kt:57\n  CartRow  Cart.kt:42\n"
         "  (1 call inside androidx libraries: --full)\nmodifiers: padding(all=8) > GlowElement\n")

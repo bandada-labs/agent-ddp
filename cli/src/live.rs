@@ -1152,6 +1152,55 @@ pub fn source(args: &mut Args) -> Result<i32> {
     Ok(0)
 }
 
+/// `ddp recompositions`: the composables whose bodies ran in the window (Compose skips the rest), most first, with
+/// the state objects that made Compose run each again. Counts and causes only: whether a run was needed is the app's.
+pub fn recompositions(args: &mut Args) -> Result<i32> {
+    let session = require_session()?;
+    if session["platform"] == "ios" {
+        fail!(
+            "SwiftUI keeps no runtime record of which view bodies ran",
+            "not_supported",
+            "in a view, `let _ = Self._printChanges()` in body prints why it ran; ddp audits shows SwiftUI's warnings"
+        );
+    }
+    let ms = parse_ms(args.duration.as_deref().unwrap_or("3s"))?;
+    let mut control = open(&session)?;
+    control.call("compose.recompositions.start", json!({"ms": ms}))?;
+    let mut then = args.then.as_deref().and_then(spawn_then);
+    std::thread::sleep(Duration::from_secs_f64(ms / 1000.0));
+    let answer = control.call("compose.recompositions.stop", json!({}))?;
+    control.close();
+    if let Some(child) = then.as_mut() {
+        let _ = child.wait();
+    }
+    if ctx().json {
+        say!("{}", py::dumps(&answer));
+        return Ok(0);
+    }
+    let composables = answer["composables"].as_array().cloned().unwrap_or_default();
+    let seconds = py::fixed(&json!(f(&answer["ms"]) / 1000.0), 1);
+    if composables.is_empty() {
+        say!("{seconds}s: no composable ran (nothing on screen changed state)");
+        return Ok(0);
+    }
+    say!("{seconds}s: {} composables ran", composables.len());
+    let limit = 20;
+    for composable in composables.iter().take(limit) {
+        let causes: Vec<String> = composable["invalidatedBy"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|cause| format!("{} x{}", py::str(&cause["state"]), py::str(&cause["times"])))
+            .collect();
+        let caused = if causes.is_empty() { String::new() } else { format!(", invalidated by {}", causes.join(", ")) };
+        say!("  {}  {} runs{caused}", py::str(&composable["name"]), py::str(&composable["runs"]));
+    }
+    if composables.len() > limit {
+        say!("  ... {} more", composables.len() - limit);
+    }
+    Ok(0)
+}
+
 pub fn animations(_args: &mut Args) -> Result<i32> {
     let session = require_session()?;
     let answer = open(&session)?.call("screen.animations", json!({}))?;

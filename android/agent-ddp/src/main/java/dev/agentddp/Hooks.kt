@@ -29,6 +29,8 @@ internal object Hooks {
         Hook("compose.textColor", "internal", "whether BasicText paints another color (its color producer)"),
         Hook("compose.drawCache", "internal", "drawWithCache draws (CacheDrawScope, DrawResult.block)"),
         Hook("compose.inspectionTables", "internal", "ddp source (the composition's inspection_slot_table_set tag)"),
+        Hook("compose.tracer", "internal", "ddp recompositions: the app's own composition tracer, kept and put back (ComposerKt.compositionTracer)"),
+        Hook("compose.wrappedComposition", "internal", "ddp recompositions: the composition behind a Compose view (WrappedComposition.original)"),
         Hook("compose.sourceInformation", "internal", "ddp source (the app's ui-tooling-data reading the slot table)"),
     )
 

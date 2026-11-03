@@ -99,6 +99,7 @@ const MCP_PROFILES: [(&str, &[&str]); 3] = [
             "media",
             "animations",
             "source",
+            "recompositions",
             "crash",
             "drag",
             "double-tap",

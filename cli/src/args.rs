@@ -97,6 +97,7 @@ Start here (for agents): ddp skills get core
   check overlap|corners|jank|settle|a11y|timeline|parity|baseline|tappable|all
   history | crash | audits | logs          the last 15 minutes; the last crash; the platform's runtime warnings; app logs
   profile | memory | perf | debug | source   where time goes; memory and leaks; missed frames; stop at FILE:LINE; the line that made it
+  recompositions                          Android: which composables ran, how often, and the state that made them
   state | events | run | prefs | storage   the app's Debug values, events and commands; preferences; files, SQLite, keys
   net | media | animations | time          requests (mock, fail, cookies); players; Core Animation; pause and step
   inspect | highlight | annotate | view    which element a person taps; a box on the phone; a numbered screenshot; a page
@@ -289,6 +290,9 @@ pub fn parser() -> Command {
         .subcommand(sub("source", "live: where an element comes from in the app's code: the calls above it with file:line, and its modifiers")
             .arg(positional("id", "element id, label or @ref").required(true))
             .arg(flag("full", "also the calls inside androidx libraries")))
+        .subcommand(sub("recompositions", "live, Android: which composables ran in a window, how often, and the state that made them run")
+            .arg(opt("for", "how long to measure (default 3s)").id("duration"))
+            .arg(opt("then", "program to run once measuring starts (no shell)")))
         .subcommand(sub("perf", "live: refreshes the main thread missed and draw time, for whatever is on screen")
             .arg(opt("for", "how long to measure (default 5s)").id("duration")))
         .subcommand(sub("events", "live: events the app sent in Debug (a rule that fired, a sync that ended)")

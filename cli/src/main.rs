@@ -65,6 +65,7 @@ fn handler(command: &str) -> fn(&mut Args) -> Result<i32> {
         "media" => live::media,
         "animations" => live::animations,
         "source" => live::source,
+        "recompositions" => live::recompositions,
         "swipe" | "drag" | "double-tap" | "long-press" => hit::gesture,
         "crash" => crash::crash,
         "wait" => device::wait,

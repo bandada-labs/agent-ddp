@@ -34,5 +34,7 @@ Kinds: `private` (an Apple symbol, class or selector without a public header), `
 | `compose.drawCache` (`CacheDrawScope()`, `setCacheParams`, `DrawResult.getBlock`) | internal | what a `drawWithCache` lambda draws | its draws are not read; a cache that needs a graphics layer fails it too | Compose UI 1.7.6 on API 35 |
 | `compose.inspectionTables` (the `inspection_slot_table_set` view tag) | internal | `ddp source` | the element gets no source information | Compose UI 1.7.6 on API 35 |
 | `compose.sourceInformation` (ui-tooling-data `CompositionData.asTree`, the app's own copy) | internal | `ddp source` | the element gets no source information; a missing library says to add `ui-tooling-data` | Compose UI 1.7.6 on API 35 |
+| `compose.tracer` (`ComposerKt.compositionTracer`) | internal | `ddp recompositions`: the app's own tracer (Perfetto's runtime-tracing) is kept, gets every call, and is put back | an app tracer is replaced for the window and the field is reset to none | Compose runtime 1.7.6 on API 35 |
+| `compose.wrappedComposition` (`WrappedComposition.getOriginal`) | internal | `ddp recompositions`: which state invalidated a composable | runs are still counted; causes are not given | Compose UI 1.7.6 on API 35 |
 
 Not hooks: `drawHierarchy`, `PixelCopy`, `CADisplayLink`, Choreographer, `UIView.hitTest`, `onInterceptTouchEvent` and Compose `PointerInputModifierNode` are public API.
