@@ -615,7 +615,8 @@ class FakeApp:
                 elif method == "media.list":
                     result = {"players": [{"source": "AVPlayerLayer", "state": "playing", "rate": 1, "position": 12.5,
                                            "duration": 60, "frame": [0, 0, 390, 220]}],
-                              "nowPlaying": {"title": "Song", "position": 12.5}}
+                              # Out of order, as an NSDictionary hands it over: ddp prints it in a fixed order.
+                              "nowPlaying": {"position": 12.5, "title": "Song"}}
                 elif method == "perf.metrics":
                     result = {"ms": params["ms"], "refreshMs": 16.67, "refreshes": 59, "missed": 3, "worstGapMs": 66.7,
                               "drawn": 20, "drawMeanMs": 6.1, "drawP95Ms": 12.4, "drawnOverRefresh": 1}

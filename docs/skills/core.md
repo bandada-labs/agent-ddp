@@ -49,7 +49,7 @@ ddp storage keys                 # Keychain / Keystore item names, never their d
 ddp storage files                # the app's files; paths are from its home folder (iOS) or data folder (Android)
 ddp storage query Documents/app.sqlite "SELECT name FROM sqlite_master"   # one read-only statement; tables first
 ddp net list                     # requests; `net get ID` adds timing when the app opted in; `net cookies` (names, never values)
-ddp media                        # players on screen: state, position, duration, rate
+ddp media                        # players on screen: state, position, duration, rate; what the app told the system plays
 
 # Motion
 ddp animations                   # iOS: Core Animation animations, by the view's id when it has one

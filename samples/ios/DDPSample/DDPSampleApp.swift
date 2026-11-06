@@ -1,5 +1,7 @@
 import AVFoundation
+import AVKit
 import AgentDDP
+import MediaPlayer
 import OSLog
 import Security
 import SQLite3
@@ -10,7 +12,7 @@ import UserNotifications
 struct DDPSampleApp: App {
     // Launch arguments for measuring History's cost: `-spinner` opens the spinner screen, `-noDDP` runs without ddp.
     private let showsSpinner = CommandLine.arguments.contains("-spinner")
-    // `-media` opens a screen with a video layer, for `ddp media`.
+    // `-media` opens a screen with a playing video, for `ddp media`.
     private let showsMedia = CommandLine.arguments.contains("-media")
 
     init() {
@@ -104,17 +106,23 @@ struct SpinnerView: View {
     }
 }
 
-/// A video layer with a player and nothing to play: `ddp media` finds it, paused at 0.
-struct PlayerView: UIViewRepresentable {
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView()
-        let layer = AVPlayerLayer(player: AVPlayer())
-        layer.frame = CGRect(x: 0, y: 100, width: 320, height: 180)
-        view.layer.addSublayer(layer)
-        return view
-    }
+/// SwiftUI's own video player on a 30 s clip, playing, and what it gave the system as now playing: `ddp media` finds
+/// the player AVKit draws and the now-playing info.
+struct PlayerView: View {
+    @State private var player = AVPlayer(url: Bundle.main.url(forResource: "clip", withExtension: "mp4")!)
 
-    func updateUIView(_ view: UIView, context: Context) {}
+    var body: some View {
+        VideoPlayer(player: player)
+            .frame(width: 320, height: 180)
+            .onAppear {
+                player.play()
+                MPNowPlayingInfoCenter.default().nowPlayingInfo = [MPMediaItemPropertyTitle: "Sample clip",
+                                                                   MPMediaItemPropertyArtist: "agent-ddp",
+                                                                   MPMediaItemPropertyPlaybackDuration: 30.0,
+                                                                   MPNowPlayingInfoPropertyElapsedPlaybackTime: 0.0,
+                                                                   MPNowPlayingInfoPropertyPlaybackRate: 1.0]
+            }
+    }
 }
 
 struct RedrawEveryFrame: UIViewRepresentable {

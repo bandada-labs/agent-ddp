@@ -56,9 +56,12 @@ Put the app in a state without the UI (`state set`), then check what it draws wi
 
 ## A player the library cannot see
 
-`ddp media` shows the players the platform shows the library: a video layer (`AVPlayerLayer`, `VideoView`) and the
-now-playing info. An audio-only `AVPlayer`, a Media3 `ExoPlayer` or a `MediaPlayer` has no public way in, so show it
-as a value:
+`ddp media` shows the players the platform shows: a drawn video layer (`AVPlayerLayer`, SwiftUI's `VideoPlayer`
+included, and `VideoView`) and what the app told the system plays. On iOS that is the now-playing info; on Android the
+app's media session (a Media3 `MediaSession` too), read from the system, so it shows without the library as well
+(`ddp media --device <serial> --app <id>`). Its `position` is the one the app last gave the system; the system moves it
+on at `rate`. An audio-only `AVPlayer`, or a Media3 `ExoPlayer` or a `MediaPlayer` with no media session, has no public
+way in, so show it as a value:
 
 ```swift
 AgentDDP.state("player", get: { ["state": player.timeControlStatus == .playing ? "playing" : "paused",

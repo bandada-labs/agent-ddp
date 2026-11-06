@@ -308,7 +308,7 @@ pub fn parser() -> Command {
             .arg(opt("grep", "only lines holding this text"))
             .arg(opt("limit", "at most this many lines").value_parser(clap::value_parser!(usize)).default_value("50")))))
         .subcommand(device_options(sub("crash", "the app's last crash as the platform recorded it, with its stack (the app may be gone)")))
-        .subcommand(sub("media", "live: the players the platform shows (video layers, now playing), with their state"))
+        .subcommand(device_options(sub("media", "live: the players the platform shows (video layers, now playing), with their state; Android's media session without the library too")))
         .subcommand(sub("animations", "live, iOS: the Core Animation animations on screen, by layer"))
         .subcommand(sub("source", "live: where an element comes from in the app's code: the calls above it with file:line, and its modifiers")
             .arg(positional("id", "element id, label or @ref").required(true))

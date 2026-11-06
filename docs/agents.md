@@ -17,7 +17,7 @@ ddp crash [--device <id> --app <id>]               the app's last crash as the p
 ddp perf [--for 5s]                                refreshes the main thread missed, worst gap; Android: draw time
 ddp recompositions [--for 3s] [--then CMD] [--full]   Android: the app's composables that ran, how often, the state that made them
 ddp net cookies | clear-cookies                    the app's cookies by name and domain, never the values
-ddp media                                          video players on screen and now-playing info, with their state
+ddp media                                          video players on screen and now-playing info (Android: the media session, library or not)
 ddp animations                                     iOS: Core Animation animations on screen, by layer
 ddp source <el> [--full]                           which line of the app's code made it: the calls above it, its modifiers
 ddp storage [files [<folder>]] | read <file> | rm <file> | query <db> "<sql>" | keys   the app's own data

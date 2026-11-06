@@ -3,7 +3,7 @@ import AVFoundation
 import MediaPlayer
 import UIKit
 
-/// `media.list`: the players the platform shows the library, never a guess. Every `AVPlayerLayer` in the app's
+/// `media.list`: the players the platform shows the library, never a guess. Every drawn `AVPlayerLayer` in the app's
 /// windows with its player's state, and the now-playing info the app gave the system (lock screen, Control Center).
 /// An audio-only player has no layer: the app shows it as a value (`AgentDDP.state`, see `ddp skills get app`).
 enum Media {
@@ -22,6 +22,9 @@ enum Media {
     }
 
     private static func collect(_ layer: CALayer, in window: UIWindow, into players: inout [[String: Any]]) {
+        // Nothing under a hidden or clear layer is drawn. SwiftUI's VideoPlayer keeps a hidden AVPlayerLayer with an
+        // empty AVQueuePlayer inside the one that plays: not a player anyone sees.
+        guard !layer.isHidden, layer.opacity > 0 else { return }
         if let playerLayer = layer as? AVPlayerLayer, let player = playerLayer.player {
             let frame = layer.convert(layer.bounds, to: window.layer)
             var entry = state(of: player)

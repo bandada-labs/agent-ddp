@@ -1373,9 +1373,30 @@ pub fn animations(_args: &mut Args) -> Result<i32> {
     Ok(0)
 }
 
-pub fn media(_args: &mut Args) -> Result<i32> {
-    let session = require_session()?;
-    let answer = open(&session)?.call("media.list", json!({}))?;
+pub fn media(args: &mut Args) -> Result<i32> {
+    let (platform, device, app) = crate::device::target(args)?;
+    let session = read_json(&ctx().session_file).unwrap_or(json!({}));
+    let library = session["mode"] != "device" && session["device"].as_str() == Some(device.as_str());
+    if !library && platform == "ios" {
+        require_session()?;
+    }
+    let mut answer = if library { open(&session)?.call("media.list", json!({}))? } else { json!({"players": []}) };
+    // Android's library sees no Media3 or MediaPlayer player, but the system lists the media session the app gave it,
+    // library or not. An adb that fails leaves it out: unknown, never "nothing plays".
+    if let (true, Some(app)) = (platform == "android", app) {
+        let dump = capture(&adb_path()?, &["-s", &device, "shell", "dumpsys", "media_session"]);
+        if let Some(session) = (dump.code == 0).then(|| media_session(&dump.stdout, &app)).flatten() {
+            answer["nowPlaying"] = session;
+        }
+    }
+    // iOS hands the now-playing info over as a dictionary, in no order: the same answer prints the same way.
+    if let Some(now) = answer.get_mut("nowPlaying").and_then(Value::as_object_mut) {
+        let order = ["source", "state", "title", "artist", "album", "description", "position", "duration", "rate"];
+        let mut fields: Vec<(String, Value)> = std::mem::take(now).into_iter().collect();
+        fields
+            .sort_by_key(|(key, _)| (order.iter().position(|known| known == key).unwrap_or(order.len()), key.clone()));
+        now.extend(fields);
+    }
     if ctx().json {
         say!("{}", py::dumps(&answer));
         return Ok(0);
@@ -1399,9 +1420,70 @@ pub fn media(_args: &mut Args) -> Result<i32> {
         say!("now playing: {}", fields.join(" "));
     }
     if players.is_empty() && answer.get("nowPlaying").is_none() {
-        say!("no player the platform shows: an audio player or a Media3 one is shown as an app value (ddp skills get app)");
+        say!("no player the platform shows: an audio player or a Media3 one with no media session is shown as an app value (ddp skills get app)");
     }
     Ok(0)
+}
+
+/// The app's first active media session in the system's own order (`dumpsys media_session`), what the lock screen and
+/// the media controls show: `state` and `rate` as the app last set them, `position` in seconds at that moment, and
+/// the system's `description` (title, subtitle, description) as it prints it, never split on its commas.
+fn media_session(dump: &str, app: &str) -> Option<Value> {
+    let mut sessions: Vec<Vec<&str>> = Vec::new();
+    for line in dump.lines().map(str::trim) {
+        if line.starts_with("package=") {
+            sessions.push(Vec::new());
+        }
+        if let Some(fields) = sessions.last_mut() {
+            fields.push(line);
+        }
+    }
+    let field =
+        |fields: &[&str], name: &str| fields.iter().find_map(|line| line.strip_prefix(name)).map(str::to_string);
+    let found = sessions.into_iter().find(|fields| {
+        field(fields, "package=").as_deref() == Some(app) && field(fields, "active=").as_deref() == Some("true")
+    })?;
+    // A whole number prints as the libraries print it: 0, not 0.0.
+    let number = |value: f64| if value.fract() == 0.0 { json!(value as i64) } else { py::fnum(value) };
+    let mut entry = json!({"source": "media session"});
+    if let Some(state) =
+        field(&found, "state=PlaybackState {").and_then(|state| state.strip_suffix('}').map(String::from))
+    {
+        let values: Vec<(&str, &str)> = state.split(", ").filter_map(|pair| pair.split_once('=')).collect();
+        let value = |name: &str| values.iter().find(|(key, _)| *key == name).map(|(_, value)| *value);
+        // Android 14 and later print `PLAYING(3)`, before that `3`: the number is PlaybackState's own constant.
+        let code =
+            value("state").map(|state| state.rsplit_once('(').map_or(state, |(_, code)| code.trim_end_matches(')')));
+        let names = [
+            "none",
+            "stopped",
+            "paused",
+            "playing",
+            "fast forwarding",
+            "rewinding",
+            "buffering",
+            "error",
+            "connecting",
+            "skipping to previous",
+            "skipping to next",
+            "skipping to queue item",
+        ];
+        if let Some(name) = code.and_then(|code| code.parse::<usize>().ok()).and_then(|code| names.get(code)) {
+            entry["state"] = json!(name);
+        }
+        if let Some(position) = value("position").and_then(|ms| ms.parse::<f64>().ok()) {
+            entry["position"] = number(position / 1000.0);
+        }
+        if let Some(rate) = value("speed").and_then(|speed| speed.parse::<f64>().ok()) {
+            entry["rate"] = number(rate);
+        }
+    }
+    if let Some(description) = field(&found, "metadata: ")
+        .and_then(|metadata| metadata.split_once("description=").map(|(_, text)| text.to_string()))
+    {
+        entry["description"] = json!(description);
+    }
+    Some(entry)
 }
 
 /// How the app runs for `--for`, from the platform's own clocks. A measurement: it exits 0 whatever it finds.
@@ -1557,7 +1639,48 @@ pub fn net_line(request: &Value) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::shell_quoted;
+    use super::{media_session, shell_quoted};
+    use serde_json::json;
+
+    #[test]
+    fn the_media_session_is_the_apps_first_active_one_as_the_system_lists_it() {
+        let dump = "Global priority session is com.android.server.telecom/HeadsetMediaButton/1 (userId=0)
+  HeadsetMediaButton com.android.server.telecom/HeadsetMediaButton/1 (userId=0)
+    package=com.android.server.telecom
+    active=false
+    state=null
+    metadata: null
+  Sessions Stack - have 3 sessions:
+    old dev.agentddp.sample/old/5 (userId=0)
+      package=dev.agentddp.sample
+      active=false
+      state=PlaybackState {state=PAUSED(2), position=4000, buffered position=0, speed=0.0, updated=100, actions=0}
+      metadata: size=1, description=Old, null, null
+    sample dev.agentddp.sample/sample/6 (userId=0)
+      package=dev.agentddp.sample
+      active=true
+      state=PlaybackState {state=PLAYING(3), position=12500, buffered position=0, speed=1.0, updated=115678, actions=0, custom actions=[], active item id=-1, error=null}
+      audioAttrs=AudioAttributes: usage=USAGE_MEDIA content=CONTENT_TYPE_UNKNOWN flags=0x800 tags= bundle=null
+      metadata: size=3, description=Song, with a comma, Artist, null
+    other com.example.other/other/7 (userId=0)
+      package=com.example.other
+      active=true
+      state=PlaybackState {state=3, position=0, buffered position=0, speed=1.0, updated=1, actions=0}
+      metadata: null
+";
+        assert_eq!(
+            media_session(dump, "dev.agentddp.sample"),
+            Some(json!({"source": "media session", "state": "playing", "position": 12.5, "rate": 1,
+                        "description": "Song, with a comma, Artist, null"}))
+        );
+        // Before Android 14 the state is the bare number; no metadata, no description.
+        assert_eq!(
+            media_session(dump, "com.example.other"),
+            Some(json!({"source": "media session", "state": "playing", "position": 0, "rate": 1}))
+        );
+        assert_eq!(media_session(dump, "com.android.server.telecom"), None);
+        assert_eq!(media_session(dump, "dev.agentddp.missing"), None);
+    }
 
     #[test]
     fn a_value_reaches_the_device_shell_as_one_argument() {

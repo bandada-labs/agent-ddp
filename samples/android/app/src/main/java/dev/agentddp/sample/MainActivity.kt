@@ -101,11 +101,34 @@ class DrawActivity : ComponentActivity() {
     }
 }
 
-/** A video view with nothing to play: `ddp media` finds it, paused at 0. */
+/**
+ * A video view playing a 30 s clip, and a platform media session telling the system what plays (the lock screen's
+ * now playing): `ddp media` finds both.
+ */
 class MediaActivity : ComponentActivity() {
+    private lateinit var session: android.media.session.MediaSession
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(android.widget.VideoView(this))
+        val video = android.widget.VideoView(this)
+        video.setVideoURI(android.net.Uri.parse("android.resource://$packageName/${R.raw.clip}"))
+        video.setOnPreparedListener { it.isLooping = true }
+        setContentView(video)
+        video.start()
+        session = android.media.session.MediaSession(this, "sample").apply {
+            setMetadata(android.media.MediaMetadata.Builder()
+                .putString(android.media.MediaMetadata.METADATA_KEY_TITLE, "Sample clip")
+                .putString(android.media.MediaMetadata.METADATA_KEY_ARTIST, "agent-ddp")
+                .putLong(android.media.MediaMetadata.METADATA_KEY_DURATION, 30_000).build())
+            setPlaybackState(android.media.session.PlaybackState.Builder()
+                .setState(android.media.session.PlaybackState.STATE_PLAYING, 0, 1f).build())
+            isActive = true
+        }
+    }
+
+    override fun onDestroy() {
+        session.release()
+        super.onDestroy()
     }
 }
 

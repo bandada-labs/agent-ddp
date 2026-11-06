@@ -52,6 +52,8 @@ enum Hit {
         case gesture(NSObject, String)
         // A List row: UIKit's cell selection runs the row's action.
         case cell(UIView)
+        // A UIKit tap recognizer on a view around a SwiftUI host that takes nothing itself (AVKit's player).
+        case recognizer(UIView)
 
     }
 
@@ -108,6 +110,13 @@ enum Hit {
         case let .cell(cell):
             guard let own = ownView(of: object) else { return false }
             return !own.isDescendant(of: cell)
+        case let .recognizer(view):
+            // The recognizer takes the touch for what is inside its view and shown, as the cell does for the row; a
+            // hidden control in there (AVKit's volume while its controls are hidden) gets nothing.
+            guard let own = (object as? UIView) ?? ownView(of: object) else { return false }
+            guard own.isDescendant(of: view) else { return true }
+            return sequence(first: own, next: \.superview).prefix { $0 !== view }
+                .contains { !$0.isUserInteractionEnabled || $0.isHidden || $0.alpha < 0.01 }
         case let .gesture(container, _):
             // A SwiftUI gesture over a UIKit view: SwiftUI does not say how the two relate.
             guard !(object is UIView), let winner = SwiftUIResponders.winner(of: container) else { return false }
@@ -158,8 +167,26 @@ enum Hit {
         if let cell = sequence(first: view, next: \.superview).first(where: { $0 is UICollectionViewCell || $0 is UITableViewCell }) {
             return .cell(cell)
         }
-        // A UIKit view inside SwiftUI content is its own taker; the hosting view itself takes nothing.
-        return view === host ? .nothing : .view(view)
+        // A UIKit view inside SwiftUI content is its own taker. The hosting view itself takes nothing, unless UIKit's
+        // tap recognizers on the views around it do: AVKit's player hosts an empty SwiftUI view over its video, and its
+        // tap that shows the controls sits on a UIKit view above that host.
+        guard view === host else { return .view(view) }
+        return uikitTapper(around: host).map { .recognizer($0) } ?? .nothing
+    }
+
+    /// The first view above a hosting view, before the next SwiftUI hosting view or the window, with a recognizer
+    /// UIKit gives a tap to. Pans, pinches and hovers do not count: a tap does not end in them. UIKit's own
+    /// `UICoreHostingView` (AVKit's stacks) is passed: it is not SwiftUI content.
+    private static func uikitTapper(around host: UIView) -> UIView? {
+        let above = sequence(first: host.superview, next: { $0?.superview }).prefix { view in
+            guard let view else { return false }
+            return !(view is UIWindow) && !NSStringFromClass(type(of: view)).contains("_UIHostingView")
+        }
+        return above.compactMap { $0 }.first { view in
+            (view.gestureRecognizers ?? []).contains { recognizer in
+                recognizer.isEnabled && (recognizer is UITapGestureRecognizer || recognizer is UILongPressGestureRecognizer)
+            }
+        }
     }
 
     private static func isHostingView(_ view: UIView) -> Bool {
@@ -228,7 +255,7 @@ enum Hit {
         // Unknown never gets here: a center the engine cannot decide counts as reaching.
         case .nothing, .unknown: return ("untouchable", nil)
         case let .gesture(_, name): return ("covered", name)
-        case let .view(view), let .cell(view): return ("covered", described(view))
+        case let .view(view), let .cell(view), let .recognizer(view): return ("covered", described(view))
         }
     }
 
