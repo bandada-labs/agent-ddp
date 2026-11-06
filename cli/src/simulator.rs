@@ -38,6 +38,14 @@ const ATTRIBUTES: [u64; 8] = [21, 45, 66, 33, 25, 53, 27, 8];
 /// Roles that hold other elements: one with no children in the flat tree is asked again in the full one.
 const CONTAINERS: [&str; 5] = ["Group", "TabGroup", "ScrollArea", "Grid", "Sheet"];
 const MAX_ELEMENTS: usize = 3000;
+/// Turning app accessibility back on in a simulator: the preference, then the two notifications a running app
+/// listens to (both are needed; measured on the iOS 27.0 simulator).
+const APP_ACCESSIBILITY_ON: [(&str, &[&str]); 3] = [
+    ("defaults", &["write", "com.apple.Accessibility", "ApplicationAccessibilityEnabled", "-bool", "true"]),
+    ("notifyutil", &["-p", "com.apple.accessibility.cache.app.ax"]),
+    ("notifyutil", &["-p", "com.apple.accessibility.cache.ax"]),
+];
+const APP_ACCESSIBILITY_WAIT: Duration = Duration::from_secs(2);
 const MAX_DEPTH: usize = 50;
 
 type Id = *mut c_void;
@@ -256,6 +264,7 @@ fn xpc_dictionary() -> Xpc {
 
 pub struct Simulator {
     pool: *mut c_void,
+    udid: String,
     device: Id,
     /// The screen in pixels and its scale: dtuhidd takes points as fractions of the screen.
     pixels: (f64, f64),
@@ -287,6 +296,7 @@ impl Simulator {
         let pool = unsafe { objc_autoreleasePoolPush() };
         let mut simulator = Simulator {
             pool,
+            udid: udid.to_string(),
             device: std::ptr::null_mut(),
             pixels: (0.0, 0.0),
             scale: 0.0,
@@ -601,6 +611,60 @@ impl Simulator {
     /// reading order, frames in points. Any element the service does not answer for fails the whole read: a tree
     /// with holes would read as a screen without those elements.
     pub fn elements(&mut self) -> Result<Vec<Value>> {
+        if !self.app_accessibility_off() {
+            return self.walk();
+        }
+        // An XCTest UI test run turns app accessibility off when it ends: apps launched after it have no tree, an
+        // empty screen to ddp. Turned back on, a running app loads it within a moment.
+        let before = self.walk()?.len();
+        for (command, arguments) in APP_ACCESSIBILITY_ON {
+            let mut all = vec!["simctl", "spawn", self.udid.as_str(), command];
+            all.extend_from_slice(arguments);
+            let done = capture("xcrun", &all);
+            if done.code != 0 {
+                fail!(
+                    format!(
+                        "app accessibility is off on {} and turning it on failed: {}",
+                        self.udid,
+                        done.stderr.trim()
+                    ),
+                    "hook_failed",
+                    format!("xcrun simctl shutdown {0} && xcrun simctl boot {0}", self.udid)
+                );
+            }
+        }
+        crate::warn!(
+            "app accessibility was off on {} (an XCTest UI test run turns it off when it ends); ddp turned it on",
+            self.udid
+        );
+        let deadline = std::time::Instant::now() + APP_ACCESSIBILITY_WAIT;
+        loop {
+            let elements = self.walk()?;
+            if elements.len() != before || std::time::Instant::now() >= deadline {
+                return Ok(elements);
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+
+    /// Whether the simulator's `ApplicationAccessibilityEnabled` preference is set to false, read from its file
+    /// (well under a millisecond). Unset, as on a new simulator, apps load accessibility when asked.
+    fn app_accessibility_off(&self) -> bool {
+        unsafe {
+            if send1::<Sel, i8>(self.device, "respondsToSelector:", selector("dataPath")) == 0 {
+                return false;
+            }
+            let data: Id = send0(self.device, "dataPath");
+            let Some(data) = text_of(data) else { return false };
+            let path = ns_string(&format!("{data}/Library/Preferences/com.apple.Accessibility.plist"));
+            let preferences: Id = send1(objc_getClass(c"NSDictionary".as_ptr()), "dictionaryWithContentsOfFile:", path);
+            !preferences.is_null()
+                && number_of(send1(preferences, "objectForKey:", ns_string("ApplicationAccessibilityEnabled")))
+                    == Some(0)
+        }
+    }
+
+    fn walk(&mut self) -> Result<Vec<Value>> {
         let root = self.front_app()?;
         let token = ns_string(&format!("ddp-{}", std::process::id()));
         let attributes: Vec<Id> = ATTRIBUTES.iter().map(|attribute| ns_number(*attribute)).collect();
