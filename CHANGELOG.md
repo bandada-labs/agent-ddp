@@ -28,6 +28,9 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 - iOS without the library: a tap on an element below the fold (a long consent sheet at the largest text size) touched outside the screen and said "nothing changed". VoiceOver lists a scroll view's whole content; ddp now marks elements with no part on screen `shown: false` as on Android, leaves them out of `tree`, and refuses a touch on one with its frame. An element partly on screen has the frame of that part.
 - Without the library, an element whose id showed up between two looks (SwiftUI's tab buttons, a moment after launch) was reported gone and new. The same label, type and place is now one element.
 - iOS `set locale es-ES` wrote only `AppleLanguages`, so dates and numbers kept the old region's format (`AppleLocale` stayed `en_CO`). It now writes both (`es_ES`).
+- iOS without the library: a tap on an element under a bar (a chat's composer over the end of the list) touched the bar and said "nothing changed", or opened the keyboard. The touch now goes to the point UIKit's accessibility says reaches the element (its visible point), and is refused with `is covered` when none does; `tap --force` touches the middle anyway.
+- iOS without the library: the keyboard's prediction bar came as plain buttons. Every element in the keyboard's window is now `window: "keyboard"` in `tree --json`.
+- iOS without the library: in a full screen cover over a sheet, VoiceOver's flat tree has no navigation bar, so Back and the title had no `parent`. `tree` now lists named containers the flat tree leaves out from the full tree, as their elements' parent (also the keyboard's `Typing Predictions`).
 - `--help` said `--device` was Android only on `tap`, `type`, `long-press` and others; it works on iOS simulators too.
 
 ### Added (beta.2)

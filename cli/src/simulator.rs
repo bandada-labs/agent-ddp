@@ -5,7 +5,7 @@
 use crate::fail;
 use crate::state::{capture, failure, Result};
 use serde_json::{json, Value};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::sync::mpsc;
 use std::time::Duration;
@@ -27,14 +27,21 @@ pub const END: u64 = 2;
 /// The translator's flat tree, what VoiceOver reads: one element per thing a person can act on or read.
 /// The flat tree, one element per VoiceOver stop.
 const FLAT_TREE: u64 = 0;
-/// Every element with its children. Only asked for a container the flat tree leaves empty: on iOS 26 and later
-/// SwiftUI's navigation bar and tab bar are such containers, their buttons only listed here.
+/// Every element with its children. Asked for a container the flat tree leaves empty (on iOS 26 and later SwiftUI's
+/// navigation bar and tab bar are such containers, their buttons only listed here), and by `tree` for containers the
+/// flat tree leaves out.
 const FULL_TREE: u64 = 2;
 const FRONTMOST_APPLICATION: u64 = 4;
 const READ_ATTRIBUTES: u64 = 5;
-/// frame, role, isRemoteElement, label, identifier, value, isEnabled, children. Never isVisible (112): it makes the
-/// app hit-test every element, a whole tree goes from milliseconds to seconds.
-const ATTRIBUTES: [u64; 9] = [21, 45, 66, 33, 25, 53, 27, 77, 8];
+/// frame, role, isRemoteElement, label, identifier, value, isEnabled, traits, window, children. Never the visible
+/// point for a whole tree: the app hit-tests each element for it, a long list goes from milliseconds to seconds.
+const ATTRIBUTES: [u64; 10] = [21, 45, 66, 33, 25, 53, 27, 77, WINDOW, 8];
+const WINDOW: u64 = 12;
+/// The first point of the element that the app's own hit test gives back to it, as UIKit answers VoiceOver; -1,-1
+/// when none does (a bar or a view over all of it, or off screen).
+const VISIBLE_POINT: u64 = 112;
+/// Nodes the full tree may cost one `tree`: it holds every screen below the top one too.
+const FULL_TREE_NODES: usize = 1500;
 /// UIAccessibilityTraits bits (attribute 77) by UIKit's names; the private bits above them are left out.
 const TRAITS: [(u64, &str); 17] = [
     (1, "button"),
@@ -178,6 +185,11 @@ fn ns_number(value: u64) -> Id {
     unsafe { send1(objc_getClass(c"NSNumber".as_ptr()), "numberWithUnsignedLongLong:", value) }
 }
 
+fn ns_numbers(values: &[u64]) -> Id {
+    let numbers: Vec<Id> = values.iter().map(|value| ns_number(*value)).collect();
+    unsafe { send2(objc_getClass(c"NSArray".as_ptr()), "arrayWithObjects:count:", numbers.as_ptr(), numbers.len()) }
+}
+
 fn ns_dictionary(key: &str, value: Id) -> Id {
     let (keys, values) = ([ns_string(key)], [value]);
     unsafe {
@@ -210,19 +222,28 @@ fn text_of(object: Id) -> Option<String> {
     (!utf8.is_null()).then(|| unsafe { CStr::from_ptr(utf8) }.to_string_lossy().into_owned()).filter(|t| !t.is_empty())
 }
 
-/// An NSValue holding a rect, read without a struct return (x86_64 returns a CGRect in memory).
 fn rect_of(object: Id) -> Option<[f64; 4]> {
+    geometry_of(object, "Rect")
+}
+
+fn point_of(object: Id) -> Option<[f64; 2]> {
+    geometry_of(object, "Point")
+}
+
+/// The doubles of an NSValue holding a CGRect or a CGPoint (`shape`), read without a struct return (x86_64 returns
+/// a CGRect in memory).
+fn geometry_of<const N: usize>(object: Id, shape: &str) -> Option<[f64; N]> {
     if !is_a(object, c"NSValue") || is_a(object, c"NSNumber") {
         return None;
     }
     let kind: *const c_char = unsafe { send0(object, "objCType") };
     let kind = unsafe { CStr::from_ptr(kind) }.to_string_lossy();
-    if !(kind.starts_with("{CGRect") || kind.starts_with("{NSRect") || kind.starts_with("{_NSRect")) {
+    if !["{CG", "{NS", "{_NS"].iter().any(|prefix| kind.starts_with(&format!("{prefix}{shape}"))) {
         return None;
     }
-    let mut rect = [0f64; 4];
-    unsafe { send2::<*mut c_void, usize, ()>(object, "getValue:size:", rect.as_mut_ptr().cast(), 32) };
-    Some(rect)
+    let mut values = [0f64; N];
+    unsafe { send2::<*mut c_void, usize, ()>(object, "getValue:size:", values.as_mut_ptr().cast(), N * 8) };
+    Some(values)
 }
 
 /// The length of an NSArray; 0 for anything else.
@@ -291,6 +312,11 @@ pub struct Simulator {
     scale: f64,
     hid: Option<Connection>,
     accessibility: Option<Connection>,
+    /// The last walk's elements as the accessibility service names them, in the same order: a touch asks about one.
+    /// They live as long as `pool`.
+    handles: Vec<Id>,
+    /// `tree` asks for the containers VoiceOver's flat tree leaves out.
+    with_containers: bool,
 }
 
 impl Drop for Simulator {
@@ -322,6 +348,8 @@ impl Simulator {
             scale: 0.0,
             hid: None,
             accessibility: None,
+            handles: Vec::new(),
+            with_containers: false,
         };
         let context = class(
             HID_HOOK,
@@ -686,26 +714,21 @@ impl Simulator {
 
     fn walk(&mut self) -> Result<Vec<Value>> {
         let root = self.front_app()?;
-        let token = ns_string(&format!("ddp-{}", std::process::id()));
-        let attributes: Vec<Id> = ATTRIBUTES.iter().map(|attribute| ns_number(*attribute)).collect();
-        let attributes: Id = unsafe {
-            send2(objc_getClass(c"NSArray".as_ptr()), "arrayWithObjects:count:", attributes.as_ptr(), attributes.len())
-        };
-        let parameters = ns_dictionary("attributes", attributes);
-        let children_attribute = [ns_number(8)];
-        let children_only = ns_dictionary("attributes", unsafe {
-            send2(objc_getClass(c"NSArray".as_ptr()), "arrayWithObjects:count:", children_attribute.as_ptr(), 1usize)
-        });
         let mut walk = Walk {
-            token,
-            parameters,
-            children_only,
+            token: ns_string(&format!("ddp-{}", std::process::id())),
+            parameters: ns_dictionary("attributes", ns_numbers(&ATTRIBUTES)),
+            children_only: ns_dictionary("attributes", ns_numbers(&[8])),
             elements: Vec::new(),
+            handles: Vec::new(),
+            listed: HashMap::new(),
             read: 0,
             seen: HashSet::new(),
             screen: None,
         };
         self.read(&mut walk, root, 0, None)?;
+        if self.with_containers {
+            self.adopt(&mut walk, root)?;
+        }
         // VoiceOver lists a scroll view's whole content. As Android gives it: an element partly on screen has the
         // frame of that part, so a tap lands on it; one with no part on screen is `shown: false`, left out of `tree`.
         if let Some([left, top, width, height]) = walk.screen.filter(|[_, _, w, h]| *w > 0.0 && *h > 0.0) {
@@ -720,7 +743,111 @@ impl Simulator {
                 }
             }
         }
+        mark_keyboard(&mut walk.elements);
+        self.handles = walk.handles;
         Ok(walk.elements)
+    }
+
+    /// VoiceOver's flat tree can leave out the container its elements sit in: SwiftUI's navigation bar in a full
+    /// screen cover over a sheet comes as a loose Back button and title. The full tree has it. Each named container
+    /// the flat tree left out, above listed elements with no parent, is listed right before them as their parent.
+    /// The full tree also holds every screen below the top one: past FULL_TREE_NODES the rest stays as it is.
+    fn adopt(&mut self, walk: &mut Walk, root: Id) -> Result<()> {
+        let mut containers = Vec::new();
+        let mut nodes = 0;
+        self.visit(walk, root, 0, None, &mut containers, &mut nodes)?;
+        containers.retain(|container: &Container| !container.elements.is_empty());
+        for container in &mut containers {
+            container.elements.sort_unstable();
+        }
+        if containers.is_empty() {
+            return Ok(());
+        }
+        let mut places: Vec<Option<usize>> = vec![None; walk.elements.len()];
+        let mut container_places = vec![0; containers.len()];
+        let (mut elements, mut handles) = (Vec::new(), Vec::new());
+        let old = std::mem::take(&mut walk.elements).into_iter().zip(std::mem::take(&mut walk.handles));
+        for (index, (element, handle)) in old.enumerate() {
+            for (at, container) in containers.iter().enumerate() {
+                if container.elements[0] == index {
+                    container_places[at] = elements.len();
+                    elements.push(container.entry.clone());
+                    handles.push(container.handle);
+                }
+            }
+            places[index] = Some(elements.len());
+            elements.push(element);
+            handles.push(handle);
+        }
+        for element in &mut elements {
+            if let Some(parent) = element["parent"].as_u64().and_then(|at| places[at as usize]) {
+                element["parent"] = json!(parent);
+            }
+        }
+        for (container, place) in containers.iter().zip(container_places) {
+            for index in &container.elements {
+                elements[places[*index].unwrap_or_default()]["parent"] = json!(place);
+            }
+        }
+        (walk.elements, walk.handles) = (elements, handles);
+        Ok(())
+    }
+
+    fn visit(
+        &mut self,
+        walk: &Walk,
+        element: Id,
+        depth: usize,
+        holder: Option<usize>,
+        containers: &mut Vec<Container>,
+        nodes: &mut usize,
+    ) -> Result<()> {
+        if *nodes >= FULL_TREE_NODES || depth > MAX_DEPTH {
+            return Ok(());
+        }
+        let identity: (i32, u64) = unsafe { (send0(element, "pid"), send0(element, "objectID")) };
+        if let Some(&index) = walk.listed.get(&identity) {
+            if let Some(holder) = holder.filter(|_| walk.elements[index].get("parent").is_none()) {
+                containers[holder].elements.push(index);
+            }
+            return Ok(());
+        }
+        *nodes += 1;
+        unsafe { send1::<Id, ()>(element, "setBridgeDelegateToken:", walk.token) };
+        let answer = self.accessibility_request(READ_ATTRIBUTES, element, walk.parameters, FULL_TREE)?;
+        if !is_a(answer, c"NSDictionary") {
+            return Ok(());
+        }
+        let (role, entry) = entry_of(answer);
+        let holder = if role != "Application" && ["label", "id", "value"].iter().any(|field| entry.get(field).is_some())
+        {
+            containers.push(Container { entry, handle: element, elements: Vec::new() });
+            Some(containers.len() - 1)
+        } else {
+            holder
+        };
+        let children: Id = unsafe { send1(answer, "objectForKey:", ns_number(8)) };
+        for index in 0..count_of(children) {
+            let child: Id = unsafe { send1(children, "objectAtIndex:", index) };
+            if is_a(child, c"AXPTranslationObject") {
+                self.visit(walk, child, depth + 1, holder, containers, nodes)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Where a touch on the element at `index` of the last walk reaches it, as the app answers VoiceOver: its visible
+    /// point. `Some(None)`: no point of it takes a touch. `None`: nothing to go by (no such element, or an answer
+    /// without a point).
+    pub fn visible_point(&mut self, index: usize) -> Result<Option<Option<(f64, f64)>>> {
+        let Some(&element) = self.handles.get(index) else { return Ok(None) };
+        let parameters = ns_dictionary("attributes", ns_numbers(&[VISIBLE_POINT]));
+        let answer = self.accessibility_request(READ_ATTRIBUTES, element, parameters, FLAT_TREE)?;
+        if !is_a(answer, c"NSDictionary") {
+            return Ok(None);
+        }
+        let point = point_of(unsafe { send1(answer, "objectForKey:", ns_number(VISIBLE_POINT)) });
+        Ok(point.map(|[x, y]| (x >= 0.0 && y >= 0.0).then_some((x, y))))
     }
 
     /// The app in front, as the accessibility service names it. Right after a launch it can still be resolving.
@@ -742,6 +869,11 @@ impl Simulator {
             }
         }
         fail!("no app in front on the simulator", "no_app", "ddp up, or open the app first");
+    }
+
+    /// Walks from now on list the containers VoiceOver's flat tree leaves out (see `adopt`).
+    pub fn list_containers(&mut self) {
+        self.with_containers = true;
     }
 
     /// Whether dtuhidd answers, for `ddp doctor`.
@@ -775,7 +907,9 @@ impl Simulator {
                 entry["parent"] = json!(at);
             }
             above_children = Some(walk.elements.len());
+            walk.listed.insert(unsafe { (send0(element, "pid"), send0(element, "objectID")) }, walk.elements.len());
             walk.elements.push(entry);
+            walk.handles.push(element);
         }
         let children_of = |answer: Id| -> Id {
             if is_a(answer, c"NSDictionary") {
@@ -818,6 +952,9 @@ fn entry_of(answer: Id) -> (&'static str, Value) {
     if number_of(value(27)) == Some(0) {
         entry["enabled"] = json!(false);
     }
+    if let Some(window) = number_of(value(WINDOW)) {
+        entry["window"] = json!(window);
+    }
     let bits = number_of(value(77)).unwrap_or(0) as u64;
     let traits: Vec<&str> = TRAITS.iter().filter(|(bit, _)| bits & bit != 0).map(|(_, name)| *name).collect();
     if !traits.is_empty() {
@@ -826,11 +963,35 @@ fn entry_of(answer: Id) -> (&'static str, Value) {
     (role, entry)
 }
 
+/// The keyboard's keys say what they are (`keyboardKey`); its prediction bar and its other buttons only share the
+/// keys' window. An element in a window that holds a key is `window: "keyboard"`; the window's number goes.
+fn mark_keyboard(elements: &mut [Value]) {
+    let is_key =
+        |element: &Value| element["traits"].as_array().is_some_and(|traits| traits.contains(&json!("keyboardKey")));
+    let keyboard: HashSet<i64> = elements.iter().filter(|e| is_key(e)).filter_map(|e| e["window"].as_i64()).collect();
+    for element in elements {
+        let window = element.as_object_mut().and_then(|fields| fields.remove("window")).and_then(|w| w.as_i64());
+        if window.is_some_and(|window| keyboard.contains(&window)) {
+            element["window"] = json!("keyboard");
+        }
+    }
+}
+
+/// A container the full tree has and the flat tree left out, with the listed elements it holds.
+struct Container {
+    entry: Value,
+    handle: Id,
+    elements: Vec<usize>,
+}
+
 struct Walk {
     token: Id,
     parameters: Id,
     children_only: Id,
     elements: Vec<Value>,
+    /// What the service calls each listed element, and where it is in `elements` by pid and object id.
+    handles: Vec<Id>,
+    listed: HashMap<(i32, u64), usize>,
     read: usize,
     /// Elements read so far, by pid and object id: an element listed twice (among its own descendants, or by the
     /// full tree too) is read once.
@@ -908,6 +1069,20 @@ fn key_usage(character: char) -> Option<(u64, bool)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_keyboard_is_the_window_its_keys_are_in() {
+        let mut elements = vec![
+            json!({"label": "Send", "traits": ["button"], "window": 25458641}),
+            json!({"label": "q", "traits": ["playsSound", "keyboardKey"], "window": 3463710206u64}),
+            json!({"label": "“am”", "traits": ["button"], "window": 3463710206u64}),
+            json!({"label": "Close", "traits": ["button"]}),
+        ];
+        mark_keyboard(&mut elements);
+        let windows: Vec<&Value> = elements.iter().map(|e| &e["window"]).collect();
+        assert_eq!(windows, [&Value::Null, &json!("keyboard"), &json!("keyboard"), &Value::Null]);
+        assert!(elements[0].get("window").is_none());
+    }
 
     #[test]
     fn keys_on_a_us_keyboard() {

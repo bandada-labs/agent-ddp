@@ -171,6 +171,33 @@ impl Screen {
         Ok(frame["elements"].as_array().cloned().unwrap_or_default())
     }
 
+    /// Where a touch on a named element lands. On iOS the app answers it (the visible point VoiceOver touches): a bar
+    /// or a view over the element's middle moves the touch to a part that takes it, and over all of it refuses the
+    /// touch, since it would land on the cover and "nothing changed" would read as the app's answer. A container's
+    /// point is a child's, so a container keeps its middle; so does any element the app gives no point for.
+    fn reach(&mut self, elements: &[Value], mut place: Place, device: &str) -> Result<Place> {
+        let (Screen::Ios(simulator), Some(seen)) = (&mut *self, &place.seen) else { return Ok(place) };
+        let key = element_key(seen);
+        if crate::hit::point(&place.given).is_some() || elements.iter().any(|e| e["parent"].as_str() == Some(&key)) {
+            return Ok(place);
+        }
+        let Some(index) = elements.iter().position(|e| e == seen) else { return Ok(place) };
+        match simulator.visible_point(index)? {
+            Some(Some(at)) if inside(at, seen) => place.at = at,
+            Some(None) => fail!(
+                format!(
+                    "'{}' is covered at {}: the app's hit test reaches no point of it (a bar or a view over it); swipe it into view first",
+                    place.given,
+                    bracket(&frame_of(seen))
+                ),
+                "covered",
+                format!("ddp swipe <from> <to> --device {device}, then ddp tree --device {device}; tap --force touches it anyway")
+            ),
+            _ => {}
+        }
+        Ok(place)
+    }
+
     fn android(&mut self, method: &str, params: Value) -> Result<()> {
         if let Screen::Android(control) = self {
             control.call(method, params)?;
@@ -263,6 +290,11 @@ struct Place {
     given: String,
     at: (f64, f64),
     seen: Option<Value>,
+}
+
+fn inside((px, py): (f64, f64), element: &Value) -> bool {
+    let [x, y, w, h] = crate::model::rect(&element["frame"]);
+    px >= x && px <= x + w && py >= y && py <= y + h
 }
 
 fn center(element: &Value) -> (f64, f64) {
@@ -563,14 +595,14 @@ fn perform(
     args: &Args,
     verb: &str,
     given: Value,
-    build: impl Fn(&[Value], &str) -> Result<(Action, Vec<Place>)>,
+    build: impl Fn(&[Value], &str, &mut Screen) -> Result<(Action, Vec<Place>)>,
 ) -> Result<i32> {
     let (platform, device, _) = crate::device::target(args)?;
     let mut screen = Screen::open(&platform, &device)?;
     let looking = Instant::now();
     let mut before = screen.look()?;
     let (action, places) = loop {
-        match build(&before, &device) {
+        match build(&before, &device, &mut screen) {
             Err(missing) if missing.code == "unknown_element" && looking.elapsed() < ELEMENT_WAIT => {
                 pause(LOOK_EVERY);
                 before = screen.look()?;
@@ -644,8 +676,9 @@ pub fn gesture(args: &Args) -> Result<i32> {
         "tap" | "double-tap" => json!({}),
         _ => json!({"ms_given": args.duration.as_deref().map(crate::state::parse_ms).transpose()?}),
     };
-    perform(args, &verb, given, |elements, device| {
+    perform(args, &verb, given, |elements, device, screen| {
         let from = place(elements, &from_text, args.id_from_ref, device)?;
+        let from = if args.force { from } else { screen.reach(elements, from, device)? };
         let to = to_text.as_deref().map(|to| place(elements, to, to_from_ref, device)).transpose()?;
         let action = match (&gesture[..], &to) {
             ("tap", _) => Action::Tap(from.at),
@@ -667,8 +700,12 @@ pub fn type_text(args: &Args) -> Result<i32> {
         args,
         &format!("typed {} characters{into}", text.chars().count()),
         json!({"text": text}),
-        |elements, device| {
-            let field = args.id.as_deref().map(|id| place(elements, id, args.id_from_ref, device)).transpose()?;
+        |elements, device, screen| {
+            let field = args
+                .id
+                .as_deref()
+                .map(|id| screen.reach(elements, place(elements, id, args.id_from_ref, device)?, device))
+                .transpose()?;
             Ok((Action::Type(text.clone()), field.into_iter().collect()))
         },
     )
@@ -676,7 +713,7 @@ pub fn type_text(args: &Args) -> Result<i32> {
 
 pub fn press(args: &Args) -> Result<i32> {
     let key = args.value.clone().unwrap_or_default();
-    perform(args, &format!("pressed {key}"), json!({"key": key}), |_, _| Ok((Action::Key(key.clone()), Vec::new())))
+    perform(args, &format!("pressed {key}"), json!({"key": key}), |_, _, _| Ok((Action::Key(key.clone()), Vec::new())))
 }
 
 /// `tree` without the library: one line per element of the platform's accessibility tree,
@@ -684,7 +721,11 @@ pub fn press(args: &Args) -> Result<i32> {
 /// what Android says takes a click. The ref, label or id is what `tap` takes.
 pub fn tree(args: &Args) -> Result<i32> {
     let (platform, device, _) = crate::device::target(args)?;
-    let elements = Screen::open(&platform, &device)?.elements()?;
+    let mut screen = Screen::open(&platform, &device)?;
+    if let Screen::Ios(simulator) = &mut screen {
+        simulator.list_containers();
+    }
+    let elements = screen.elements()?;
     if args.json {
         say!("{}", py::dumps(&json!({"elements": elements, "checks": false})));
         return Ok(0);
@@ -874,6 +915,10 @@ mod mac_only {
             unreachable!()
         }
         pub fn front_app(&mut self) -> Result<()> {
+            unreachable!()
+        }
+        pub fn list_containers(&mut self) {}
+        pub fn visible_point(&mut self, _: usize) -> Result<Option<Option<(f64, f64)>>> {
             unreachable!()
         }
     }
