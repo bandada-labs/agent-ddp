@@ -871,6 +871,12 @@ impl Simulator {
         fail!("no app in front on the simulator", "no_app", "ddp up, or open the app first");
     }
 
+    /// The process id of the app in front, for `ddp doctor`.
+    pub fn front_pid(&mut self) -> Result<i32> {
+        let root = self.front_app()?;
+        Ok(unsafe { send0(root, "pid") })
+    }
+
     /// Walks from now on list the containers VoiceOver's flat tree leaves out (see `adopt`).
     pub fn list_containers(&mut self) {
         self.with_containers = true;

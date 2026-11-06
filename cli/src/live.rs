@@ -284,9 +284,11 @@ pub fn launch(args: &mut Args) -> Result<i32> {
             format!("ddp doctor {device} --app {app}")
         );
     }
-    // The old run's endpoint may still be on disk: wait until the new run's answers.
-    let (session, snapshot) = attach_within(&platform, &device, &app, Duration::from_secs(15))?;
     say!("launched {app} on {platform} {device}");
+    // The old run's endpoint may still be on disk: wait until the new run's answers.
+    let Some((session, snapshot)) = session_after_start(&platform, &device, &app, Duration::from_secs(15))? else {
+        return Ok(0);
+    };
     if !values.is_empty() {
         let names: Vec<&str> = values.iter().map(|(key, _)| key.as_str()).collect();
         // The platform's answer, not ddp's: what the app process was given. A library before app.launch says nothing.
@@ -306,7 +308,7 @@ pub fn launch(args: &mut Args) -> Result<i32> {
 
 /// The app's data as after a fresh install, with the app stopped: Android's own `pm clear`; on iOS the simulator's data
 /// container emptied. The iOS Keychain lives outside the container and stays.
-fn reset_data(platform: &str, device: &str, app: &str) -> Result<()> {
+pub fn reset_data(platform: &str, device: &str, app: &str) -> Result<()> {
     if platform != "ios" {
         let cleared = capture(&adb_path()?, &["-s", device, "shell", "pm", "clear", app]);
         if !cleared.stdout.contains("Success") {
@@ -369,18 +371,65 @@ pub fn launcher_activity(device: &str, app: &str) -> Result<String> {
 }
 
 /// One argument for a POSIX shell, in single quotes.
-fn shell_quoted(text: &str) -> String {
+pub fn shell_quoted(text: &str) -> String {
     format!("'{}'", text.replace('\'', "'\\''"))
 }
 
 /// The session for the app's control endpoint, and what is on screen, when it answers.
 /// [attach], tried again until `patience` runs out: the app may still be starting.
+/// How long an iOS app may take to write its endpoint after it starts; the library writes it at once.
+const NO_ENDPOINT_PATIENCE: Duration = Duration::from_secs(5);
+
+/// After the app was started: its own session when the library answers, else a session through the platform, where
+/// tree, actions and walks work without checks. An Android build without the library is not waited for.
+pub fn session_after_start(
+    platform: &str,
+    device: &str,
+    app: &str,
+    patience: Duration,
+) -> Result<Option<(Value, Vec<Value>)>> {
+    let has_library = platform == "ios" || android_has_library(device, app);
+    match attach_within(platform, device, app, if has_library { patience } else { Duration::ZERO }) {
+        Ok(attached) => Ok(Some(attached)),
+        Err(reason) => {
+            let session = json!({"platform": platform, "device": device, "app": app, "mode": "device"});
+            write_file(&ctx().session_file, py::dumps(&session))?;
+            say!(
+                "{app} did not answer as an app with the library ({}): tree, tap, type, swipe, press and walk now go through the platform, with no checks; if it has the library, ddp connect {device} --app {app}",
+                reason.message
+            );
+            Ok(None)
+        }
+    }
+}
+
+/// Whether the installed Android build has the library. Unknown (no adb) counts as yes: it is only waited for.
+pub fn android_has_library(device: &str, app: &str) -> bool {
+    adb_path()
+        .map(|adb| {
+            has_library_component(&capture(&adb, &["-s", device, "shell", "dumpsys", "package", app]).stdout, app)
+        })
+        .unwrap_or(true)
+}
+
+/// The library's starter in the app's own manifest, in `dumpsys package <app>`. The dump also lists other packages,
+/// so "dev.agentddp" alone matches any app on a phone that has ddp's sample or runner.
+pub fn has_library_component(package_dump: &str, app: &str) -> bool {
+    package_dump.contains(&format!("{app}/dev.agentddp.AgentDdpStarter"))
+}
+
+/// The app's session once its library answers. An iOS app that writes no endpoint within a few seconds of its start
+/// has no library: it is not waited for to the end.
 pub fn attach_within(platform: &str, device: &str, app: &str, patience: Duration) -> Result<(Value, Vec<Value>)> {
-    let deadline = Instant::now() + patience;
+    let started = Instant::now();
+    let deadline = started + patience;
     loop {
         match attach(platform, device, app) {
             Ok(attached) => return Ok(attached),
             Err(failure) if Instant::now() >= deadline => return Err(failure),
+            Err(failure) if failure.code == "no_endpoint" && started.elapsed() >= NO_ENDPOINT_PATIENCE => {
+                return Err(failure)
+            }
             Err(_) => std::thread::sleep(Duration::from_millis(250)),
         }
     }
@@ -1641,6 +1690,16 @@ pub fn net_line(request: &Value) -> String {
 mod tests {
     use super::{media_session, shell_quoted};
     use serde_json::json;
+
+    #[test]
+    fn the_library_is_the_apps_own_starter_not_another_package_named_in_the_dump() {
+        let settings =
+            "Packages:\n  Package [com.android.settings]\n    queriesPackages:\n        dev.agentddp.sample\n";
+        assert!(!super::has_library_component(settings, "com.android.settings"));
+        let sample = "  dev.agentddp.sample/dev.agentddp.AgentDdpStarter:\n    Provider{c8bbda8 dev.agentddp.sample/dev.agentddp.AgentDdpStarter}\n";
+        assert!(super::has_library_component(sample, "dev.agentddp.sample"));
+        assert!(!super::has_library_component(sample, "dev.agentddp"));
+    }
 
     #[test]
     fn the_media_session_is_the_apps_first_active_one_as_the_system_lists_it() {

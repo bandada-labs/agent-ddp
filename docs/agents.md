@@ -22,7 +22,9 @@ ddp animations                                     iOS: Core Animation animation
 ddp source <el> [--full]                           which line of the app's code made it: the calls above it, its modifiers
 ddp storage [files [<folder>]] | read <file> | rm <file> | query <db> "<sql>" | keys   the app's own data
 ddp launch <device> --app <id> --reset             clear the app's data first, like a fresh install
-ddp doctor [<device> --app <id>]                  what is wrong between the device and a frame, with the fix, and every engine hook's state
+ddp stop | clear [--device <d> --app <id>]          stop the app; clear its data like a fresh install (it stops it too)
+ddp test [--class C[#m]] [--env K=V] [--runner R]   Android: the app's instrumentation tests, then passed, failed, skipped
+ddp doctor [<device> --app <id>]                  what is wrong between the device and a frame, with the fix, and every engine hook's state; starts the app or brings it to the front first
 ddp tree [-i] [-c] [--within <el>] [-d N]         what is on screen now, per element, with @refs
 ddp find text <part of a label> | id <id>          elements by name, with @refs
 ddp watch <element> [--until 'border>3'] [--for 5s] [--then "<cmd>"]
@@ -52,6 +54,7 @@ ddp run [<command> ['<params JSON>']]              run a command the app added i
 ddp wait id <id> | text <label> | --settled 300ms [--ignore <el>] [--timeout 10s]
 ddp logs [--grep <text>]                           app log lines during the last take, at their time in it
 ddp logs --follow [--for 10s] [--grep <text>] [--source]   the last 100 lines, then each new one; --source: subsystem and library (iOS)
+ddp logs --since-launch [--grep <text>] [--limit 50]   the app process's lines since it started, newest last, at their time of day
 ddp set appearance dark | text-size large | reduce-motion on | locale es-ES | location 4.71,-74.07 | orientation landscape
 ddp biometric enroll | match | fail                Face ID on the simulator, a fingerprint on the emulator
 ddp push <payload.json>                            iOS: a push as APNs would deliver it
@@ -302,7 +305,11 @@ While a walk is open, every `tap`, `double-tap`, `long-press`, `swipe`, `drag`, 
 
 ### launch
 
-`launch` stops the app if it runs, starts it again and connects, so the next command runs live on the new run. `--env KEY=VALUE` (repeatable) puts the app in a state at start, such as a backend URL or a demo mode. iOS gets each value as an environment variable (`ProcessInfo.processInfo.environment["KEY"]`, sent as `SIMCTL_CHILD_KEY`). Android has no per-launch environment for an app, so each value is a string extra of the launch intent (`intent.getStringExtra("KEY")`). On Android it starts the launcher activity the package manager resolves (`am start -S -W -n`), not `monkey`, which does not start every app. `launch` then asks the app which names it received (`app.launch`, the platform's answer) and prints `app received KEY`, or a warning for a name that did not arrive. Read them in the app with the platform's own API. To run app commands after it, chain them: `ddp launch $UDID --app ID --env MODE=demo && ddp run like`. `--arg` (repeatable, iOS) passes a launch argument as an Xcode scheme does, for a `UserDefaults` value such as `--arg -_UIConstraintBasedLayoutLogUnsatisfiable --arg YES`; an Android activity has no launch arguments, so ddp refuses and points to `--env`.
+`launch` stops the app if it runs, starts it again and connects, so the next command runs live on the new run. An app without the library gets a session through the platform instead (tree, actions and walks, no checks), as after `ddp up`; an Android build without the library's starter is not waited for, and an iOS app that writes no endpoint within 5 s is taken as one without it.
+
+`stop` stops the app (`am force-stop`, `simctl terminate`) and keeps the session; `launch` starts it again. `clear` does what `launch --reset` does before a start: Android's `pm clear`, or the iOS data container emptied (the Keychain stays). `logs --since-launch` reads the app process's own lines: Android's `logcat --pid` as far as the log buffer reaches, iOS's `log show` for that process id since it started. `doctor` starts the app when it is not running, or brings it to the front when another app is (never a restart), says so in a `started` line, and the saved session follows the new run.
+
+`test` runs the app's instrumentation (`am instrument -w -r`, the one whose target is the app; `--runner` when there are several) and prints a `FAIL Class#method: <first line of the stack>` per failure, `STOPPED` when the process died in a test, then `<runner> in 3.3s: 2 passed, 1 failed, 1 skipped`, and exits 1 on any failure. It stops ddp's runner first, so a UI test gets UiAutomation. `--class` takes `Class` or `Class#method`; `--env KEY=VALUE` becomes `-e KEY VALUE` for the tests. iOS tests run from Xcode's build (`xcodebuild test-without-building`). `--env KEY=VALUE` (repeatable) puts the app in a state at start, such as a backend URL or a demo mode. iOS gets each value as an environment variable (`ProcessInfo.processInfo.environment["KEY"]`, sent as `SIMCTL_CHILD_KEY`). Android has no per-launch environment for an app, so each value is a string extra of the launch intent (`intent.getStringExtra("KEY")`). On Android it starts the launcher activity the package manager resolves (`am start -S -W -n`), not `monkey`, which does not start every app. `launch` then asks the app which names it received (`app.launch`, the platform's answer) and prints `app received KEY`, or a warning for a name that did not arrive. Read them in the app with the platform's own API. To run app commands after it, chain them: `ddp launch $UDID --app ID --env MODE=demo && ddp run like`. `--arg` (repeatable, iOS) passes a launch argument as an Xcode scheme does, for a `UserDefaults` value such as `--arg -_UIConstraintBasedLayoutLogUnsatisfiable --arg YES`; an Android activity has no launch arguments, so ddp refuses and points to `--env`.
 
 ### doctor and engine hooks
 

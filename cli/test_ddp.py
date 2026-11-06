@@ -898,6 +898,7 @@ with tempfile.TemporaryDirectory() as directory:
                        (("set", "location", "200,10", "--device", sim), "location is LAT,LON"),
                        (("push", "p.json", "--device", emu, "--app", "x"), "no local way to deliver a push"),
                        (("job", "7", "--device", sim, "--app", "x"), "only from the debugger"),
+                       (("test", "--device", sim, "--app", "x"), "run from Xcode's build"),
                        (("biometric", "enroll", "--device", emu), "only through Settings")]:
         refused = ddp_in(directory, *args)
         assert refused.returncode == 1 and said in refused.stderr, (args, refused.stderr)

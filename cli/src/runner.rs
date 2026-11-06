@@ -877,6 +877,11 @@ pub fn ios_hook_steps(device: &str) -> Vec<(bool, String, String)> {
 }
 
 /// Simulators exist only on a Mac: the same calls, refused.
+/// The process id of the app in front of an iOS simulator, from its accessibility service; None when it does not say.
+pub fn ios_front_pid(device: &str) -> Option<i32> {
+    Simulator::open(device).and_then(|mut simulator| simulator.front_pid()).ok()
+}
+
 #[cfg(not(target_os = "macos"))]
 mod mac_only {
     use crate::fail;
@@ -915,6 +920,9 @@ mod mac_only {
             unreachable!()
         }
         pub fn front_app(&mut self) -> Result<()> {
+            unreachable!()
+        }
+        pub fn front_pid(&mut self) -> Result<i32> {
             unreachable!()
         }
         pub fn list_containers(&mut self) {}

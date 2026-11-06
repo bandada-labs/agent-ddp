@@ -68,6 +68,9 @@ ddp biometric fail               # a face or finger that does not match; `match`
 ddp push payload.json            # iOS, as APNs would (needs notification permission)
 ddp job 7                        # Android: run a scheduled job now
 ddp launch <device> --app ID --reset   # wipe the app's data first (the iOS Keychain stays)
+ddp stop; ddp clear              # stop the app; clear its data (stops it too); the session stays
+ddp test --class com.app.LoginTest   # Android instrumentation: FAIL lines, then "2 passed, 1 failed, 0 skipped"; exit 1 on a failure
+ddp logs --since-launch --grep Exception   # the app process's lines since it started (no take needed)
 ddp launch <device> --app ID --arg -SomeDefault --arg YES   # iOS launch arguments, as an Xcode scheme; Android: use --env
 ```
 
@@ -151,7 +154,7 @@ ddp walk replay add-a-note-then-delete-it --device <other>   # again with no mod
 ddp walk parity add-a-note-then-delete-it                    # last iOS replay against last Android replay
 ```
 
-Walk by label when the walk must run on both platforms: ids often differ between them. Before the app's own UI tests on an Android device (`connectedAndroidTest`), run `ddp disconnect --device <device>`: ddp's runner holds UiAutomation until then, or until 5 minutes without a command. An action waits up to 2 s for its element (a menu still opening), and refuses one that is off screen: swipe it into view first. `tree --json` has each element's `parent` and, on iOS, its `traits` (`keyboardKey` marks the keyboard's keys) and `window: "keyboard"` on everything in the keyboard's window, the prediction bar too. With the Android library `tree --json` gives the parent from the semantics tree and `visible`, the part that shows when a list or the window cuts it (null: none). On iOS without the library a touch goes to the part of an element the app says a touch reaches, and is refused (`is covered`) when a bar or a view lies over all of it: swipe it into view, or `tap --force`. A cover the app's accessibility does not know (a splash hidden from VoiceOver that still takes touches) is not seen: a tap under it says "nothing changed". Wait for the app's own sign that it is ready.
+Walk by label when the walk must run on both platforms: ids often differ between them. Run the app's own Android UI tests with `ddp test`: it frees UiAutomation from ddp's runner first. Before `connectedAndroidTest` from Gradle, run `ddp disconnect --device <device>`: ddp's runner holds UiAutomation until then, or until 5 minutes without a command. `ddp doctor` starts the app, or brings it to the front, when it is not there. An action waits up to 2 s for its element (a menu still opening), and refuses one that is off screen: swipe it into view first. `tree --json` has each element's `parent` and, on iOS, its `traits` (`keyboardKey` marks the keyboard's keys) and `window: "keyboard"` on everything in the keyboard's window, the prediction bar too. With the Android library `tree --json` gives the parent from the semantics tree and `visible`, the part that shows when a list or the window cuts it (null: none). On iOS without the library a touch goes to the part of an element the app says a touch reaches, and is refused (`is covered`) when a bar or a view lies over all of it: swipe it into view, or `tap --force`. A cover the app's accessibility does not know (a splash hidden from VoiceOver that still takes touches) is not seen: a tap under it says "nothing changed". Wait for the app's own sign that it is ready.
 
 ## What happened a while ago
 

@@ -302,6 +302,9 @@ pub fn logs(args: &mut Args) -> Result<i32> {
     if args.follow {
         return follow_logs(args);
     }
+    if args.since_launch {
+        return logs_since_launch(args);
+    }
     let recording = load(args.file.as_deref().unwrap_or(&ctx().last))?;
     let Some(started) = recording.header.get("startedAt").map(f).filter(|s| *s != 0.0) else {
         fail!("this recording has no start time (an older library)", "no_start_time", "record again");
@@ -367,6 +370,282 @@ pub fn logs(args: &mut Args) -> Result<i32> {
         say!("... {} more (--grep or --limit)", lines.len() - limit);
     }
     Ok(0)
+}
+
+/// The app process's log lines since it started, the newest `--limit` of them, at their time of day. Android keeps
+/// what its log buffer still holds; iOS keeps the simulator's whole log.
+fn logs_since_launch(args: &Args) -> Result<i32> {
+    let (platform, device, app) = target(args)?;
+    let Some(app) = app else {
+        fail!("no app", "missing_option", "pass --app, or ddp connect first");
+    };
+    let not_running = || {
+        failure(
+            format!("{app} is not running on {device}"),
+            "not_running",
+            Some(&format!("ddp launch {device} --app {app}")),
+        )
+    };
+    let mut lines: Vec<String> = Vec::new();
+    if platform == "ios" {
+        let pid = ios_app_pid(&device, &app).ok_or_else(not_running)?.to_string();
+        // A simulator's processes are the Mac's own: `ps` says how long this one has run.
+        let elapsed =
+            elapsed_seconds(capture("ps", &["-o", "etime=", "-p", &pid]).stdout.trim()).ok_or_else(not_running)?;
+        let start = state::local_time("%Y-%m-%d %H:%M:%S", state::now_ms() / 1000.0 - elapsed - 1.0);
+        let predicate = format!("processIdentifier == {pid}");
+        let output = state::run(&[
+            "xcrun",
+            "simctl",
+            "spawn",
+            &device,
+            "log",
+            "show",
+            "--info",
+            "--style",
+            "compact",
+            "--start",
+            &start,
+            "--predicate",
+            &predicate,
+        ])?;
+        lines = output
+            .lines()
+            .filter(|line| line.get(..19).and_then(state::parse_local).is_some())
+            .map(|line| format!("{} {}", line.get(11..23).unwrap_or(""), line.get(24..).unwrap_or("").trim()))
+            .collect();
+    } else {
+        let pid = adb(&device, &["shell", "pidof", &app])?.stdout.trim().to_string();
+        if pid.is_empty() {
+            return Err(not_running());
+        }
+        for line in adb(&device, &["logcat", "-d", "-v", "epoch", &format!("--pid={pid}")])?.stdout.lines() {
+            let mut parts = line.trim_start().splitn(2, char::is_whitespace);
+            let Some(stamp) = parts.next().and_then(|part| part.parse::<f64>().ok()) else { continue };
+            let millis = ((stamp.fract() * 1000.0).round() as u32).min(999);
+            lines.push(format!(
+                "{}.{millis:03} {}",
+                state::local_time("%H:%M:%S", stamp),
+                parts.next().unwrap_or("").trim()
+            ));
+        }
+    }
+    if let Some(grep) = &args.grep {
+        lines.retain(|text| text.to_lowercase().contains(&grep.to_lowercase()));
+    }
+    if lines.is_empty() {
+        say!("no log lines from {app} since it started");
+        return Ok(0);
+    }
+    let limit = args.limit.unwrap_or(50);
+    if lines.len() > limit {
+        say!("... {} earlier lines (--grep or --limit)", lines.len() - limit);
+    }
+    lines[lines.len().saturating_sub(limit)..].iter().for_each(|line| say!("{line}"));
+    Ok(0)
+}
+
+/// The app's process on an iOS simulator, as its launchd lists it; None when it is not running.
+pub fn ios_app_pid(device: &str, app: &str) -> Option<i32> {
+    let listed = capture("xcrun", &["simctl", "spawn", device, "launchctl", "list"]).stdout;
+    let label = format!("UIKitApplication:{app}[");
+    listed.lines().find(|line| line.contains(&label))?.split_whitespace().next()?.parse().ok()
+}
+
+/// `ps -o etime`: `[[dd-]hh:]mm:ss` in seconds.
+fn elapsed_seconds(text: &str) -> Option<f64> {
+    let (days, clock) =
+        text.split_once('-').map_or(Some((0.0, text)), |(days, clock)| Some((days.parse().ok()?, clock)))?;
+    let parts: Vec<f64> = clock.split(':').map(|part| part.parse().ok()).collect::<Option<_>>()?;
+    let clock_seconds = match parts.as_slice() {
+        [minutes, seconds] => minutes * 60.0 + seconds,
+        [hours, minutes, seconds] => hours * 3600.0 + minutes * 60.0 + seconds,
+        _ => return None,
+    };
+    Some(days * 86400.0 + clock_seconds)
+}
+
+/// Stops the app. The session stays: `ddp launch` starts it again.
+pub fn stop(args: &mut Args) -> Result<i32> {
+    let (platform, device, app) = target(args)?;
+    let Some(app) = app else { fail!("no app", "missing_option", "pass --app, or ddp connect first") };
+    let was_running = if platform == "ios" {
+        let stopped = capture("xcrun", &["simctl", "terminate", &device, &app]);
+        // simctl says "found nothing to terminate" when the app was not running.
+        if stopped.code != 0 && !stopped.stderr.contains("found nothing to terminate") {
+            fail!(
+                format!("could not stop {app}: {}", stopped.stderr.trim()),
+                "command_failed",
+                format!("ddp doctor {device} --app {app}")
+            );
+        }
+        stopped.code == 0
+    } else {
+        let running = !adb(&device, &["shell", "pidof", &app])?.stdout.trim().is_empty();
+        let stopped = adb(&device, &["shell", "am", "force-stop", &app])?;
+        if stopped.code != 0 {
+            fail!(
+                format!("could not stop {app}: {}", stopped.stderr.trim()),
+                "command_failed",
+                format!("ddp doctor {device} --app {app}")
+            );
+        }
+        running
+    };
+    say!("{} {app} on {platform} {device}", if was_running { "stopped" } else { "was not running:" });
+    Ok(0)
+}
+
+/// Clears the app's data, like a fresh install; it stops the app first.
+pub fn clear(args: &mut Args) -> Result<i32> {
+    let (platform, device, app) = target(args)?;
+    let Some(app) = app else { fail!("no app", "missing_option", "pass --app, or ddp connect first") };
+    crate::live::reset_data(&platform, &device, &app)?;
+    Ok(0)
+}
+
+/// What `am instrument -r` reported, test by test.
+#[derive(Debug, Default, PartialEq)]
+struct TestRun {
+    passed: usize,
+    skipped: usize,
+    /// `Class#method` and the first line of its stack.
+    failed: Vec<(String, String)>,
+    /// The run ended early: the process died, or the instrumentation never ran. The test running then, if any.
+    stopped: Option<(String, Option<String>)>,
+}
+
+/// `am instrument -r` output. A status block ends with `INSTRUMENTATION_STATUS_CODE`: 1 a test started, 0 it passed,
+/// -1 an error, -2 a failure, -3 ignored, -4 an assumption that did not hold. A value can run over several lines.
+fn instrumentation_run(output: &str) -> TestRun {
+    let mut run = TestRun::default();
+    let (mut status, mut result) = (std::collections::HashMap::new(), std::collections::HashMap::new());
+    let mut last: Option<(bool, String)> = None;
+    let mut running: Option<String> = None;
+    let mut finished = false;
+    for line in output.lines() {
+        let line = line.trim_end_matches('\r');
+        if let Some(pair) = line.strip_prefix("INSTRUMENTATION_STATUS: ") {
+            let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+            status.insert(key.to_string(), value.to_string());
+            last = Some((true, key.to_string()));
+        } else if let Some(pair) = line.strip_prefix("INSTRUMENTATION_RESULT: ") {
+            let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+            result.insert(key.to_string(), value.to_string());
+            last = Some((false, key.to_string()));
+        } else if let Some(code) = line.strip_prefix("INSTRUMENTATION_STATUS_CODE: ") {
+            let field = |name: &str| status.get(name).cloned().unwrap_or_default();
+            let test = format!("{}#{}", field("class"), field("test"));
+            match code.trim() {
+                "1" => running = Some(test),
+                "0" => run.passed += 1,
+                "-1" | "-2" => {
+                    let stack = field("stack");
+                    run.failed.push((test, stack.lines().next().unwrap_or("").trim().to_string()));
+                }
+                "-3" | "-4" => run.skipped += 1,
+                _ => {}
+            }
+            if code.trim() != "1" {
+                running = None;
+            }
+            status.clear();
+            last = None;
+        } else if line.starts_with("INSTRUMENTATION_CODE: ") {
+            finished = true;
+            last = None;
+        } else if let Some(why) = line.strip_prefix("INSTRUMENTATION_FAILED: ") {
+            run.stopped = Some((format!("the instrumentation did not run: {}", why.trim()), None));
+            return run;
+        } else if let Some((is_status, key)) = &last {
+            let values = if *is_status { &mut status } else { &mut result };
+            if let Some(value) = values.get_mut(key) {
+                value.push('\n');
+                value.push_str(line);
+            }
+        }
+    }
+    // A crash ends the run with a message and no code for the test that was running.
+    if let Some(message) = result.get("shortMsg").filter(|message| !message.is_empty()) {
+        run.stopped = Some((message.trim().to_string(), running));
+    } else if !finished {
+        run.stopped = Some(("the run ended without a result".to_string(), running));
+    }
+    run
+}
+
+/// Runs the app's instrumentation tests and counts what passed. It frees UiAutomation from ddp's runner first.
+pub fn test(args: &mut Args) -> Result<i32> {
+    let (platform, device, app) = target(args)?;
+    let Some(app) = app else { fail!("no app", "missing_option", "pass --app, or ddp connect first") };
+    if platform == "ios" {
+        fail!(
+            "iOS tests run from Xcode's build, not from the simulator",
+            "not_supported",
+            format!("xcodebuild test-without-building -xctestrun <file> -destination id={device}")
+        );
+    }
+    let listed = adb(&device, &["shell", "pm", "list", "instrumentation"])?.stdout;
+    let target_note = format!("(target={app})");
+    let runners: Vec<String> = listed
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("instrumentation:"))
+        .filter(|line| line.ends_with(&target_note))
+        .filter_map(|line| line.split_whitespace().next().map(String::from))
+        .collect();
+    let runner = match (&args.name, runners.as_slice()) {
+        (Some(runner), _) => runner.clone(),
+        (None, [one]) => one.clone(),
+        (None, []) => fail!(
+            format!("{app} has no instrumentation on {device}"),
+            "no_tests",
+            "install the test APK: ./gradlew installDebugAndroidTest"
+        ),
+        (None, many) => fail!(
+            format!("{app} has {} instrumentations: {}", many.len(), many.join(", ")),
+            "ambiguous",
+            "--runner <one of them>"
+        ),
+    };
+    if crate::runner::stop(&device).unwrap_or(false) {
+        say!("ddp's runner stopped on {device}: UiAutomation is free for the tests");
+    }
+    let mut command: Vec<String> = ["-s", &device, "shell", "am", "instrument", "-w", "-r"].map(String::from).to_vec();
+    if let Some(class) = &args.filter {
+        command.extend(["-e".into(), "class".into(), crate::live::shell_quoted(class)]);
+    }
+    for pair in &args.env {
+        let Some((key, value)) = pair.split_once('=').filter(|(key, _)| !key.is_empty()) else {
+            fail!(format!("--env takes KEY=VALUE, not '{pair}'"), "bad_value", "--env size=small");
+        };
+        command.extend(["-e".into(), crate::live::shell_quoted(key), crate::live::shell_quoted(value)]);
+    }
+    command.push(runner.clone());
+    let started = Instant::now();
+    let words: Vec<&str> = command.iter().map(String::as_str).collect();
+    let output = capture(&adb_path()?, &words);
+    let run = instrumentation_run(&output.stdout);
+    let seconds = py::round_f(started.elapsed().as_secs_f64(), 1);
+    if ctx().json {
+        let failed: Vec<Value> =
+            run.failed.iter().map(|(test, message)| json!({"test": test, "message": message})).collect();
+        let stopped = run.stopped.as_ref().map(|(why, test)| json!({"why": why, "test": test}));
+        say!(
+            "{}",
+            py::dumps(
+                &json!({"runner": runner, "passed": run.passed, "failed": failed, "skipped": run.skipped, "stopped": stopped, "seconds": seconds})
+            )
+        );
+    } else {
+        for (test, message) in &run.failed {
+            say!("FAIL {test}: {message}");
+        }
+        if let Some((why, test)) = &run.stopped {
+            say!("STOPPED {}{why}", test.as_ref().map(|test| format!("in {test}: ")).unwrap_or_default());
+        }
+        say!("{runner} in {seconds}s: {} passed, {} failed, {} skipped", run.passed, run.failed.len(), run.skipped);
+    }
+    Ok(if run.failed.is_empty() && run.stopped.is_none() { 0 } else { 1 })
 }
 
 /// iOS content size categories as `simctl ui content_size` names them. `default` and `largest` are the names the
@@ -1144,6 +1423,50 @@ pub fn explore(args: &mut Args) -> Result<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_instrumentation_run_counts_each_test_by_its_final_code() {
+        let status = |test: &str, code: i32, extra: &str| {
+            format!("INSTRUMENTATION_STATUS: class=dev.app.SampleTest\nINSTRUMENTATION_STATUS: current=1\n{extra}INSTRUMENTATION_STATUS: test={test}\nINSTRUMENTATION_STATUS_CODE: {code}\n")
+        };
+        let stack = "INSTRUMENTATION_STATUS: stack=org.junit.ComparisonFailure: expected:<[expected]> but was:<[actual]>\n\tat org.junit.Assert.assertEquals(Assert.java:117)\n";
+        let passing = status("packageName", 1, "") + &status("packageName", 0, "")
+            + &status("failsWhenAsked", 1, "") + &status("failsWhenAsked", -2, stack)
+            + &status("skipped", 1, "") + &status("skipped", -4, "")
+            + "INSTRUMENTATION_RESULT: stream=\nTime: 0.4\n\nFAILURES!!!\nTests run: 3,  Failures: 1\n\nINSTRUMENTATION_CODE: -1\n";
+        assert_eq!(
+            instrumentation_run(&passing),
+            TestRun {
+                passed: 1,
+                skipped: 1,
+                failed: vec![(
+                    "dev.app.SampleTest#failsWhenAsked".into(),
+                    "org.junit.ComparisonFailure: expected:<[expected]> but was:<[actual]>".into()
+                )],
+                stopped: None,
+            }
+        );
+        // The process dies in the middle of a test: no code for it, a short message for the run.
+        let crashed = status("packageName", 1, "")
+            + &status("packageName", 0, "")
+            + &status("crashesWhenAsked", 1, "")
+            + "INSTRUMENTATION_RESULT: shortMsg=Process crashed.\nINSTRUMENTATION_CODE: 0\n";
+        let run = instrumentation_run(&crashed);
+        assert_eq!(run.passed, 1);
+        assert_eq!(run.stopped, Some(("Process crashed.".into(), Some("dev.app.SampleTest#crashesWhenAsked".into()))));
+        let missing = "INSTRUMENTATION_FAILED: dev.app.test/androidx.test.runner.AndroidJUnitRunner\nINSTRUMENTATION_STATUS_CODE: -1\n";
+        assert!(instrumentation_run(missing)
+            .stopped
+            .is_some_and(|(why, _)| why.starts_with("the instrumentation did not run")));
+    }
+
+    #[test]
+    fn ps_elapsed_time_in_seconds() {
+        assert_eq!(elapsed_seconds("01:05"), Some(65.0));
+        assert_eq!(elapsed_seconds("02:00:01"), Some(7201.0));
+        assert_eq!(elapsed_seconds("1-00:00:00"), Some(86400.0));
+        assert_eq!(elapsed_seconds("soon"), None);
+    }
 
     #[test]
     fn apple_locale_takes_the_region_after_an_underscore() {

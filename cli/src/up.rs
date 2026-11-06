@@ -55,17 +55,8 @@ pub fn up(args: &mut Args) -> Result<i32> {
         start_app(&platform, &id, &app)?;
         args.device = Some(id.clone());
         args.platform = Some(platform.clone());
-        match live::attach_within(&platform, &id, &app, ENDPOINT_PATIENCE) {
-            Ok((session, snapshot)) => return live::keep_session(&session, &snapshot),
-            Err(reason) => {
-                // An app without the library still takes touches and shows its accessibility tree.
-                let session = json!({"platform": platform, "device": id, "app": app, "mode": "device"});
-                write_file(&ctx().session_file, py::dumps(&session))?;
-                say!(
-                    "{app} did not answer as an app with the library ({}): tree, tap, type, swipe, press and walk now go through the platform, with no checks; if it has the library, ddp connect {id} --app {app}",
-                    reason.message
-                );
-            }
+        if let Some((session, snapshot)) = live::session_after_start(&platform, &id, &app, ENDPOINT_PATIENCE)? {
+            return live::keep_session(&session, &snapshot);
         }
     }
     Ok(0)
@@ -372,7 +363,8 @@ fn install(platform: &str, device: &str, build: &str) -> Result<()> {
     Ok(())
 }
 
-fn start_app(platform: &str, device: &str, app: &str) -> Result<()> {
+/// Starts the app, or brings it to the front if it runs: never a restart.
+pub fn start_app(platform: &str, device: &str, app: &str) -> Result<()> {
     let started = if platform == "ios" {
         capture("xcrun", &["simctl", "launch", device, app])
     } else {

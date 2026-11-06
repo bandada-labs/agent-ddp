@@ -83,6 +83,7 @@ pub struct Args {
     pub env: Vec<String>,
     pub launch_args: Vec<String>,
     pub set_value: Option<String>,
+    pub since_launch: bool,
 }
 
 const ABOUT: &str = "ddp: see what a Debug iOS/Android app draws, frame by frame, live or from a recording.
@@ -91,6 +92,7 @@ Start here (for agents): ddp skills get core
   The guides ship with the CLI, so they always match this version. `ddp doctor` when something fails.
 
   connect | launch | disconnect | doctor   attach to a running Debug app, or start it fresh; check the setup
+  stop | clear | test                      stop the app; clear its data; run its instrumentation tests (Android)
   up | down                               a simulator or emulator of ddp's own for a run, removed after
   tree | find | get | read | watch | eval  what is drawn, now or over a take (@refs from tree and find)
   record | wait | tap | type | press       take a recording, wait, touch and type
@@ -303,6 +305,7 @@ pub fn parser() -> Command {
             .arg(opt("device", "without the library: the accessibility tree of an iOS simulator or Android device")))
         .subcommand(file(device_options(sub("logs", "the app's log lines during the last take, at their time in it")
             .arg(flag("follow", "live: the last 100 lines, then each new one"))
+            .arg(flag("since-launch", "the app process's lines since it started, the newest --limit of them, at their time of day"))
             .arg(flag("source", "--follow: where each line came from (iOS: subsystem and library)"))
             .arg(opt("for", "--follow: stop after this long").id("duration"))
             .arg(opt("grep", "only lines holding this text"))
@@ -363,6 +366,13 @@ pub fn parser() -> Command {
             .arg(choices("action", &["enroll", "match", "fail"]).required(true))))
         .subcommand(device_options(sub("push", "iOS: deliver a push notification to the app, as APNs would")
             .arg(positional("path", "the payload JSON file ({\"aps\": {\"alert\": \"Hi\"}})").required(true))))
+        .subcommand(device_options(sub("stop", "stop the app (Android am force-stop, iOS simctl terminate); ddp launch starts it again")))
+        .subcommand(device_options(sub("clear", "clear the app's data, like a fresh install (Android pm clear; iOS its data container, the Keychain stays)")))
+        .subcommand(device_options(sub("test", "Android: run the app's instrumentation tests (am instrument), then what passed, failed and was skipped")
+            .arg(opt("class", "only this class, or Class#method").id("filter"))
+            .arg(opt("runner", "the instrumentation, package/runner, when the app has more than one").id("name"))
+            .arg(Arg::new("env").long("env").num_args(1).action(ArgAction::Append).value_name("KEY=VALUE")
+                .help("an argument for the tests (am instrument -e KEY VALUE); repeat for more"))))
         .subcommand(device_options(sub("job", "Android: run one of the app's scheduled jobs now (JobScheduler, WorkManager)")
             .arg(positional("value", "the job id").required(true))))
         .subcommand(sub("compare", "how far the screen is from a reference image, or one element from the other phone")
@@ -533,6 +543,7 @@ pub fn parse(argv: &[String]) -> Result<Args, clap::Error> {
         error: string(m, "error"),
         key: string(m, "key"),
         follow: boolean(m, "follow"),
+        since_launch: boolean(m, "since-launch"),
         source: boolean(m, "source"),
         force: boolean(m, "force"),
         id_from_ref: false,

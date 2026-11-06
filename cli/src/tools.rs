@@ -108,6 +108,9 @@ const MCP_PROFILES: [(&str, &[&str]); 3] = [
             "biometric",
             "push",
             "job",
+            "stop",
+            "clear",
+            "test",
             "back",
             "background",
             "memory",
@@ -316,6 +319,7 @@ fn doctor_checks(platform: &str, device: &str, app: &str) -> Result<Vec<Step>> {
         if result.code != 0 {
             return Ok(steps);
         }
+        steps.extend(front_step(platform, device, app));
         let endpoint = read_json(&Path::new(result.stdout.trim()).join(IOS_DIR).join("control.json"));
         steps.push((
             endpoint.is_some(),
@@ -354,10 +358,11 @@ fn doctor_checks(platform: &str, device: &str, app: &str) -> Result<Vec<Step>> {
         steps.push((debuggable.code == 0, "debuggable build".into(), "install the debug variant, not release".into()));
         let package = capture(&adb, &["-s", device, "shell", "dumpsys", "package", app]).stdout;
         steps.push((
-            package.contains("dev.agentddp"),
+            crate::live::has_library_component(&package, app),
             "agent-ddp library in the build".into(),
             "add debugImplementation(project(\":agent-ddp\")) and reinstall".into(),
         ));
+        steps.extend(front_step(platform, device, app));
         let running = capture(&adb, &["-s", device, "shell", "pidof", app]).stdout.trim().to_string();
         steps.push((!running.is_empty(), "app running".into(), format!("ddp launch {device} --app {app}")));
         if running.is_empty() {
@@ -409,6 +414,50 @@ fn doctor_checks(platform: &str, device: &str, app: &str) -> Result<Vec<Step>> {
     }
     steps.extend(hooks);
     Ok(steps)
+}
+
+/// When the app is not in front, starts it or brings it there (never a restart), since the checks after read its
+/// screen, and waits for its library's endpoint. Nothing when it already is in front.
+fn front_step(platform: &str, device: &str, app: &str) -> Option<Step> {
+    let (running, in_front) = if platform == "ios" {
+        let pid = crate::device::ios_app_pid(device, app);
+        // A front app the accessibility service does not name counts as not in front: bringing it there is harmless.
+        (pid.is_some(), pid.is_some() && pid == crate::runner::ios_front_pid(device))
+    } else {
+        let adb = adb_path().ok()?;
+        let running = !capture(&adb, &["-s", device, "shell", "pidof", app]).stdout.trim().is_empty();
+        let activities = capture(&adb, &["-s", device, "shell", "dumpsys", "activity", "activities"]).stdout;
+        let top = format!(" {app}/");
+        (running, activities.lines().any(|line| line.contains("topResumedActivity") && line.contains(&top)))
+    };
+    if in_front {
+        return None;
+    }
+    let why = if running { "it was not in front" } else { "it was not running" };
+    if let Err(failure) = crate::up::start_app(platform, device, app) {
+        return Some((
+            false,
+            format!("start {app} ({why}): {}", failure.message),
+            format!("ddp launch {device} --app {app}"),
+        ));
+    }
+    if platform == "ios" || crate::live::android_has_library(device, app) {
+        if let Ok((session, _)) = crate::live::attach_within(platform, device, app, std::time::Duration::from_secs(8)) {
+            let saved = read_json(&ctx().session_file).unwrap_or(json!({}));
+            if saved["device"] == device && saved["app"] == app {
+                // The new run answers on a new port: the saved session follows it, so the next command reaches it.
+                let _ = write_file(&ctx().session_file, py::dumps(&session));
+            } else if platform == "android" {
+                if let Ok(adb) = adb_path() {
+                    capture(
+                        &adb,
+                        &["-s", device, "forward", "--remove", &format!("tcp:{}", py::str(&session["port"]))],
+                    );
+                }
+            }
+        }
+    }
+    Some((true, format!("started {app}: {why}"), String::new()))
 }
 
 /// The values the app added for `ddp state`; None from a library before `state.list`.
