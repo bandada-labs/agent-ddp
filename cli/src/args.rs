@@ -89,6 +89,7 @@ Start here (for agents): ddp skills get core
   The guides ship with the CLI, so they always match this version. `ddp doctor` when something fails.
 
   connect | launch | disconnect | doctor   attach to a running Debug app, or start it fresh; check the setup
+  up | down                               a simulator or emulator of ddp's own for a run, removed after
   tree | find | get | read | watch | eval  what is drawn, now or over a take (@refs from tree and find)
   record | wait | tap | type | press       take a recording, wait, touch and type
   swipe | drag | double-tap | long-press   gestures with a real finger, then what changed
@@ -185,6 +186,14 @@ pub fn parser() -> Command {
             .arg(Arg::new("arg").long("arg").num_args(1).action(ArgAction::Append).allow_hyphen_values(true).value_name("ARG")
                 .help("iOS: a launch argument, as an Xcode scheme passes it (--arg -SomeDefault --arg YES); repeat for more")))
         .subcommand(sub("disconnect", "forget the live session"))
+        .subcommand(sub("up", "a simulator or emulator of ddp's own, from a warm base; installs and starts the app, then connects")
+            .arg(opt("platform", "ios or android").value_parser(["ios", "android"]).required(true))
+            .arg(opt("install", "app build to install: a .app folder (iOS) or an .apk (Android)").id("path"))
+            .arg(opt("app", "bundle id / application id to start and connect to"))
+            .arg(opt("base", "base simulator name or AVD to start from (ddp-base / ddp_base, made on first use)").id("name")))
+        .subcommand(sub("down", "shut down and remove a device `ddp up` made (default: the session's)")
+            .arg(positional("device", "simulator UDID or emulator serial from `ddp up`"))
+            .arg(flag("all", "every device `ddp up` made from this folder").id("full")))
         .subcommand(file(window(sub("record", "record frames (live, or offline by notification/broadcast)")
             .arg(opt("platform", "offline only").value_parser(["ios", "android"]))
             .arg(opt("app", "offline only: bundle id / application id"))

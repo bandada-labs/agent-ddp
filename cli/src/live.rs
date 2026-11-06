@@ -366,7 +366,7 @@ fn shell_quoted(text: &str) -> String {
 
 /// The session for the app's control endpoint, and what is on screen, when it answers.
 /// [attach], tried again until `patience` runs out: the app may still be starting.
-fn attach_within(platform: &str, device: &str, app: &str, patience: Duration) -> Result<(Value, Vec<Value>)> {
+pub fn attach_within(platform: &str, device: &str, app: &str, patience: Duration) -> Result<(Value, Vec<Value>)> {
     let deadline = Instant::now() + patience;
     loop {
         match attach(platform, device, app) {
@@ -417,7 +417,7 @@ fn attach(platform: &str, device: &str, app: &str) -> Result<(Value, Vec<Value>)
     Ok((session, snapshot))
 }
 
-fn keep_session(session: &Value, snapshot: &[Value]) -> Result<i32> {
+pub fn keep_session(session: &Value, snapshot: &[Value]) -> Result<i32> {
     write_file(&ctx().session_file, py::dumps(session))?;
     let (app, platform, device) =
         (py::str(&session["app"]), py::str(&session["platform"]), py::str(&session["device"]));

@@ -2,6 +2,12 @@
 
 Changes that users or agents will notice. Before 1.0, a minor version may change the protocol or the output; those changes are marked.
 
+## Unreleased
+
+### Added
+
+- `ddp up --platform ios|android [--install <build>] [--app <id>]`: a simulator or emulator of ddp's own for a run. iOS clones a base simulator (`ddp-base`, made and booted once on first use); Android starts the base AVD (`ddp_base`) read-only from its quickboot snapshot on the first free even port from 5560, never 5554-5558. Then it installs and starts the app and connects. `ddp down [<device>] [--all]` shuts down and removes only devices `ddp up` made, listed in `.ddp/devices.json`.
+
 ## 0.4.0 (2026-11-03)
 
 - `ddp recompositions [--for 3s] [--then CMD]` (Android): which composables ran in the window, how often, and which state objects made Compose run them again; androidx's own composables are counted and listed with `--full`. The counts come from the trace calls the Compose compiler writes in every composable body, the causes from Compose's composition observer. A tracer the app has (Perfetto's runtime-tracing) keeps working. Two new engine hooks: `compose.tracer`, `compose.wrappedComposition`.

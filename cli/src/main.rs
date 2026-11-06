@@ -16,6 +16,7 @@ mod state;
 mod summary;
 mod swift_source;
 mod tools;
+mod up;
 
 use args::Args;
 use serde_json::json;
@@ -47,6 +48,8 @@ fn handler(command: &str) -> fn(&mut Args) -> Result<i32> {
         "connect" => live::connect,
         "launch" => live::launch,
         "disconnect" => live::disconnect,
+        "up" => up::up,
+        "down" => up::down,
         "record" => device::record,
         "watch" => live::watch,
         "eval" => live::evaluate,

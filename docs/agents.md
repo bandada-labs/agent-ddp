@@ -9,6 +9,8 @@ Works only in Debug builds. Release builds contain none of it.
 ```
 ddp connect <sim UDID | adb serial> --app <bundle or application id> [--wait 15s]   --wait: keep trying while the app starts
 ddp launch <device> --app <id> [--env KEY=VALUE ...]   start the app fresh with values for it, then connect
+ddp up --platform ios|android [--install <.app|.apk>] [--app <id>]   a simulator or emulator of ddp's own, from a warm base
+ddp down [<device>] [--all]                        shut down and remove what `ddp up` made
 ddp state [list] | get <name> | set <name> <value> | watch <name> [--until '>100'] [--for 10s]   the app's own values
 ddp events [--follow] [--for 10s] [--grep <text>]   events the app sent in Debug, also in ddp history
 ddp crash [--device <id> --app <id>]               the app's last crash as the platform recorded it, with its stack
