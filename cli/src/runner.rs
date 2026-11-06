@@ -119,6 +119,9 @@ const FOCUS_WAIT: Duration = Duration::from_millis(200);
 pub const CONFIRM_LOOK: Duration = Duration::from_millis(500);
 /// Elements listed per group in an action's line; the rest are counted.
 const SHOWN: usize = 5;
+/// How long an action waits for its element to show, as `tap` with the library does: a menu or sheet still opening
+/// rebuilds its part of the tree, and an element listed a moment ago is missing for a few looks.
+const ELEMENT_WAIT: Duration = Duration::from_millis(2000);
 
 /// Whether this command drives an app without the library: `--device`, or a session `ddp up` made for one.
 pub fn device_mode(args: &Args) -> bool {
@@ -533,12 +536,21 @@ fn perform(
     args: &Args,
     verb: &str,
     given: Value,
-    build: impl FnOnce(&[Value], &str) -> Result<(Action, Vec<Place>)>,
+    build: impl Fn(&[Value], &str) -> Result<(Action, Vec<Place>)>,
 ) -> Result<i32> {
     let (platform, device, _) = crate::device::target(args)?;
     let mut screen = Screen::open(&platform, &device)?;
-    let before = screen.look()?;
-    let (action, places) = build(&on_screen(&before), &device)?;
+    let looking = Instant::now();
+    let mut before = screen.look()?;
+    let (action, places) = loop {
+        match build(&on_screen(&before), &device) {
+            Err(missing) if missing.code == "unknown_element" && looking.elapsed() < ELEMENT_WAIT => {
+                pause(LOOK_EVERY);
+                before = screen.look()?;
+            }
+            built => break built?,
+        }
+    };
     pause(BUSY_SAMPLE);
     let settled = screen.look()?;
     let busy = differing(&before, &settled);

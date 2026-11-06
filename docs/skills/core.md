@@ -151,7 +151,7 @@ ddp walk replay add-a-note-then-delete-it --device <other>   # again with no mod
 ddp walk parity add-a-note-then-delete-it                    # last iOS replay against last Android replay
 ```
 
-Walk by label when the walk must run on both platforms: ids often differ between them. Without the library ddp can't see a cover that has no accessibility (a splash hidden from VoiceOver that still takes touches): a tap under it says "nothing changed". Wait for the app's own sign that it is ready.
+Walk by label when the walk must run on both platforms: ids often differ between them. An action waits up to 2 s for its element (a menu still opening). Without the library ddp can't see a cover that has no accessibility (a splash hidden from VoiceOver that still takes touches): a tap under it says "nothing changed". Wait for the app's own sign that it is ready.
 
 ## What happened a while ago
 

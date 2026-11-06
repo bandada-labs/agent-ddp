@@ -408,7 +408,7 @@ class FakeApp:
         # App values: total grows by 10 on every read; mode is writable.
         self.total, self.mode = 0, "idle"
         self.touches, self.runner, self.saved, self.hide_save, self.rows = [], [], False, False, False
-        self.scrolls = False
+        self.scrolls, self.save_late = False, 0
         self.server = socket.socket()
         self.server.bind(("127.0.0.1", 0))
         self.server.listen()
@@ -519,7 +519,9 @@ class FakeApp:
                         shown.append({"type": "TextView", "label": "Below", "frame": [0, 900, 50, 10], "shown": False})
                         if self.saved:
                             shown[0] = {**shown[0], "frame": [0, -40, 50, 10], "shown": False}
-                    if not self.hide_save:
+                    # Missing for a few looks, as in a context menu still opening.
+                    late, self.save_late = self.save_late > 0, max(0, self.save_late - 1)
+                    if not self.hide_save and not late:
                         shown.insert(0, {"type": "Button", "label": "Save", "id": "save", "frame": [10, 20, 200, 80], "tap": True})
                     if self.saved:
                         shown.append({"type": "TextView", "label": "Saved", "frame": [10, 120, 100, 30]})
@@ -798,6 +800,11 @@ with tempfile.TemporaryDirectory() as directory:
     assert re.search(r'tap Save on runner-fake in \d+ms; new: @e\d+ "Saved"; no checks', saved.stdout), saved.stdout + saved.stderr
     gone = ddp_in(directory, "tap", "Nope", "--device", "runner-fake", env=host)
     assert gone.returncode == 1 and "no element 'Nope'" in gone.stderr and "next: ddp tree --device runner-fake" in gone.stderr, gone.stderr
+    # An element missing from the tree for a few looks is waited for, as `tap` with the library waits.
+    app.saved, app.save_late = False, 3
+    late_save = ddp_in(directory, "tap", "Save", "--device", "runner-fake", env=host)
+    assert re.search(r'tap Save on runner-fake in \d+ms; new: @e\d+ "Saved"', late_save.stdout) and app.save_late == 0, \
+        late_save.stdout + late_save.stderr
     # A walk: every action a step, an expectation, a report; then a replay with no model, by label, never by pixels.
     app.saved = False
     started = ddp_in(directory, "walk", "start", "Save the form", "--device", "runner-fake", env=host)

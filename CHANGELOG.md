@@ -23,6 +23,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 - iOS `set text-size largest` said done and changed nothing: simctl ignores names it does not know. `default` and `largest` now work on both platforms, and a name the platform does not take is refused.
 - iOS without the library: after an `xcodebuild test` UI test run, `tree --device` showed 0 elements (or only the status bar) for every app until the simulator rebooted. XCTest sets the simulator's `ApplicationAccessibilityEnabled` to false when it ends. ddp now reads that preference on each look, turns it back on when it is off, says so, and reads the tree again (about 2.5 s, once).
 - `check overlap` said COVERED for a text its list had scrolled almost away (7 px left at the list's edge): the strip held none of its glyphs. A text cut by its container is no longer judged.
+- Without the library, an action on an element failed at once when the tree did not list it at that moment, as while an iOS context menu opens. It now waits up to 2 s for the element, as `tap` with the library does.
 - `--help` said `--device` was Android only on `tap`, `type`, `long-press` and others; it works on iOS simulators too.
 
 ### Added (beta.2)
