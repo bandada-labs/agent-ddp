@@ -14,6 +14,7 @@ ddp doctor <sim UDID | adb serial> --app <id>   # once: device, app, library, en
 ddp connect <sim UDID | adb serial> --app <id>  # attach; every command below now runs live
 ddp up --platform ios --install Build/App.app --app <id>   # no device yet: ddp makes one, installs, starts, connects; `ddp down` after
 ddp launch <device> --app <id> --env MODE=demo   # start it fresh with values for it (iOS env, Android intent extras), then connect
+ddp tree --device <adb serial>; ddp tap Save --device <adb serial>   # app without the library (Android): elements and touches, no checks
 ddp tree -i                                      # what is on screen: elements with @refs, no paint nodes
 ddp watch @e3 --until 'border>3' --then "agent-device press id=start"
 ddp read --for 3s --then "agent-device press id=start"   # record a take, summary per element

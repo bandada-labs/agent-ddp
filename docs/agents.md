@@ -42,7 +42,7 @@ ddp tap <x,y>                                      a real touch at a point, then
 ddp swipe <from> <to> [--for 300ms]                a quick move (scroll, page); places are elements or x,y
 ddp drag <from> <to> [--for 600ms]                 hold 500ms, move slowly, let go (reorder, drag and drop)
 ddp double-tap <place> | long-press <place> [--for 800ms]
-ddp tap|swipe|drag|long-press <x,y> ... --device <adb serial>   without the library: Android adb input, screen pixels
+ddp tap|double-tap|swipe|drag|long-press|type|press|tree ... --device <adb serial>   without the library (Android): ddp's runner, labels or x,y in screen pixels, no checks
 ddp type <text> [--into <element>]                 type as the keyboard does, into the focused field
 ddp press Enter | Tab | Backspace
 ddp prefs [list | set <key> <value> | rm <key> | clear | files] [--in <suite or file>]
@@ -249,7 +249,7 @@ report: /Users/you/Library/Logs/DiagnosticReports/DDPSample-2026-10-29-155054.ip
 
 `swipe`, `drag`, `double-tap` and `long-press` move one real finger with `input.touch`, the same finger `tap` uses, so gesture recognizers, SwiftUI and Compose see a touch. A place is an element (its center, read just before) or `x,y` in the frames' unit. `swipe` moves in 12 steps over `--for`; `drag` holds 500 ms first so the app sees a long press that picks the item up; `double-tap` leaves 100 ms between taps. Each prints what changed, leaving out what changes on its own (a clock). A swipe can leave a list moving: wait (`ddp wait --settled 300ms`) before you touch something in it.
 
-Without the library, `--device <adb serial>` uses Android's own `input` command with `x,y` in screen pixels (the screenshot's), and cannot say what changed. A double tap needs the library: two `adb input` commands come too far apart. iOS has no public way to touch a simulator from the host, so ddp refuses there and points to agent-device.
+Without the library, `--device <adb serial>` drives the app through ddp's runner (Android): an instrumentation ddp carries inside its binary, installs and starts on the device the first time (`am instrument`, alive for the session, about 2 s), and reaches through `adb forward`. Touches go in as the system's own input (UiAutomation): a tap takes about 35 ms. A place is `x,y` in screen pixels (the screenshot's) or a label, content description or resource id, which the runner finds in the platform's accessibility tree. `tree --device` lists those elements, one line each: `Button "Save" #save [x,y wxh] tap`. `type --device` types ASCII through the virtual keyboard map. The app's engine is not there to ask, so nothing is checked: every line ends with `no checks (no SDK)`. iOS refuses for now.
 
 ### device actions
 

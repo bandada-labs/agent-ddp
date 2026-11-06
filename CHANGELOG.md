@@ -7,6 +7,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 ### Added
 
 - `ddp up --platform ios|android [--install <build>] [--app <id>]`: a simulator or emulator of ddp's own for a run. iOS clones a base simulator (`ddp-base`, made and booted once on first use); Android starts the base AVD (`ddp_base`) read-only from its quickboot snapshot on the first free even port from 5560, never 5554-5558. Then it installs and starts the app and connects. `ddp down [<device>] [--all]` shuts down and removes only devices `ddp up` made, listed in `.ddp/devices.json`.
+- Android apps without the library: `tap`, `double-tap`, `long-press`, `swipe`, `drag`, `type`, `press` and `tree` with `--device` go through ddp's runner, an instrumentation inside the ddp binary that it installs and starts when needed. Touches are the system's own input (a tap in about 35 ms, `adb shell input` took 70-115 ms), and a place can be a label or resource id from the platform's accessibility tree, not only `x,y`. Nothing is checked without the library: the output says `no checks (no SDK)`. Double tap now works too.
 
 ## 0.4.0 (2026-11-03)
 

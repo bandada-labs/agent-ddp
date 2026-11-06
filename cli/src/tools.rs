@@ -75,8 +75,8 @@ const MCP_PROFILES: [(&str, &[&str]); 3] = [
     (
         "core",
         &[
-            "doctor", "connect", "launch", "up", "down", "tree", "find", "get", "read", "check", "wait", "tap", "swipe", "type",
-            "press", "skills",
+            "doctor", "connect", "launch", "up", "down", "tree", "find", "get", "read", "check", "wait", "tap",
+            "swipe", "type", "press", "skills",
         ],
     ),
     (

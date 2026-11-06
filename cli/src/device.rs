@@ -156,6 +156,9 @@ const FOCUS_WAIT_MS: u64 = 200;
 
 /// Types into the focused field, or into `--into` after tapping it.
 pub fn type_text(args: &mut Args) -> Result<i32> {
+    if args.device.is_some() {
+        return crate::runner::type_text(args);
+    }
     let session = require_session()?;
     let text = args.value.clone().unwrap_or_default();
     let mut control = open(&session)?;
@@ -175,6 +178,9 @@ pub fn type_text(args: &mut Args) -> Result<i32> {
 }
 
 pub fn press(args: &mut Args) -> Result<i32> {
+    if args.device.is_some() {
+        return crate::runner::press(args);
+    }
     let session = require_session()?;
     let key = args.value.clone().unwrap_or_default();
     open(&session)?.call("input.key", json!({"key": key}))?;

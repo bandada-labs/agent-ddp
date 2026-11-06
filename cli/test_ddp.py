@@ -41,8 +41,9 @@ def run(*args, recording):
     return result.stdout
 
 
-def ddp_in(directory, *args, stdin=None):
-    return subprocess.run([*DDP, *args], cwd=directory, input=stdin, capture_output=True, text=True)
+def ddp_in(directory, *args, stdin=None, env=None):
+    return subprocess.run([*DDP, *args], cwd=directory, input=stdin, capture_output=True, text=True,
+                          env=None if env is None else {**os.environ, **env})
 
 
 with tempfile.TemporaryDirectory() as directory:
@@ -405,7 +406,7 @@ class FakeApp:
         self.typed, self.prefs, self.interceptor, self.answers = "", {}, None, {}
         # App values: total grows by 10 on every read; mode is writable.
         self.total, self.mode = 0, "idle"
-        self.touches = []
+        self.touches, self.runner = [], []
         self.server = socket.socket()
         self.server.bind(("127.0.0.1", 0))
         self.server.listen()
@@ -501,6 +502,13 @@ class FakeApp:
                     pixels = base64.b64encode(bytes([0, 0, 255, 255] * 4 + [255, 255, 255, 255] * 4)).decode()
                     result = {"scale": 3, "regions": [{"x": 0, "y": 0, "width": 4, "height": 2, "rgba": pixels}
                                                       for _ in params["rects"]]}
+                elif method in ("input.tap", "input.doubleTap", "input.longPress", "input.drag"):
+                    # The Android runner, for an app without the library.
+                    self.runner.append((method, params))
+                    result = {"ms": 30.4}
+                elif method == "screen.elements":
+                    result = {"elements": [{"type": "Button", "label": "Save", "id": "save", "frame": [10, 20, 200, 80], "tap": True},
+                                           {"type": "TextView", "label": "Off", "frame": [0, 0, 50, 10], "enabled": False}]}
                 elif method == "input.touch":
                     self.touches.append((params["phase"], round(params["x"]), round(params["y"]), clock.monotonic()))
                     if params["phase"] == "down" and params["x"] < 100 and params["y"] < 50:
@@ -747,13 +755,25 @@ with tempfile.TemporaryDirectory() as directory:
     app.touches = []
     ddp_in(directory, "drag", "button", "0,200", "--for", "120ms")
     assert app.touches[1][3] - app.touches[0][3] >= 0.5 and app.touches[-1][0:3] == ("up", 0, 200), app.touches
-    # Without the library: Android only, points only, and never a double tap.
+    # Without the library: Android through the runner, reached by a fake adb whose forward points at the fake app.
     ios_host = ddp_in(directory, "tap", "10,10", "--device", "5A9A96DD-128D-475C-B007-46F50ED266A7")
     assert ios_host.returncode == 1 and "no public way to touch a simulator" in ios_host.stderr, ios_host.stderr
-    double = ddp_in(directory, "double-tap", "10,10", "--device", "emulator-5554")
-    assert double.returncode == 1 and "a double tap needs the library" in double.stderr, double.stderr
-    element = ddp_in(directory, "swipe", "button", "0,0", "--device", "emulator-5554")
-    assert element.returncode == 1 and "knows no elements" in element.stderr, element.stderr
+    fake_adb = Path(directory, "bin", "adb")
+    fake_adb.parent.mkdir()
+    fake_adb.write_text(f"#!/bin/sh\necho 'runner-fake tcp:{app.port} localabstract:agentddp.runner.control'\n")
+    fake_adb.chmod(0o755)
+    host = {"PATH": f"{fake_adb.parent}:{os.environ['PATH']}"}
+    double = ddp_in(directory, "double-tap", "10,10", "--device", "runner-fake", env=host)
+    assert double.returncode == 0 and "double-tap 10,10 on runner-fake in 30ms; no checks (no SDK)" in double.stdout, double.stdout + double.stderr
+    ddp_in(directory, "swipe", "Save", "0,0", "--for", "200ms", "--device", "runner-fake", env=host)
+    ddp_in(directory, "drag", "save", "5,5", "--device", "runner-fake", env=host)
+    ddp_in(directory, "long-press", "save", "--device", "runner-fake", env=host)
+    assert app.runner == [("input.doubleTap", {"x": 10, "y": 10}),
+                          ("input.drag", {"from": {"label": "Save"}, "to": {"x": 0, "y": 0}, "ms": 200}),
+                          ("input.drag", {"from": {"label": "save"}, "to": {"x": 5, "y": 5}, "ms": 600, "hold": 500}),
+                          ("input.longPress", {"label": "save", "ms": 800})], app.runner
+    listed = ddp_in(directory, "tree", "--device", "runner-fake", env=host)
+    assert listed.stdout == 'Button "Save" #save [10,20 200x80] tap\nTextView "Off" [0,0 50x10] disabled\n2 elements on runner-fake; no checks (no SDK)\n', listed.stdout + listed.stderr
     # Host commands refuse what a platform has no public way to do, before running anything.
     sim, emu = "5A9A96DD-128D-475C-B007-46F50ED266A7", "emulator-5554"
     for args, said in [(("set", "orientation", "landscape", "--device", sim), "no public way to rotate"),

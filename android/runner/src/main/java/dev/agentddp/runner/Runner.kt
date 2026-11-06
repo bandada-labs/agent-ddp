@@ -120,7 +120,7 @@ class Runner : Instrumentation() {
         "input.drag" -> {
             val (fromX, fromY) = point(params.optJSONObject("from") ?: throw RunnerError.missing("from"))
             val (toX, toY) = point(params.optJSONObject("to") ?: throw RunnerError.missing("to"))
-            drag(fromX, fromY, toX, toY, params.optLong("ms", 300))
+            drag(fromX, fromY, toX, toY, params.optLong("ms", 300), params.optLong("hold", 0))
             JSONObject()
         }
         "input.type" -> {
@@ -167,9 +167,11 @@ class Runner : Instrumentation() {
         touch(MotionEvent.ACTION_UP, x, y, down)
     }
 
-    private fun drag(fromX: Float, fromY: Float, toX: Float, toY: Float, ms: Long) {
+    private fun drag(fromX: Float, fromY: Float, toX: Float, toY: Float, ms: Long, hold: Long) {
         val down = SystemClock.uptimeMillis()
         touch(MotionEvent.ACTION_DOWN, fromX, fromY, down)
+        // Held still first, the app sees a long press that picks the item up.
+        SystemClock.sleep(hold)
         // One move per display frame, so scroll and fling see the speed of a real finger.
         val steps = (ms / FRAME_MS).coerceAtLeast(1)
         for (step in 1..steps) {

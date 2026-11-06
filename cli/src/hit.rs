@@ -324,8 +324,8 @@ pub fn gesture(args: &mut Args) -> Result<i32> {
     Ok(0)
 }
 
-/// `--device`, for an app without the library: Android's own `input` command, in screen pixels. No element is known
-/// and nothing is checked after. iOS has no public way to touch a simulator from the host.
+/// `--device`, for an app without the library. Android: the runner, with `x,y` in screen pixels or a label it finds in
+/// the accessibility tree. Nothing is checked: the app's engine is not there to ask.
 fn host_gesture(args: &Args) -> Result<i32> {
     let (platform, device, _) = crate::device::target(args)?;
     let gesture = args.command.clone();
@@ -336,34 +336,40 @@ fn host_gesture(args: &Args) -> Result<i32> {
             "add the library to the Debug build and drop --device, or use agent-device"
         );
     }
-    let at = |text: &str| match point(text) {
-        Some((x, y)) => Ok(format!("{x:.0} {y:.0}")),
-        None => Err(failure(
-            format!("without the library ddp knows no elements: give x,y in screen pixels, not '{text}'"),
-            "bad_value",
-            Some("ddp tap 540,1200 --device emulator-5554"),
-        )),
+    let from_text = args.id.clone().unwrap_or_default();
+    let from = crate::runner::place(&from_text);
+    let ms = |default: f64| -> Result<f64> {
+        Ok(args.duration.as_deref().map(crate::state::parse_ms).transpose()?.unwrap_or(default))
     };
-    let from = at(&args.id.clone().unwrap_or_default())?;
-    let ms = |default: f64| -> Result<String> {
-        Ok(format!("{:.0}", args.duration.as_deref().map(crate::state::parse_ms).transpose()?.unwrap_or(default)))
+    let to = || -> Result<Value> {
+        match &args.value {
+            Some(text) => Ok(crate::runner::place(text)),
+            None => fail!(
+                format!("{gesture} needs where to: FROM TO"),
+                "missing_option",
+                format!("ddp {gesture} 540,1600 540,600 --device {device}")
+            ),
+        }
     };
-    let command = match &gesture[..] {
-        "tap" => format!("input tap {from}"),
-        "long-press" => format!("input swipe {from} {from} {}", ms(800.0)?),
-        "swipe" => format!("input swipe {from} {} {}", at(args.value.as_deref().unwrap_or(""))?, ms(300.0)?),
-        "drag" => format!("input draganddrop {from} {} {}", at(args.value.as_deref().unwrap_or(""))?, ms(1100.0)?),
-        _ => fail!(
-            "a double tap needs the library: two adb input commands come too far apart to count as one",
-            "not_supported",
-            "add the library to the Debug build and drop --device"
-        ),
+    let (method, params) = match &gesture[..] {
+        "tap" => ("input.tap", from),
+        "double-tap" => ("input.doubleTap", from),
+        "long-press" => ("input.longPress", {
+            let mut at = from;
+            at["ms"] = json!(ms(800.0)?);
+            at
+        }),
+        "swipe" => ("input.drag", json!({"from": from, "to": to()?, "ms": ms(300.0)?})),
+        _ => ("input.drag", json!({"from": from, "to": to()?, "ms": ms(600.0)?, "hold": DRAG_HOLD_MS})),
     };
-    let result = crate::state::capture(&crate::state::adb_path()?, &["-s", &device, "shell", &command]);
-    if result.code != 0 {
-        fail!(format!("adb input failed: {}", result.stderr.trim()), "command_failed");
-    }
-    say!("{gesture} on {device} with adb ({command}); without the library ddp cannot say what changed");
+    let answer = crate::runner::call(&device, method, params)?;
+    let to_text = args.value.as_deref().filter(|_| matches!(&gesture[..], "swipe" | "drag"));
+    say!(
+        "{gesture} {from_text}{} on {device} in {}ms; {}",
+        to_text.map(|to| format!(" -> {to}")).unwrap_or_default(),
+        answer["ms"].as_f64().unwrap_or(0.0).round() as i64,
+        crate::runner::NO_CHECKS
+    );
     Ok(0)
 }
 

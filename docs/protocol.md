@@ -83,6 +83,26 @@ Only requests through `AgentDDP.send` (iOS) or `AgentDdpInterceptor` (Android) a
 
 The rest comes in the order in [STATUS.md](STATUS.md).
 
+### Runner (Android, apps without the library)
+
+`android/runner` is an instrumentation that serves the same JSON-RPC over the abstract socket
+`agentddp.runner.control` (shell user and root only), started with `am instrument -w dev.agentddp.runner/.Runner`.
+It reads the platform's accessibility tree and touches through UiAutomation, so it answers what the system knows,
+never the app's engine. Places are `x`,`y` in screen pixels or `label` (text, content description or resource id).
+Every result has `ms`, the time spent on the device.
+
+| Method | Params | Result |
+| --- | --- | --- |
+| `app.info` | | `platform`, `unit` (`px`), `scale`, `screen`, `app` (package in front) |
+| `input.tap`, `input.doubleTap` | a place | |
+| `input.longPress` | a place, `ms` (600) | |
+| `input.drag` | `from`, `to` places, `ms` (300), `hold` (0) | |
+| `input.type` | `text` (ASCII) | |
+| `input.key` | `key`: `Enter`, `Tab`, `Backspace`, `Back` | |
+| `screen.find` | `label` | `found`, `frame` |
+| `screen.elements` | | `elements`: `type`, `label`, `id`, `frame` [x,y,w,h], `tap`, `enabled` |
+| `runner.stop` | | |
+
 ## Messages
 
 ### header
