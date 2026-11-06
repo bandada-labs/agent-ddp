@@ -167,3 +167,10 @@ Asked on Reddit how ddp maps elements back to source when modifiers chain deeply
 
 ### 2026-11-03: ship 0.4.0
 Asked whether the 0.4.0 work was finished. Answer: "push", then "do it" for the version bump and the tag. CI's first run on the pushed branch failed on Android: `Recompositions` made its main-thread handler when its class loaded, and the JVM unit tests have no main looper. It now makes it when first used. Left out, because they wait on something outside the repo: the older-OS hook matrix and a physical iPhone.
+
+### 2026-11-05: apps without the library, own devices, walks
+Requests from an app team: drive apps that do not have the library, bring up a device of ddp's own, and walk a task in plain words like Google's ARTEMIS, replayed with no model. Proposed: native device servers, not a copy of ARTEMIS; the model stays out of ddp. Answer: "lo que yo quiero es que sea optimo rapido, y que ahorre tokens" (it must be optimal, fast and save tokens), then "si, hazlo". Done in this order: `ddp up` / `ddp down`, the Android runner, then the CLI on both platforms.
+
+### 2026-11-06: iOS taps from the Mac, no daemon, do all of 0.5.0
+XCUITest taps took 556 ms and XCTest's synthesized events 291 ms. Touches sent from the Mac into the simulator's HID service take 0.5 ms, and its accessibility service gives the tree without XCTest, both private and listed in hooks.md. Asked whether to build a daemon: measured first, about 200 ms per command without one, so no daemon. Asked whether ARTEMIS had been read in detail: it was, its ideas are taken (find a target again by id or label, never by pixels; keep what was seen at each step), its code and its model-in-the-tool are not. Answer to finish the rest: "ok dale con toda hazlo todo" (go ahead with all of it).
+

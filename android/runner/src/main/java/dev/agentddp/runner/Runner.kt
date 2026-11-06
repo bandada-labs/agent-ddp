@@ -192,9 +192,16 @@ class Runner : Instrumentation() {
         event.recycle()
     }
 
-    // Right after a window change the active window may not be known yet: wait once for the screen to go idle.
-    private fun root(): AccessibilityNodeInfo? = automation.rootInActiveWindow
-        ?: runCatching { automation.waitForIdle(50, 1000) }.let { automation.rootInActiveWindow }
+    // Right after the runner starts (its flags just set) or a window change, the active window may not be known yet:
+    // an empty answer then would read as an empty screen. Wait for it, as long as a window change takes.
+    private fun root(): AccessibilityNodeInfo? {
+        val deadline = SystemClock.uptimeMillis() + ROOT_WAIT_MS
+        while (true) {
+            automation.rootInActiveWindow?.let { return it }
+            if (SystemClock.uptimeMillis() >= deadline) return null
+            runCatching { automation.waitForIdle(50, 200) }
+        }
+    }
 
     private fun find(label: String): AccessibilityNodeInfo? {
         val root = root() ?: return null
@@ -241,6 +248,7 @@ class Runner : Instrumentation() {
     private companion object {
         const val SOCKET_NAME = "agentddp.runner.control"
         const val FRAME_MS = 16L
+        const val ROOT_WAIT_MS = 2000L
         val ALLOWED_UIDS = setOf(0, 2000)
         val KEYS = mapOf(
             "Enter" to KeyEvent.KEYCODE_ENTER,

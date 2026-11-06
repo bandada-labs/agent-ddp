@@ -75,7 +75,7 @@ A platform that cannot do something from the host refuses with the reason and th
 
 ## Refs
 
-`tree` and `find text|id` print `@e1`, `@e2` ... Use them anywhere an element goes: `get @e3`, `watch @e3`, `eval @e3 layer.opacity`, `tap @e3`. In a recording refs never go stale. Live, they are stale as soon as the screen changes: run `tree -i` again. Two elements with the same label are `Open` and `Open [2]`.
+`tree` and `find text|id` print `@e1`, `@e2` ... Use them anywhere an element goes: `get @e3`, `watch @e3`, `eval @e3 layer.opacity`, `tap @e3`. In a recording refs never go stale. Live, `tap`, `swipe`, `type` and the other actions print what changed with refs for it (`new: @e9 "Saved"`): act on those, no `tree` needed. An action adds refs, it never renumbers the ones you hold. Run `tree -i` again only when you need the whole screen. Two elements with the same label are `Open` and `Open [2]`.
 
 ## Reading a screen cheaply
 
@@ -136,6 +136,21 @@ ddp record --on ios,android --for 3s --then "<cmd with {platform}>"   # both pla
 ```
 
 Sessions for `--on` are named: `ddp connect <sim> --app ID --session ios` and `... --session android`.
+
+## An app without the library, and walks
+
+```
+ddp up --platform ios --install Build/App.app --app <id>   # no library: the session says so; tree, tap, type, swipe, press work
+ddp tree                         # the platform's accessibility tree with refs; points (iOS) or pixels (Android)
+ddp tap "Add"                    # by label, id or ref; prints what changed, with refs; no checks (no SDK)
+ddp walk start "add a note, then delete it"   # every action from here is a step with a screenshot
+ddp walk expect "Note deleted"   # a check the replay repeats
+ddp walk end pass                # one line per step, the file, the screenshots
+ddp walk replay add-a-note-then-delete-it --device <other>   # again with no model, by label, never by pixels
+ddp walk parity add-a-note-then-delete-it                    # last iOS replay against last Android replay
+```
+
+Walk by label when the walk must run on both platforms: ids often differ between them.
 
 ## What happened a while ago
 

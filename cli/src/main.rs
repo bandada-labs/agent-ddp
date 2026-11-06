@@ -20,6 +20,7 @@ mod summary;
 mod swift_source;
 mod tools;
 mod up;
+mod walk;
 
 use args::Args;
 use serde_json::json;
@@ -100,6 +101,7 @@ fn handler(command: &str) -> fn(&mut Args) -> Result<i32> {
         "tree" => queries::tree,
         "get" => queries::get,
         "find" => queries::find,
+        "walk" => walk::walk,
         _ => queries::diff,
     }
 }
@@ -120,12 +122,26 @@ pub fn run_command(argv: Vec<String>) -> i32 {
     };
     state::use_context(args.session.as_deref(), args.json);
     state::push_limit(args.max_output, args.content_boundaries);
+    // An open walk keeps every action as a step, with the line the action printed.
+    let walking = walk::records(&args.command);
+    if walking {
+        state::push_capture(false);
+    }
     let result = (|| {
         if let Some(id) = &args.id {
             args.id = Some(queries::resolve_ref(id)?);
         }
         handler(&args.command.clone())(&mut args)
     })();
+    if walking {
+        let printed = state::pop_capture();
+        state::write_out(&printed);
+        if matches!(result, Ok(0)) {
+            if let Err(failure) = walk::record(&argv, &printed) {
+                state::report_failure(&failure);
+            }
+        }
+    }
     state::pop_limit();
     match result {
         Ok(code) => code,

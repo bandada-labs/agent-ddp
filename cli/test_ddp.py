@@ -3,6 +3,7 @@ Runs cli/target/release/ddp (cargo build --release), or the program in env DDP_B
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -406,7 +407,7 @@ class FakeApp:
         self.typed, self.prefs, self.interceptor, self.answers = "", {}, None, {}
         # App values: total grows by 10 on every read; mode is writable.
         self.total, self.mode = 0, "idle"
-        self.touches, self.runner = [], []
+        self.touches, self.runner, self.saved, self.hide_save = [], [], False, False
         self.server = socket.socket()
         self.server.bind(("127.0.0.1", 0))
         self.server.listen()
@@ -503,12 +504,18 @@ class FakeApp:
                     result = {"scale": 3, "regions": [{"x": 0, "y": 0, "width": 4, "height": 2, "rgba": pixels}
                                                       for _ in params["rects"]]}
                 elif method in ("input.tap", "input.doubleTap", "input.longPress", "input.drag"):
-                    # The Android runner, for an app without the library.
+                    # The Android runner, for an app without the library: a tap on Save shows "Saved".
                     self.runner.append((method, params))
+                    if method == "input.tap" and params.get("x") == 110:
+                        self.saved = True
                     result = {"ms": 30.4}
                 elif method == "screen.elements":
-                    result = {"elements": [{"type": "Button", "label": "Save", "id": "save", "frame": [10, 20, 200, 80], "tap": True},
-                                           {"type": "TextView", "label": "Off", "frame": [0, 0, 50, 10], "enabled": False}]}
+                    shown = [{"type": "TextView", "label": "Off", "frame": [0, 0, 50, 10], "enabled": False}]
+                    if not self.hide_save:
+                        shown.insert(0, {"type": "Button", "label": "Save", "id": "save", "frame": [10, 20, 200, 80], "tap": True})
+                    if self.saved:
+                        shown.append({"type": "TextView", "label": "Saved", "frame": [10, 120, 100, 30]})
+                    result = {"elements": shown}
                 elif method == "input.touch":
                     self.touches.append((params["phase"], round(params["x"]), round(params["y"]), clock.monotonic()))
                     if params["phase"] == "down" and params["x"] < 100 and params["y"] < 50:
@@ -631,7 +638,7 @@ with tempfile.TemporaryDirectory() as directory:
     live = ddp_in(directory, "tree", "-i")
     assert "@e1 button" in live.stdout and "@e2 spinner" in live.stdout, live.stdout + live.stderr
     tapped = ddp_in(directory, "tap", "@e1").stdout
-    assert "tapped button at (50, 25)" in tapped and "new: toast" in tapped, tapped
+    assert "tapped button at (50, 25)" in tapped and re.search(r"new: @e\d+ toast", tapped), tapped
     app.tapped_at = None
     # The app's hit test says a touch misses it: tap refuses, check tappable reports it, --force touches anyway.
     refused = ddp_in(directory, "tap", "locked")
@@ -736,7 +743,7 @@ with tempfile.TemporaryDirectory() as directory:
     # Gestures: one finger on input.touch, with the timing each needs.
     app.touches, app.tapped_at = [], None
     point = ddp_in(directory, "tap", "50,25")
-    assert "tapped (50, 25); changed: toast" in point.stdout and [t[0] for t in app.touches] == ["down", "up"], point.stdout + point.stderr
+    assert re.search(r"tapped \(50, 25\); new: @e\d+ toast", point.stdout) and [t[0] for t in app.touches] == ["down", "up"], point.stdout + point.stderr
     app.touches = []
     swiped = ddp_in(directory, "swipe", "10,10", "90,40", "--for", "120ms")
     phases = [t[0] for t in app.touches]
@@ -765,16 +772,51 @@ with tempfile.TemporaryDirectory() as directory:
     fake_adb.chmod(0o755)
     host = {"PATH": f"{fake_adb.parent}:{os.environ['PATH']}"}
     double = ddp_in(directory, "double-tap", "10,10", "--device", "runner-fake", env=host)
-    assert double.returncode == 0 and "double-tap 10,10 on runner-fake in 30ms; no checks (no SDK)" in double.stdout, double.stdout + double.stderr
+    assert double.returncode == 0 and re.fullmatch(r"double-tap 10,10 on runner-fake in \d+ms; nothing changed within 1000ms; no checks \(no SDK\)\n", double.stdout), double.stdout + double.stderr
     ddp_in(directory, "swipe", "Save", "0,0", "--for", "200ms", "--device", "runner-fake", env=host)
     ddp_in(directory, "drag", "save", "5,5", "--device", "runner-fake", env=host)
     ddp_in(directory, "long-press", "save", "--device", "runner-fake", env=host)
+    # Places resolve on the Mac, from the accessibility tree: the runner always gets points.
     assert app.runner == [("input.doubleTap", {"x": 10, "y": 10}),
-                          ("input.drag", {"from": {"label": "Save"}, "to": {"x": 0, "y": 0}, "ms": 200}),
-                          ("input.drag", {"from": {"label": "save"}, "to": {"x": 5, "y": 5}, "ms": 600, "hold": 500}),
-                          ("input.longPress", {"label": "save", "ms": 800})], app.runner
+                          ("input.drag", {"from": {"x": 110, "y": 60}, "to": {"x": 0, "y": 0}, "ms": 200, "hold": 0}),
+                          ("input.drag", {"from": {"x": 110, "y": 60}, "to": {"x": 5, "y": 5}, "ms": 600, "hold": 500}),
+                          ("input.longPress", {"x": 110, "y": 60, "ms": 800})], app.runner
     listed = ddp_in(directory, "tree", "--device", "runner-fake", env=host)
-    assert listed.stdout == 'Button "Save" #save [10,20 200x80] tap\nTextView "Off" [0,0 50x10] disabled\n2 elements on runner-fake; no checks (no SDK)\n', listed.stdout + listed.stderr
+    assert re.fullmatch(r'@e\d+ Button "Save" #save \[10,20 200x80\] tap\n@e\d+ TextView "Off" \[0,0 50x10\] disabled\n2 elements on runner-fake; no checks \(no SDK\)\n', listed.stdout), listed.stdout + listed.stderr
+    # An action says what changed, with the ref to act on next, once the screen settles.
+    saved = ddp_in(directory, "tap", "Save", "--device", "runner-fake", env=host)
+    assert re.search(r'tap Save on runner-fake in \d+ms; new: @e\d+ "Saved"; no checks', saved.stdout), saved.stdout + saved.stderr
+    gone = ddp_in(directory, "tap", "Nope", "--device", "runner-fake", env=host)
+    assert gone.returncode == 1 and "no element 'Nope'" in gone.stderr and "next: ddp tree --device runner-fake" in gone.stderr, gone.stderr
+    # A walk: every action a step, an expectation, a report; then a replay with no model, by label, never by pixels.
+    app.saved = False
+    started = ddp_in(directory, "walk", "start", "Save the form", "--device", "runner-fake", env=host)
+    assert started.returncode == 0 and "walk save-the-form started on android runner-fake (no SDK: no checks)" in started.stdout, started.stdout + started.stderr
+    assert ddp_in(directory, "tap", "Save", "--device", "runner-fake", env=host).returncode == 0
+    expected = ddp_in(directory, "walk", "expect", "Saved", env=host)
+    assert expected.returncode == 0 and 'expect "Saved": on screen' in expected.stdout, expected.stdout + expected.stderr
+    ended = ddp_in(directory, "walk", "end", "pass", "--note", "saved once", env=host)
+    assert ended.returncode == 0 and "walk save-the-form: PASS, 2 steps on android runner-fake, no checks (no SDK)" in ended.stdout and \
+        re.search(r'1\. tap Save in \d+ms; new: @e\d+ "Saved"\n2\. expect "Saved": on screen\nnote: saved once\n', ended.stdout) and \
+        "next: ddp walk replay save-the-form" in ended.stdout, ended.stdout + ended.stderr
+    app.saved, app.runner = False, []
+    replayed = ddp_in(directory, "walk", "replay", "save-the-form", "--device", "runner-fake", env=host)
+    assert replayed.returncode == 0 and re.fullmatch(r"replay save-the-form on android runner-fake: 2 steps passed in [\d.]+s\n", replayed.stdout), replayed.stdout + replayed.stderr
+    assert app.runner == [("input.tap", {"x": 110, "y": 60})], app.runner
+    app.saved, app.hide_save = False, True
+    broken = ddp_in(directory, "walk", "replay", "save-the-form", "--device", "runner-fake", env=host)
+    assert broken.returncode == 1 and 'FAIL at step 1, tap "Save": not on screen' in broken.stdout and 'on screen: "Off"' in broken.stdout, broken.stdout + broken.stderr
+    app.hide_save = False
+    assert "save-the-form pass 2 steps android: Save the form" in ddp_in(directory, "walk", "list").stdout
+    # Parity compares the labels that appeared after each step, not elements: iOS keys a button by id, Android by label.
+    walks = Path(directory, ".ddp", "walks")
+    (walks / "save-the-form.ios.replay.json").write_text(json.dumps({"ok": True, "steps": [
+        {"n": 1, "ok": True, "appeared": ["Selected"]}, {"n": 2, "ok": True, "appeared": ["Saved"]}]}))
+    (walks / "save-the-form.android.replay.json").write_text(json.dumps({"ok": True, "steps": [
+        {"n": 1, "ok": True, "appeared": ["Selected"]}, {"n": 2, "ok": True, "appeared": ["Saved", "Undo"]}]}))
+    compared = ddp_in(directory, "walk", "parity", "save-the-form")
+    assert compared.returncode == 1 and compared.stdout == ("step 2: ios passed, android passed; new on Android only: Undo\n"
+        "parity save-the-form: ios passed, android passed; 1 step differs\n"), compared.stdout + compared.stderr
     # Host commands refuse what a platform has no public way to do, before running anything.
     sim, emu = "5A9A96DD-128D-475C-B007-46F50ED266A7", "emulator-5554"
     for args, said in [(("set", "orientation", "landscape", "--device", sim), "no public way to rotate"),

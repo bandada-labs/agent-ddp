@@ -156,19 +156,24 @@ const FOCUS_WAIT_MS: u64 = 200;
 
 /// Types into the focused field, or into `--into` after tapping it.
 pub fn type_text(args: &mut Args) -> Result<i32> {
-    if args.device.is_some() {
+    if crate::runner::device_mode(args) {
         return crate::runner::type_text(args);
     }
     let session = require_session()?;
     let text = args.value.clone().unwrap_or_default();
     let mut control = open(&session)?;
+    let mut places = Vec::new();
     if let Some(id) = &args.id {
-        touch(&mut control, element_center(&session, id)?)?;
+        let at = element_center(&session, id)?;
+        let field = crate::hit::frame_now(&session)?.element(id).map(crate::hit::seen);
+        places.push((id.clone(), at, field));
+        touch(&mut control, at)?;
         // The field takes the focus on a later turn of the main loop; typed text before that goes nowhere.
         std::thread::sleep(Duration::from_millis(FOCUS_WAIT_MS));
     }
     control.call("input.type", json!({"text": text}))?;
     control.close();
+    crate::hit::note(&py::str(&session["platform"]), places, &[], json!({"text": text}));
     say!(
         "typed {} characters{}",
         text.chars().count(),
@@ -178,12 +183,13 @@ pub fn type_text(args: &mut Args) -> Result<i32> {
 }
 
 pub fn press(args: &mut Args) -> Result<i32> {
-    if args.device.is_some() {
+    if crate::runner::device_mode(args) {
         return crate::runner::press(args);
     }
     let session = require_session()?;
     let key = args.value.clone().unwrap_or_default();
     open(&session)?.call("input.key", json!({"key": key}))?;
+    crate::hit::note(&py::str(&session["platform"]), Vec::new(), &[], json!({"key": key}));
     say!("pressed {key}");
     Ok(0)
 }

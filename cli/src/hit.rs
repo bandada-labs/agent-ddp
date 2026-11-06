@@ -17,12 +17,16 @@ const TAP_WAIT_MS: u64 = 2000;
 /// How long `tap` looks for a change on screen after the touch.
 const CHANGE_WAIT_MS: u64 = 1000;
 const POLL_MS: u64 = 50;
+/// After the first change, the screen is settled when this many polls in a row bring nothing new.
+const QUIET_POLLS: u32 = 3;
+/// The longest `tap` waits for the screen to settle.
+const SETTLE_WAIT_MS: u64 = 3000;
 const BUSY_SAMPLE_MS: u64 = 100;
 /// Two frames closer than this (in the platform's unit) are the same place: the element is not moving.
 const STILL: f64 = 0.5;
 
 pub fn tap(args: &mut Args) -> Result<i32> {
-    if args.device.is_some() {
+    if crate::runner::device_mode(args) {
         return crate::runner::gesture(args);
     }
     let session = require_session()?;
@@ -52,7 +56,7 @@ pub fn tap(args: &mut Args) -> Result<i32> {
     let busy = changed_keys(before.frames.last().unwrap(), &settled);
     touch(&mut control, (x, y))?;
     control.close();
-    let (changed, after) = wait_for_change(&session, &settled, &busy)?;
+    let (changed, after, still_changing) = wait_for_change(&session, &settled, &busy)?;
     let mut notes = Vec::new();
     if !text(&hit, "reason").is_empty() {
         notes.push(format!("its center is {}", detail(&hit)));
@@ -60,27 +64,9 @@ pub fn tap(args: &mut Args) -> Result<i32> {
     if moving {
         notes.push("it was still moving".to_string());
     }
-    let outcome = if changed.is_empty() {
-        // A slow action (a request) can still change the screen later; a second tap would run it twice.
-        format!("nothing changed within {CHANGE_WAIT_MS}ms; look again before a second tap")
-    } else {
-        // A label is the name of an element without an id, so a new label reads as one element gone, one new.
-        let (was, is) = (settled.keys(), after.keys());
-        let group = |label: &str, keep: &dyn Fn(&String) -> bool| {
-            let keys: Vec<&String> = changed.iter().filter(|k| keep(k)).take(5).collect();
-            (!keys.is_empty())
-                .then(|| format!("{label}: {}", keys.iter().map(|k| k.as_str()).collect::<Vec<_>>().join(", ")))
-        };
-        [
-            group("changed", &|k| was.contains(k) && is.contains(k)),
-            group("new", &|k| !was.contains(k)),
-            group("gone", &|k| !is.contains(k)),
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>()
-        .join("; ")
-    };
+    let (outcome, new) = outcome(&settled, &after, &changed, still_changing)?;
+    let shown = json!({"appeared": appeared(&settled, &after, &busy)});
+    note(&py::str(&session["platform"]), vec![(key.clone(), (x, y), Some(seen(&element)))], &new, shown);
     let notes = if notes.is_empty() { String::new() } else { format!(" ({})", notes.join(", ")) };
     say!("tapped {key} at ({x:.0}, {y:.0}){notes}; {outcome}");
     Ok(0)
@@ -194,7 +180,7 @@ fn distance(a: [f64; 4], b: [f64; 4]) -> f64 {
 }
 
 /// One frame of what is on screen, kept in memory: polling must not replace the last take on disk.
-fn frame_now(session: &Value) -> Result<Frame> {
+pub fn frame_now(session: &Value) -> Result<Frame> {
     let recording = from_lines(snapshot_messages(session)?, PathBuf::from("live"))?;
     Ok(recording.frames.into_iter().last().unwrap())
 }
@@ -207,17 +193,124 @@ fn changed_keys(a: &Frame, b: &Frame) -> BTreeSet<String> {
     keys.into_iter().filter(|key| key != "?" && state(a, key) != state(b, key)).collect()
 }
 
-/// Polls until something other than the busy elements changes, or the wait is over: the changed keys and the frame.
-fn wait_for_change(session: &Value, settled: &Frame, busy: &BTreeSet<String>) -> Result<(Vec<String>, Frame)> {
-    let deadline = Instant::now() + Duration::from_millis(CHANGE_WAIT_MS);
+/// Polls until the screen settles: the first change other than the busy elements within 1 s, then until three polls
+/// in a row bring nothing new, at most 3 s. The changed keys against `settled`, the last frame, whether it was still
+/// changing when the wait ran out.
+fn wait_for_change(session: &Value, settled: &Frame, busy: &BTreeSet<String>) -> Result<(Vec<String>, Frame, bool)> {
+    let started = Instant::now();
+    let mut last: Option<Frame> = None;
+    let mut quiet = 0;
     loop {
         std::thread::sleep(Duration::from_millis(POLL_MS));
         let now = frame_now(session)?;
-        let changed: Vec<String> = changed_keys(settled, &now).difference(busy).cloned().collect();
-        if !changed.is_empty() || Instant::now() >= deadline {
-            return Ok((changed, now));
+        let changed_since = |frame: &Frame| changed_keys(frame, &now).difference(busy).count() > 0;
+        match &last {
+            None if !changed_since(settled) => {
+                if started.elapsed() >= Duration::from_millis(CHANGE_WAIT_MS) {
+                    return Ok((Vec::new(), now, false));
+                }
+            }
+            Some(previous) if !changed_since(previous) => {
+                quiet += 1;
+                if quiet >= QUIET_POLLS {
+                    let changed = changed_keys(settled, &now).difference(busy).cloned().collect();
+                    return Ok((changed, now, false));
+                }
+            }
+            _ => {
+                quiet = 0;
+                if started.elapsed() >= Duration::from_millis(SETTLE_WAIT_MS) {
+                    let changed = changed_keys(settled, &now).difference(busy).cloned().collect();
+                    return Ok((changed, now, true));
+                }
+                last = Some(now);
+            }
         }
     }
+}
+
+/// The change as the agent reads it: changed, new and gone elements, each with the `@eN` to act on next.
+fn outcome(settled: &Frame, after: &Frame, changed: &[String], still_changing: bool) -> Result<(String, Vec<String>)> {
+    if changed.is_empty() {
+        return Ok((format!("nothing changed within {CHANGE_WAIT_MS}ms; look again before a second tap"), Vec::new()));
+    }
+    let refs = crate::runner::refs_for(changed)?;
+    let (was, is) = (settled.keys(), after.keys());
+    let named = |key: &String| refs.get(key).map(|r| format!("{r} {key}")).unwrap_or_else(|| key.clone());
+    let group = |label: &str, keep: &dyn Fn(&String) -> bool| {
+        let keys: Vec<&String> = changed.iter().filter(|k| keep(k)).collect();
+        (!keys.is_empty()).then(|| {
+            let mut shown: Vec<String> = keys.iter().take(5).map(|k| named(k)).collect();
+            if keys.len() > 5 {
+                shown.push(format!("+{}", keys.len() - 5));
+            }
+            format!("{label}: {}", shown.join(", "))
+        })
+    };
+    // A label is the name of an element without an id, so a new label reads as one element gone, one new.
+    let mut parts: Vec<String> = [
+        group("changed", &|k| was.contains(k) && is.contains(k)),
+        group("new", &|k| !was.contains(k)),
+        group("gone", &|k| !is.contains(k)),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    if still_changing {
+        parts.push("still changing".into());
+    }
+    let new = changed.iter().filter(|k| !was.contains(k)).cloned().collect();
+    Ok((parts.join("; "), new))
+}
+
+/// What a walk keeps of an element: enough to find it again on another run.
+pub fn seen(element: &Value) -> Value {
+    json!({"key": element_key(element), "id": element.get("id"), "label": element.get("label"), "frame": element["frame"]})
+}
+
+/// The smallest element under a point: what a finger there lands on.
+fn under(frame: &Frame, (x, y): (f64, f64)) -> Option<Value> {
+    let area = |e: &Value| {
+        let [_, _, w, h] = rect(&e["frame"]);
+        w * h
+    };
+    frame
+        .elements()
+        .iter()
+        .filter(|e| {
+            let [ex, ey, w, h] = rect(&e["frame"]);
+            x >= ex && x <= ex + w && y >= ey && y <= ey + h
+        })
+        .min_by(|a, b| area(a).total_cmp(&area(b)))
+        .map(seen)
+}
+
+/// A walk step with the library: the places as given with what was there, and the keys that changed.
+/// Labels on screen after the action that were not before it, whatever element holds them (see walk parity).
+fn appeared(settled: &Frame, after: &Frame, busy: &BTreeSet<String>) -> Vec<String> {
+    let labels = |frame: &Frame| -> Vec<String> {
+        frame
+            .elements()
+            .iter()
+            .filter(|e| !busy.contains(&element_key(e)))
+            .filter_map(|e| e["label"].as_str().filter(|l| !l.is_empty()).map(String::from))
+            .collect()
+    };
+    let was = labels(settled);
+    labels(after).into_iter().filter(|l| !was.contains(l)).collect()
+}
+
+pub fn note(platform: &str, places: Vec<(String, (f64, f64), Option<Value>)>, new: &[String], given: Value) {
+    let mut note = json!({
+        "mode": "sdk",
+        "platform": platform,
+        "places": places.into_iter().map(|(given, at, seen)| json!({"given": given, "at": [at.0, at.1], "seen": seen})).collect::<Vec<_>>(),
+        "new": new,
+    });
+    if let (Some(note), Some(given)) = (note.as_object_mut(), given.as_object()) {
+        note.extend(given.clone());
+    }
+    crate::walk::note(note);
 }
 
 /// A point has no element to ask the hit test about: touch it, then say what changed.
@@ -229,12 +322,14 @@ fn tap_point(session: &Value, at: (f64, f64)) -> Result<i32> {
     let mut control = open(session)?;
     touch(&mut control, at)?;
     control.close();
-    let (changed, _) = wait_for_change(session, &settled, &busy)?;
-    let outcome = if changed.is_empty() {
-        format!("nothing changed within {CHANGE_WAIT_MS}ms; look again before a second tap")
-    } else {
-        format!("changed: {}", changed.iter().take(5).cloned().collect::<Vec<_>>().join(", "))
-    };
+    let (changed, after, still_changing) = wait_for_change(session, &settled, &busy)?;
+    let (outcome, new) = outcome(&settled, &after, &changed, still_changing)?;
+    note(
+        &py::str(&session["platform"]),
+        vec![(format!("{},{}", at.0, at.1), at, under(&settled, at))],
+        &new,
+        json!({"appeared": appeared(&settled, &after, &busy)}),
+    );
     say!("tapped ({:.0}, {:.0}); {outcome}", at.0, at.1);
     Ok(0)
 }
@@ -249,7 +344,7 @@ pub const DOUBLE_TAP_GAP_MS: u64 = 100;
 /// `swipe`, `drag`, `double-tap`, `long-press`: one finger on `input.touch`, the real finger the libraries give, then
 /// what changed. A place is an element (its center) or `x,y` in the frames' unit (pt on iOS, px on Android).
 pub fn gesture(args: &mut Args) -> Result<i32> {
-    if args.device.is_some() {
+    if crate::runner::device_mode(args) {
         return crate::runner::gesture(args);
     }
     let session = require_session()?;
@@ -310,12 +405,20 @@ pub fn gesture(args: &mut Args) -> Result<i32> {
         _ => unreachable!("swipe and drag have a place to go"),
     }
     control.close();
-    let (changed, _) = wait_for_change(&session, &settled, &busy)?;
-    let outcome = if changed.is_empty() {
-        format!("nothing changed within {CHANGE_WAIT_MS}ms")
+    let (changed, after, still_changing) = wait_for_change(&session, &settled, &busy)?;
+    let (outcome, new) = outcome(&settled, &after, &changed, still_changing)?;
+    let outcome = outcome.replace("; look again before a second tap", "");
+    let to_text = args.value.clone().map(|text| crate::queries::resolve_ref(&text)).transpose()?;
+    let mut places = vec![(from_text.clone(), from, place_seen(frame, &from_text, from))];
+    if let (Some(text), Some(to)) = (&to_text, to) {
+        places.push((text.clone(), to, place_seen(frame, text, to)));
+    }
+    let given = if gesture == "double-tap" {
+        json!({"appeared": appeared(&settled, &after, &busy)})
     } else {
-        format!("changed: {}", changed.iter().take(5).cloned().collect::<Vec<_>>().join(", "))
+        json!({"appeared": appeared(&settled, &after, &busy), "ms_given": args.duration.as_deref().map(crate::state::parse_ms).transpose()?})
     };
+    note(&py::str(&session["platform"]), places, &new, given);
     let places = match to {
         Some(to) => format!("({:.0}, {:.0}) -> ({:.0}, {:.0})", from.0, from.1, to.0, to.1),
         None => format!("({:.0}, {:.0})", from.0, from.1),
@@ -336,6 +439,14 @@ pub fn highlight(args: &mut Args) -> Result<i32> {
     open(&session)?.call("screen.highlight", json!({"rect": element["frame"], "ms": ms}))?;
     say!("highlighted {key} {} for {}ms", py::str(&element["frame"]), ms as u64);
     Ok(0)
+}
+
+/// What was at a place a gesture was given: the element named, or the one under the point.
+fn place_seen(frame: &Frame, text: &str, at: (f64, f64)) -> Option<Value> {
+    match point(text) {
+        Some(_) => under(frame, at),
+        None => frame.element(text).map(seen),
+    }
 }
 
 /// An element's center, or `x,y`.

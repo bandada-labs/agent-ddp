@@ -7,7 +7,7 @@ use crate::args::Args;
 use crate::live;
 use crate::py;
 use crate::state::{adb_path, capture, ctx, failure, now_ms, read_json, write_file, Result};
-use crate::{fail, say, warn};
+use crate::{fail, say};
 use serde_json::{json, Value};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
@@ -57,7 +57,15 @@ pub fn up(args: &mut Args) -> Result<i32> {
         args.platform = Some(platform.clone());
         match live::attach_within(&platform, &id, &app, ENDPOINT_PATIENCE) {
             Ok((session, snapshot)) => return live::keep_session(&session, &snapshot),
-            Err(reason) => warn!("ddp: {app} started, not connected: {}", reason.message),
+            Err(reason) => {
+                // An app without the library still takes touches and shows its accessibility tree.
+                let session = json!({"platform": platform, "device": id, "app": app, "mode": "device"});
+                write_file(&ctx().session_file, py::dumps(&session))?;
+                say!(
+                    "{app} runs without the library ({}): tree, tap, type, swipe, press and walk work through the platform, with no checks",
+                    reason.message
+                );
+            }
         }
     }
     Ok(0)

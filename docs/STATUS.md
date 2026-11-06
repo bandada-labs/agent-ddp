@@ -1,6 +1,6 @@
 # Status
 
-Last update: 2026-11-03. Read this after a break, then [DECISIONS.md](DECISIONS.md).
+Last update: 2026-11-06. Read this after a break, then [DECISIONS.md](DECISIONS.md).
 
 ## In one paragraph
 
@@ -17,6 +17,10 @@ A small library inside a Debug build of an iOS or Android app serves what the ap
 0.2.0 on 2026-10-24: the control endpoint (protocol 2), so the CLI and the library must be updated together. npm `agent-ddp`, GitHub release with 5 binaries, JitPack `com.github.bandada-labs:agent-ddp:v0.2.0`, SwiftPM from the repo URL. Checked before the tag: CI's three jobs locally, every command live on the sample apps, release builds without the library, and the hook matrix on iOS 26.5 and 27.0 and API 29, 33 and 35. What is in it: [CHANGELOG.md](../CHANGELOG.md).
 
 0.1.5 on 2026-10-23.
+
+## In progress: 0.5.0 (not released)
+
+Done and checked live on the iOS 27.0 simulator and the API 36 emulator with the sample apps: `ddp up` / `ddp down` (own device from a warm base, boot under 10 s); apps without the library on both platforms (`--device`, or a session `up` keeps): Android through ddp's runner instrumentation (a tap in about 35 ms), iOS from the Mac through the simulator's HID and accessibility services (about 200 ms per command, no XCTest); every action prints what changed with refs; `ddp walk` start, expect, end, replay with no model, and parity between iOS and Android (a walk made on iOS replayed on Android, parity 0 differences). Before the tag: the version bump, the release workflow building the runner APK first (changed, untested until a tag), and the hook matrix for the two new Mac-side hooks.
 
 ## Next
 

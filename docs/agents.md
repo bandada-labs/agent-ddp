@@ -43,6 +43,8 @@ ddp swipe <from> <to> [--for 300ms]                a quick move (scroll, page); 
 ddp drag <from> <to> [--for 600ms]                 hold 500ms, move slowly, let go (reorder, drag and drop)
 ddp double-tap <place> | long-press <place> [--for 800ms]
 ddp tap|double-tap|swipe|drag|long-press|type|press|tree ... --device <device>   without the library: labels or x,y, no checks
+ddp walk start "<task>" | expect <element> | end pass|fail [--note ..] | show | list   a task step by step, kept as a file
+ddp walk replay [<walk>] [--device <id>] | parity [<walk>]   the walk again with no model; iOS against Android
 ddp type <text> [--into <element>]                 type as the keyboard does, into the focused field
 ddp press Enter | Tab | Backspace
 ddp prefs [list | set <key> <value> | rm <key> | clear | files] [--in <suite or file>]
@@ -183,11 +185,11 @@ A control covered for touch is `check tappable`'s.
 
 ### tap, check tappable
 
-`tap` asks the app's own hit test (`screen.hit`) where a touch on the element would land before it touches, the same calls a real finger goes through. iOS: UIKit's `hitTest`, and in SwiftUI content the gesture hit test with the radius UIKit gives a touch; whether the gesture that wins is the control's own is SwiftUI's answer too (the responders its accessibility node keeps). Android: the walk ViewGroup dispatch makes, with its own methods for order, transforms and scroll, and Compose's `hitTest`. When the platform cannot say (app code decides, or a hook does not work on that version), the point counts as reaching: nothing is reported that the platform did not decide. It waits up to 2 s for the element to hold still, become enabled and have a point a touch reaches (the center first, then 8 more points), then touches there and looks for a change for 1 s:
+`tap` asks the app's own hit test (`screen.hit`) where a touch on the element would land before it touches, the same calls a real finger goes through. iOS: UIKit's `hitTest`, and in SwiftUI content the gesture hit test with the radius UIKit gives a touch; whether the gesture that wins is the control's own is SwiftUI's answer too (the responders its accessibility node keeps). Android: the walk ViewGroup dispatch makes, with its own methods for order, transforms and scroll, and Compose's `hitTest`. When the platform cannot say (app code decides, or a hook does not work on that version), the point counts as reaching: nothing is reported that the platform did not decide. It waits up to 2 s for the element to hold still, become enabled and have a point a touch reaches (the center first, then 8 more points), then touches there and waits for the screen to settle: the first change within 1 s, then until three looks in a row bring nothing new (at most 3 s; past that the line says `still changing`). The line names what changed, what is new and what is gone, each with its `@eN`, so the next step needs no `tree`. Refs an action gives never renumber the ones you hold:
 
 ```
 $ ddp tap @e1
-tapped animatedButton at (201, 146); changed: animatedButton, flashBox
+tapped animatedButton at (201, 146); changed: @e1 animatedButton, @e4 flashBox
 $ ddp tap trapCovered
 ddp: trapCovered is covered by TapGesture: no point of it takes a touch
 next: ddp check tappable, or ddp tap trapCovered --force to touch it anyway
@@ -249,7 +251,30 @@ report: /Users/you/Library/Logs/DiagnosticReports/DDPSample-2026-10-29-155054.ip
 
 `swipe`, `drag`, `double-tap` and `long-press` move one real finger with `input.touch`, the same finger `tap` uses, so gesture recognizers, SwiftUI and Compose see a touch. A place is an element (its center, read just before) or `x,y` in the frames' unit. `swipe` moves in 12 steps over `--for`; `drag` holds 500 ms first so the app sees a long press that picks the item up; `double-tap` leaves 100 ms between taps. Each prints what changed, leaving out what changes on its own (a clock). A swipe can leave a list moving: wait (`ddp wait --settled 300ms`) before you touch something in it.
 
-Without the library, `--device <adb serial>` drives the app through ddp's runner (Android): an instrumentation ddp carries inside its binary, installs and starts on the device the first time (`am instrument`, alive for the session, about 2 s), and reaches through `adb forward`. Touches go in as the system's own input (UiAutomation): a tap takes about 35 ms. A place is `x,y` in screen pixels (the screenshot's) or a label, content description or resource id, which the runner finds in the platform's accessibility tree. `tree --device` lists those elements, one line each: `Button "Save" #save [x,y wxh] tap`. `type --device` types ASCII through the virtual keyboard map. On iOS (simulators) ddp drives the simulator from the Mac, with nothing installed in it and no XCTest: touches and keys go into the simulator's own HID service, the same input as the Simulator window, and `tree --device` reads its accessibility service, the elements VoiceOver reads. A place is `x,y` in points or a label or accessibility identifier. `type --device` types ASCII as key presses on a US keyboard. Each command takes about 200 ms on a booted simulator (CoreSimulator's device list about 70 ms, then 80 ms so the last event reaches the app before ddp lets go of the connection). The accessibility tree is what VoiceOver reads: an element under the keyboard or another cover is not in it. Both pieces are private Apple API (docs/hooks.md, Mac host): `ddp doctor <sim UDID>` asks them, and a command fails when the simulator does not answer, never half done. The app's engine is not there to ask on either platform, so nothing is checked: every line ends with `no checks (no SDK)`.
+Without the library, `--device <device>` drives the app; after `ddp up` with an app that has no library, the session remembers it and `--device` can be left out. Android goes through ddp's runner: an instrumentation ddp carries inside its binary, installs and starts on the device the first time (`am instrument`, alive for the session, about 2 s), and reaches through `adb forward`. Touches go in as the system's own input (UiAutomation): a tap takes about 35 ms. A place is `x,y` in screen pixels (the screenshot's), a label, content description or resource id from the platform's accessibility tree, or an `@eN`. `tree --device` lists those elements, one line each: `@e3 Button "Save" #save [x,y wxh] tap`. `type --device` types ASCII through the virtual keyboard map. On iOS (simulators) ddp drives the simulator from the Mac, with nothing installed in it and no XCTest: touches and keys go into the simulator's own HID service, the same input as the Simulator window, and `tree --device` reads its accessibility service, the elements VoiceOver reads. A place is `x,y` in points or a label or accessibility identifier. `type --device` types ASCII as key presses on a US keyboard. Each command takes about 200 ms on a booted simulator (CoreSimulator's device list about 70 ms, then 80 ms so the last event reaches the app before ddp lets go of the connection). The accessibility tree is what VoiceOver reads: an element under the keyboard or another cover is not in it. Both pieces are private Apple API (docs/hooks.md, Mac host): `ddp doctor <sim UDID>` asks them, and a command fails when the simulator does not answer, never half done. Each action reads the accessibility tree before and after and says what changed once the screen settles, like `tap` with the library: `tap Save on <device> in 47ms; new: @e12 "Saved"; gone: @e5 "Save"; no checks (no SDK)`. Elements that change by themselves (a clock) are left out, and `N moved` counts what only moved (a scroll). The app's engine is not there to ask on either platform, so nothing is checked: every line ends with `no checks (no SDK)`. Commands that need the library say so in a session without it.
+
+### walk
+
+A walk is a task done step by step and kept as a file, for an agent testing an app like a person would. ddp calls no model: the agent walking is the model, ddp keeps the steps, the report and the replay.
+
+```
+$ ddp walk start "add a note, then delete it"
+walk add-a-note-then-delete-it started on ios <udid> (no SDK: no checks); each tap, swipe, type and press is now a step ...
+$ ddp tap "New note"
+$ ddp type "milk" --into @e7
+$ ddp walk expect "milk"
+$ ddp walk end pass
+walk add-a-note-then-delete-it: PASS, 3 steps on ios <udid>, no checks (no SDK)
+task: add a note, then delete it
+1. tap New note in 41ms; new: @e7 #noteField
+2. typed 4 characters into @e7 in 380ms; changed: @e7 #noteField = "milk"
+3. expect "milk": on screen
+file: .ddp/walks/add-a-note-then-delete-it.jsonl; screenshots: .ddp/walks/add-a-note-then-delete-it
+```
+
+While a walk is open, every `tap`, `double-tap`, `long-press`, `swipe`, `drag`, `type` and `press` is a step: its line, the places it was given with the element seen there (label, id, frame), what changed, and a screenshot taken in the background after the screen settled (`step-01.png` ...). `walk expect <element>` waits up to 3 s for an element (label, id or ref) and adds it as a check; it fails when the element does not show. Works with the library and without it.
+
+`walk replay [<walk>]` does the steps again with no model and no tokens: each target is found again by its id, else its label (the one nearest where it was, on the same platform), never by its old pixels; a point is replayed at the same spot of the element it landed on. It waits up to 3 s for each target. It fails only when a target or an expected element is not on screen: one line with the step and what the screen shows instead. It passes with one line: `replay add-a-note on ios <udid>: 3 steps passed in 2.4s`. `--device` replays on another device, the other platform too: ids differ between platforms more often than labels, so a walk that should run on both is best walked by label. `walk parity` compares the last replay on iOS with the last on Android, step by step: which passed, and what appeared on one and not on the other.
 
 ### device actions
 

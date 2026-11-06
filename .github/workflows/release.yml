@@ -8,7 +8,23 @@ on:
     tags: ["v*"]
 
 jobs:
+  # The Android runner, which every ddp binary carries (cli/build.rs): built once, put in each build below.
+  runner:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - run: ./samples/android/gradlew -p samples/android :runner:assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runner-apk
+          path: android/runner/build/outputs/apk/debug/runner-debug.apk
+
   build:
+    needs: runner
     strategy:
       matrix:
         include:
@@ -25,6 +41,13 @@ jobs:
           targets: ${{ matrix.target }}
       - if: contains(matrix.target, 'musl')
         run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - uses: actions/download-artifact@v4
+        with:
+          name: runner-apk
+          path: android/runner/build/outputs/apk/debug
+      # Without it the binary still builds and says so on Android; a release must not ship that way.
+      - shell: bash
+        run: test -s android/runner/build/outputs/apk/debug/runner-debug.apk
       - run: cargo build --release --manifest-path cli/Cargo.toml --target ${{ matrix.target }}
       - shell: bash
         run: cp cli/target/${{ matrix.target }}/release/ddp${{ matrix.exe }} ddp-${{ matrix.npm }}${{ matrix.exe }}

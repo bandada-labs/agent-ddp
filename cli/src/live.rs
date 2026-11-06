@@ -174,6 +174,11 @@ pub fn live_session(args: &Args) -> Option<Value> {
 
 pub fn require_session() -> Result<Value> {
     match read_json(&ctx().session_file) {
+        Some(session) if session["mode"] == "device" => fail!(
+            format!("{} runs without the library: this command needs it", py::str(&session["app"])),
+            "no_library",
+            "without it: tree, tap, double-tap, long-press, swipe, drag, type, press and walk work (no checks)"
+        ),
         Some(session) => Ok(session),
         None => fail!("not connected", "not_connected", "ddp connect DEVICE --app ID"),
     }

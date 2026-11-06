@@ -116,7 +116,7 @@ fn public_node(node: &Value) -> Value {
 }
 
 pub fn tree(args: &mut Args) -> Result<i32> {
-    if args.device.is_some() {
+    if crate::runner::device_mode(args) {
         return crate::runner::tree(args);
     }
     let recording = match live_session(args) {

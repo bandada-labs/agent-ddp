@@ -27,7 +27,7 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-      - run: ./samples/android/gradlew -p samples/android :agent-ddp:testDebugUnitTest :agent-ddp:assembleRelease :app:assembleDebug
+      - run: ./samples/android/gradlew -p samples/android :agent-ddp:testDebugUnitTest :agent-ddp:assembleRelease :app:assembleDebug :runner:assembleDebug
 
   ios:
     runs-on: macos-15
