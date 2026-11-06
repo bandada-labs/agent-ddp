@@ -65,7 +65,7 @@ pub fn tap(args: &mut Args) -> Result<i32> {
         notes.push("it was still moving".to_string());
     }
     let (outcome, new) = outcome(&settled, &after, &changed, still_changing)?;
-    let shown = json!({"appeared": appeared(&settled, &after, &busy)});
+    let shown = json!({"appeared": appeared(&session, &settled, &after, &busy)?});
     note(&py::str(&session["platform"]), vec![(key.clone(), (x, y), Some(seen(&element)))], &new, shown);
     let notes = if notes.is_empty() { String::new() } else { format!(" ({})", notes.join(", ")) };
     say!("tapped {key} at ({x:.0}, {y:.0}){notes}; {outcome}");
@@ -287,7 +287,8 @@ fn under(frame: &Frame, (x, y): (f64, f64)) -> Option<Value> {
 
 /// A walk step with the library: the places as given with what was there, and the keys that changed.
 /// Labels on screen after the action that were not before it, whatever element holds them (see walk parity).
-fn appeared(settled: &Frame, after: &Frame, busy: &BTreeSet<String>) -> Vec<String> {
+/// During a replay, labels must still be there one more look later (see `runner::confirmed`).
+fn appeared(session: &Value, settled: &Frame, after: &Frame, busy: &BTreeSet<String>) -> Result<Vec<String>> {
     let labels = |frame: &Frame| -> Vec<String> {
         frame
             .elements()
@@ -297,7 +298,13 @@ fn appeared(settled: &Frame, after: &Frame, busy: &BTreeSet<String>) -> Vec<Stri
             .collect()
     };
     let was = labels(settled);
-    labels(after).into_iter().filter(|l| !was.contains(l)).collect()
+    let appeared: Vec<String> = labels(after).into_iter().filter(|l| !was.contains(l)).collect();
+    if !crate::walk::replaying() || appeared.is_empty() {
+        return Ok(appeared);
+    }
+    std::thread::sleep(crate::runner::CONFIRM_LOOK);
+    let later = labels(&frame_now(session)?);
+    Ok(appeared.into_iter().filter(|l| later.contains(l)).collect())
 }
 
 pub fn note(platform: &str, places: Vec<(String, (f64, f64), Option<Value>)>, new: &[String], given: Value) {
@@ -328,7 +335,7 @@ fn tap_point(session: &Value, at: (f64, f64)) -> Result<i32> {
         &py::str(&session["platform"]),
         vec![(format!("{},{}", at.0, at.1), at, under(&settled, at))],
         &new,
-        json!({"appeared": appeared(&settled, &after, &busy)}),
+        json!({"appeared": appeared(session, &settled, &after, &busy)?}),
     );
     say!("tapped ({:.0}, {:.0}); {outcome}", at.0, at.1);
     Ok(0)
@@ -414,9 +421,9 @@ pub fn gesture(args: &mut Args) -> Result<i32> {
         places.push((text.clone(), to, place_seen(frame, text, to)));
     }
     let given = if gesture == "double-tap" {
-        json!({"appeared": appeared(&settled, &after, &busy)})
+        json!({"appeared": appeared(&session, &settled, &after, &busy)?})
     } else {
-        json!({"appeared": appeared(&settled, &after, &busy), "ms_given": args.duration.as_deref().map(crate::state::parse_ms).transpose()?})
+        json!({"appeared": appeared(&session, &settled, &after, &busy)?, "ms_given": args.duration.as_deref().map(crate::state::parse_ms).transpose()?})
     };
     note(&py::str(&session["platform"]), places, &new, given);
     let places = match to {

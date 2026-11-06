@@ -85,7 +85,17 @@ macro_rules! warn {
     ($($arg:tt)*) => { $crate::state::write_err(&format!("{}\n", format_args!($($arg)*))) };
 }
 
+thread_local! {
+    static LAST_FAILURE: RefCell<Option<Failure>> = const { RefCell::new(None) };
+}
+
+/// The failure the last command reported, for a caller that ran it inside its own (a walk's replay).
+pub fn take_last_failure() -> Option<Failure> {
+    LAST_FAILURE.with(|f| f.borrow_mut().take())
+}
+
 pub fn report_failure(failure: &Failure) {
+    LAST_FAILURE.with(|f| *f.borrow_mut() = Some(failure.clone()));
     if ctx().json {
         let body = crate::py::obj(vec![
             ("error", failure.message.clone().into()),

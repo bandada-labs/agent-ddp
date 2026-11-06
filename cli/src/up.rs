@@ -62,7 +62,7 @@ pub fn up(args: &mut Args) -> Result<i32> {
                 let session = json!({"platform": platform, "device": id, "app": app, "mode": "device"});
                 write_file(&ctx().session_file, py::dumps(&session))?;
                 say!(
-                    "{app} runs without the library ({}): tree, tap, type, swipe, press and walk work through the platform, with no checks",
+                    "{app} did not answer as an app with the library ({}): tree, tap, type, swipe, press and walk now go through the platform, with no checks; if it has the library, ddp connect {id} --app {app}",
                     reason.message
                 );
             }

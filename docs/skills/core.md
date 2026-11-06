@@ -75,7 +75,7 @@ A platform that cannot do something from the host refuses with the reason and th
 
 ## Refs
 
-`tree` and `find text|id` print `@e1`, `@e2` ... Use them anywhere an element goes: `get @e3`, `watch @e3`, `eval @e3 layer.opacity`, `tap @e3`. In a recording refs never go stale. Live, `tap`, `swipe`, `type` and the other actions print what changed with refs for it (`new: @e9 "Saved"`): act on those, no `tree` needed. An action adds refs, it never renumbers the ones you hold. Run `tree -i` again only when you need the whole screen. Two elements with the same label are `Open` and `Open [2]`.
+`tree` and `find text|id` print `@e1`, `@e2` ... Use them anywhere an element goes: `get @e3`, `watch @e3`, `eval @e3 layer.opacity`, `tap @e3`. In a recording refs never go stale. Live, `tap`, `swipe`, `type` and the other actions print what changed with refs for it (`new: @e9 "Saved"`): act on those, no `tree` needed. An element keeps its ref for the session: neither an action nor `tree` renumbers the ones you hold. Run `tree -i` again only when you need the whole screen. Two elements with the same label are `Open` and `Open [2]`.
 
 ## Reading a screen cheaply
 

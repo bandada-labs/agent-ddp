@@ -7,7 +7,7 @@ use crate::model::{
     node_alpha, normalize_label, read_text, recording_path, rect, with_origin, Frame, Recording,
 };
 use crate::py::{self, obj};
-use crate::state::{ctx, parse_ms, write_file, Result};
+use crate::state::{ctx, parse_ms, Result};
 use crate::{fail, say};
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
@@ -53,14 +53,11 @@ pub fn describe_node(node: &Value) -> String {
 
 /// @e1, @e2 ... in order of first appearance. A recording never changes, so its refs stay valid;
 /// live, they go stale as soon as the screen changes.
+/// An element keeps its number for the session, whichever command gave it: an agent may still hold a ref from an
+/// action's line, and renumbering would send its next touch to another element.
 pub fn save_refs(frames: &[Frame]) -> Result<HashMap<String, String>> {
     let keys = element_keys(frames);
-    let mut refs = Map::new();
-    for (index, key) in keys.iter().enumerate() {
-        refs.insert(format!("@e{}", index + 1), key.clone().into());
-    }
-    write_file(&ctx().dir.join("refs.json"), py::dumps(&Value::Object(refs)))?;
-    Ok(keys.into_iter().enumerate().map(|(i, k)| (k, format!("@e{}", i + 1))).collect())
+    Ok(crate::runner::refs_for(&keys)?.into_iter().filter(|(key, _)| keys.contains(key)).collect())
 }
 
 pub fn resolve_ref(text: &str) -> Result<String> {

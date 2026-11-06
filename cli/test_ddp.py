@@ -407,7 +407,7 @@ class FakeApp:
         self.typed, self.prefs, self.interceptor, self.answers = "", {}, None, {}
         # App values: total grows by 10 on every read; mode is writable.
         self.total, self.mode = 0, "idle"
-        self.touches, self.runner, self.saved, self.hide_save = [], [], False, False
+        self.touches, self.runner, self.saved, self.hide_save, self.rows = [], [], False, False, False
         self.server = socket.socket()
         self.server.bind(("127.0.0.1", 0))
         self.server.listen()
@@ -515,6 +515,8 @@ class FakeApp:
                         shown.insert(0, {"type": "Button", "label": "Save", "id": "save", "frame": [10, 20, 200, 80], "tap": True})
                     if self.saved:
                         shown.append({"type": "TextView", "label": "Saved", "frame": [10, 120, 100, 30]})
+                    if self.rows:
+                        shown += [{"type": "Button", "label": "Delete", "frame": [0, 300 + 100 * i, 100, 50]} for i in range(2)]
                     result = {"elements": shown}
                 elif method == "input.touch":
                     self.touches.append((params["phase"], round(params["x"]), round(params["y"]), clock.monotonic()))
@@ -808,6 +810,15 @@ with tempfile.TemporaryDirectory() as directory:
     assert broken.returncode == 1 and 'FAIL at step 1, tap "Save": not on screen' in broken.stdout and 'on screen: "Off"' in broken.stdout, broken.stdout + broken.stderr
     app.hide_save = False
     assert "save-the-form pass 2 steps android: Save the form" in ddp_in(directory, "walk", "list").stdout
+    # Two elements with one label are two names and two refs: the second ref touches the second element.
+    app.rows, app.runner = True, []
+    rows = ddp_in(directory, "tree", "--device", "runner-fake", env=host).stdout
+    second = re.search(r'(@e\d+) Button "Delete" \[0,400 100x50\]', rows)
+    assert second and re.search(r'@e\d+ Button "Delete" \[0,300 100x50\]', rows), rows
+    ddp_in(directory, "tap", second.group(1), "--device", "runner-fake", env=host)
+    ddp_in(directory, "tap", "Delete", "--device", "runner-fake", env=host)
+    assert app.runner == [("input.tap", {"x": 50, "y": 425}), ("input.tap", {"x": 50, "y": 325})], app.runner
+    app.rows = False
     # Parity compares the labels that appeared after each step, not elements: iOS keys a button by id, Android by label.
     walks = Path(directory, ".ddp", "walks")
     (walks / "save-the-form.ios.replay.json").write_text(json.dumps({"ok": True, "steps": [

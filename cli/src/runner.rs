@@ -107,6 +107,8 @@ const QUIET_LOOKS: u32 = 2;
 const FRAME: Duration = Duration::from_millis(16);
 /// The field takes the focus on a later turn of the app's main loop; keys before that go nowhere.
 const FOCUS_WAIT: Duration = Duration::from_millis(200);
+/// How long after a replayed action ddp looks again before it keeps what appeared.
+pub const CONFIRM_LOOK: Duration = Duration::from_millis(500);
 /// Elements listed per group in an action's line; the rest are counted.
 const SHOWN: usize = 5;
 
@@ -128,13 +130,18 @@ impl Screen {
     }
 
     /// What is on screen: `type`, `label`, `id`, `value`, `frame`, and `tap`/`enabled` where the platform says.
+    /// Named as the library names them: elements that share a label are `Delete`, `Delete [2]` in reading order, so
+    /// a ref or a name points at one element, never at the first of several.
     fn elements(&mut self) -> Result<Vec<Value>> {
-        match self {
-            Screen::Ios(simulator) => simulator.elements(),
+        let elements = match self {
+            Screen::Ios(simulator) => simulator.elements()?,
             Screen::Android(control) => {
-                Ok(control.call("screen.elements", json!({}))?["elements"].as_array().cloned().unwrap_or_default())
+                control.call("screen.elements", json!({}))?["elements"].as_array().cloned().unwrap_or_default()
             }
-        }
+        };
+        let mut frame = json!({"elements": elements});
+        crate::model::name_elements(&mut frame);
+        Ok(frame["elements"].as_array().cloned().unwrap_or_default())
     }
 
     fn android(&mut self, method: &str, params: Value) -> Result<()> {
@@ -250,10 +257,12 @@ fn place(elements: &[Value], text: &str, device: &str) -> Result<Place> {
             .cloned();
         return Ok(Place { given: text.to_string(), at, seen });
     }
-    match elements.iter().find(|e| e["label"] == text || e["id"] == text) {
+    // An exact name first (`Delete [2]`, from a ref), then a label or id: the first in reading order.
+    let named = elements.iter().find(|e| element_key(e) == text);
+    match named.or_else(|| elements.iter().find(|e| e["label"] == text || e["id"] == text)) {
         Some(element) => Ok(Place { given: text.to_string(), at: center(element), seen: Some(element.clone()) }),
         None => fail!(
-            format!("no element '{text}' in the accessibility tree (an Android Compose testTag shows only with testTagsAsResourceId)"),
+            format!("no element '{text}' in the accessibility tree (not in it: what the iOS keyboard covers, an Android Compose testTag without testTagsAsResourceId)"),
             "unknown_element",
             format!("ddp tree --device {device}")
         ),
@@ -454,6 +463,17 @@ fn appeared(before: &[Value], after: &[Value], busy: &HashSet<String>) -> Vec<St
     shown
 }
 
+/// During a replay, one more look: a label that came and went (a toast) or changes by itself (a countdown) between
+/// two runs would read as a difference between platforms. Only labels still there are kept.
+fn confirmed(screen: &mut Screen, appeared: Vec<String>) -> Result<Vec<String>> {
+    if !crate::walk::replaying() || appeared.is_empty() {
+        return Ok(appeared);
+    }
+    pause(CONFIRM_LOOK);
+    let later: Vec<String> = screen.elements()?.iter().filter_map(|e| e["label"].as_str().map(String::from)).collect();
+    Ok(appeared.into_iter().filter(|label| later.contains(label)).collect())
+}
+
 /// The elements on screen now, for walks: the platform's accessibility tree.
 pub fn elements_now(platform: &str, device: &str) -> Result<Vec<Value>> {
     Screen::open(platform, device)?.elements()
@@ -497,7 +517,7 @@ fn perform(
         "platform": platform,
         "places": places.iter().map(|p| json!({"given": p.given, "at": [p.at.0, p.at.1], "seen": p.seen})).collect::<Vec<_>>(),
         "new": change.new.iter().map(display).collect::<Vec<_>>(),
-        "appeared": appeared(&settled, &after, &busy),
+        "appeared": confirmed(&mut screen, appeared(&settled, &after, &busy))?,
         "gone": change.gone.iter().map(display).collect::<Vec<_>>(),
         "changed": change.changed.iter().map(display).collect::<Vec<_>>(),
         "ms": took.round(),

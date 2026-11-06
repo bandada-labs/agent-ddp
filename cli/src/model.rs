@@ -256,7 +256,7 @@ pub fn from_lines(lines: Vec<Value>, path: PathBuf) -> Result<Recording> {
 }
 
 /// Normalized labels, and an index for elements that share a name in one frame: `Open`, `Open [2]`.
-fn name_elements(frame: &mut Value) {
+pub fn name_elements(frame: &mut Value) {
     let mut seen: HashMap<String, usize> = HashMap::new();
     if let Some(elements) = frame["elements"].as_array_mut() {
         for element in elements {

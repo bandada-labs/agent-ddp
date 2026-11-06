@@ -16,8 +16,9 @@ use std::time::{Duration, Instant};
 
 /// The commands that are steps.
 const ACTIONS: [&str; 7] = ["tap", "double-tap", "long-press", "swipe", "drag", "type", "press"];
-/// How long a replay waits for a target or an expected element to show: the step before may still be moving.
-const FIND_WAIT: Duration = Duration::from_millis(3000);
+/// How long a replay waits for a target or an expected element to show: the step before may still be moving, or
+/// waiting on the network.
+const FIND_WAIT: Duration = Duration::from_millis(5000);
 const LOOK_EVERY: Duration = Duration::from_millis(200);
 /// Same platform: an element more than this much bigger or smaller than the one walked is another element.
 const SIZE_RATIO: f64 = 2.5;
@@ -31,6 +32,11 @@ thread_local! {
 /// The action itself calls this; `record` writes it into the open walk.
 pub fn note(step: Value) {
     NOTE.with(|n| *n.borrow_mut() = Some(step));
+}
+
+/// Whether a replay is running: its actions take one more look before they say what appeared (see `appeared`).
+pub fn replaying() -> bool {
+    REPLAYING.with(Cell::get)
 }
 
 fn take_note() -> Option<Value> {
@@ -423,18 +429,19 @@ fn described(place: &Value) -> String {
     }
 }
 
-/// Runs one ddp command inside this one, its output kept for the replay's own line.
-fn run_nested(argv: Vec<String>) -> (i32, String, Option<Value>) {
+/// Runs one ddp command inside this one, its output kept for the replay's own line, with the failure it reported.
+fn run_nested(argv: Vec<String>) -> (i32, String, Option<Value>, Option<crate::state::Failure>) {
     let outer = ctx();
     let mut argv = argv;
     if let Some(session) = &outer.session_name {
         argv.extend(["--session".to_string(), session.clone()]);
     }
+    crate::state::take_last_failure();
     crate::state::push_capture(true);
     let code = crate::run_command(argv);
     let output = crate::state::pop_capture();
     crate::state::use_context(outer.session_name.as_deref(), outer.json);
-    (code, output, take_note())
+    (code, output, take_note(), crate::state::take_last_failure())
 }
 
 /// `ddp walk replay [walk] [--device D]`: every step again, with no model. One line when it passes; on a failure,
@@ -479,7 +486,11 @@ fn replay(args: &Args) -> Result<i32> {
             let found = wait_for(&target, |elements| find_again(&place, elements, false))?;
             results.push(json!({"n": step["n"], "expect": described(&place), "ok": found.is_some()}));
             if found.is_none() {
-                failed = Some(format!("step {number}, expect {}: not on screen", described(&place)));
+                failed = Some(format!(
+                    "step {number}, expect {}: not on screen after {}s",
+                    described(&place),
+                    FIND_WAIT.as_secs()
+                ));
                 break;
             }
             continue;
@@ -491,7 +502,11 @@ fn replay(args: &Args) -> Result<i32> {
             match wait_for(&target, |elements| find_again(place, elements, same_platform))? {
                 Some((x, y)) => points.push(format!("{x:.1},{y:.1}")),
                 None => {
-                    failed = Some(format!("step {number}, {command} {}: not on screen", described(place)));
+                    failed = Some(format!(
+                        "step {number}, {command} {}: not on screen after {}s",
+                        described(place),
+                        FIND_WAIT.as_secs()
+                    ));
                     break;
                 }
             }
@@ -517,17 +532,20 @@ fn replay(args: &Args) -> Result<i32> {
         if mode == "device" {
             argv.extend(["--device".into(), device.clone()]);
         }
-        let (code, output, note) = run_nested(argv);
+        let (code, output, note, failure) = run_nested(argv);
         let appeared: Vec<Value> = note.as_ref().and_then(|n| n["appeared"].as_array().cloned()).unwrap_or_default();
         results.push(
             json!({"n": step["n"], "command": command, "ok": code == 0, "line": output.trim(), "appeared": appeared}),
         );
         if code != 0 {
-            failed = Some(format!(
-                "step {number}, {}: {}",
-                py::str(&step["line"]).split(';').next().unwrap_or(""),
-                output.trim().replace('\n', " ")
-            ));
+            let action = py::str(&step["line"]).split(';').next().unwrap_or("").to_string();
+            // What the app shows decides a replay; ddp failing to reach the device is not the app's failure.
+            let why = match &failure {
+                Some(f) if f.code == "unknown_element" || f.code == "not_found" => format!("{action}: {}", f.message),
+                Some(f) => format!("{action}: could not run it ({}: {})", f.code, f.message),
+                None => format!("{action}: {}", output.trim().replace('\n', " ")),
+            };
+            failed = Some(format!("step {number}, {why}"));
             break;
         }
     }
