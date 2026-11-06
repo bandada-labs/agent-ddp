@@ -14,6 +14,8 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     publishing { singleVariant("release") { withSourcesJar() } }
+    // The WebSocket wire, shared with the runner APK.
+    sourceSets["main"].java.srcDir("../wire")
 }
 
 dependencies {

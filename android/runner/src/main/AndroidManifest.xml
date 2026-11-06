@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:label="ddp runner" />
+    <!-- Self-instrumenting: UiAutomation reaches every window, whatever the target package. -->
+    <instrumentation
+        android:name=".Runner"
+        android:targetPackage="dev.agentddp.runner" />
+</manifest>

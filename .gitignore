@@ -7,6 +7,7 @@ samples/android/build/
 samples/android/local.properties
 .ddp/
 android/agent-ddp/build/
+android/runner/build/
 ios/AgentDDP/.build/
 ios/AgentDDP/.swiftpm/
 __pycache__/
