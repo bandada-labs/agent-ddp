@@ -13,6 +13,8 @@ mod process;
 mod py;
 mod queries;
 mod runner;
+#[cfg(target_os = "macos")]
+mod simulator;
 mod state;
 mod summary;
 mod swift_source;

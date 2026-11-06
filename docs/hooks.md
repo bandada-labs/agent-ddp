@@ -18,6 +18,15 @@ Kinds: `private` (an Apple symbol, class or selector without a public header), `
 | `swiftui.viewDebugData` (`_UIHostingView._accessibilitySwiftUIDebugData`: the view tree with each node's type and the accessibility elements made from it, with `SWIFTUI_VIEW_DEBUG` at launch; `_viewDebugData()` traps on iOS 27 when called outside SwiftUI's update) | private | `ddp source` on SwiftUI | the element gets no source information | iOS 27.0 simulator (probe app and sample, 2026-11-03) |
 | `swiftui.viewTypes` (the tree's node types as metatypes; `_typeByName` for views only named in a body; `_typeName` of each body type; the nominal type descriptor in Swift's type metadata, to tell the app's types from Apple's) | internal | `ddp source` on SwiftUI: which app view wrote the element | the element's view is not known | iOS 27.0 simulator (probe app and sample, 2026-11-03) |
 
+## Mac host (iOS apps without the library, `--device`)
+
+ddp itself reaches these, from the Mac, for a booted simulator: nothing runs in the simulator and there is no XCTest. Each request waits for the simulator's answer; no answer fails the command with the hook's name, never a partial answer. `ddp doctor <sim UDID>` asks both once.
+
+| Hook | Kind | What depends on it | When it fails | Checked on |
+| --- | --- | --- | --- | --- |
+| `simulator.hid` (CoreSimulator `SimServiceContext`, `-[SimDevice lookup:error:]`, libxpc `xpc_endpoint_create_mach_port_4sim` and `xpc_connection_enable_sim2host_4sim`, `dtuhidd`'s `IndigoDigitizerEvent` and `IndigoKeyboardButtonEvent` messages) | private | `tap`, `double-tap`, `long-press`, `swipe`, `drag`, `type`, `press` with `--device` | the command fails; a touch is only reported once `dtuhidd` answered after it | iOS 27.0 simulator, Xcode 27.2 |
+| `simulator.accessibility` (`AccessibilityPlatformTranslation`'s `AXPTranslatorRequest`, `AXPTranslatorResponse`, `AXPTranslationObject`, archived to `com.apple.CoreSimulator.accessibility`) | private | `tree --device`, places given by label or id | the command fails; a tree is never shown with elements missing | iOS 27.0 simulator, Xcode 27.2 |
+
 ## Android
 
 | Hook | Kind | What depends on it | When it fails | Checked on |

@@ -23,7 +23,7 @@ const STILL: f64 = 0.5;
 
 pub fn tap(args: &mut Args) -> Result<i32> {
     if args.device.is_some() {
-        return host_gesture(args);
+        return crate::runner::gesture(args);
     }
     let session = require_session()?;
     let key = args.id.clone().unwrap_or_default();
@@ -242,15 +242,15 @@ fn tap_point(session: &Value, at: (f64, f64)) -> Result<i32> {
 /// Moves in a swipe or a drag, spread over its time: enough for a gesture recognizer to see a velocity.
 const GESTURE_STEPS: u32 = 12;
 /// A drag holds still this long first, so the app sees a long press that picks the item up.
-const DRAG_HOLD_MS: u64 = 500;
+pub const DRAG_HOLD_MS: u64 = 500;
 /// The pause between the two taps of a double tap, under both platforms' double-tap timeout (300 ms).
-const DOUBLE_TAP_GAP_MS: u64 = 100;
+pub const DOUBLE_TAP_GAP_MS: u64 = 100;
 
 /// `swipe`, `drag`, `double-tap`, `long-press`: one finger on `input.touch`, the real finger the libraries give, then
 /// what changed. A place is an element (its center) or `x,y` in the frames' unit (pt on iOS, px on Android).
 pub fn gesture(args: &mut Args) -> Result<i32> {
     if args.device.is_some() {
-        return host_gesture(args);
+        return crate::runner::gesture(args);
     }
     let session = require_session()?;
     let gesture = args.command.clone();
@@ -321,55 +321,6 @@ pub fn gesture(args: &mut Args) -> Result<i32> {
         None => format!("({:.0}, {:.0})", from.0, from.1),
     };
     say!("{gesture} {from_text} {places}; {outcome}");
-    Ok(0)
-}
-
-/// `--device`, for an app without the library. Android: the runner, with `x,y` in screen pixels or a label it finds in
-/// the accessibility tree. Nothing is checked: the app's engine is not there to ask.
-fn host_gesture(args: &Args) -> Result<i32> {
-    let (platform, device, _) = crate::device::target(args)?;
-    let gesture = args.command.clone();
-    if platform == "ios" {
-        fail!(
-            "iOS has no public way to touch a simulator from outside the app",
-            "not_supported",
-            "add the library to the Debug build and drop --device, or use agent-device"
-        );
-    }
-    let from_text = args.id.clone().unwrap_or_default();
-    let from = crate::runner::place(&from_text);
-    let ms = |default: f64| -> Result<f64> {
-        Ok(args.duration.as_deref().map(crate::state::parse_ms).transpose()?.unwrap_or(default))
-    };
-    let to = || -> Result<Value> {
-        match &args.value {
-            Some(text) => Ok(crate::runner::place(text)),
-            None => fail!(
-                format!("{gesture} needs where to: FROM TO"),
-                "missing_option",
-                format!("ddp {gesture} 540,1600 540,600 --device {device}")
-            ),
-        }
-    };
-    let (method, params) = match &gesture[..] {
-        "tap" => ("input.tap", from),
-        "double-tap" => ("input.doubleTap", from),
-        "long-press" => ("input.longPress", {
-            let mut at = from;
-            at["ms"] = json!(ms(800.0)?);
-            at
-        }),
-        "swipe" => ("input.drag", json!({"from": from, "to": to()?, "ms": ms(300.0)?})),
-        _ => ("input.drag", json!({"from": from, "to": to()?, "ms": ms(600.0)?, "hold": DRAG_HOLD_MS})),
-    };
-    let answer = crate::runner::call(&device, method, params)?;
-    let to_text = args.value.as_deref().filter(|_| matches!(&gesture[..], "swipe" | "drag"));
-    say!(
-        "{gesture} {from_text}{} on {device} in {}ms; {}",
-        to_text.map(|to| format!(" -> {to}")).unwrap_or_default(),
-        answer["ms"].as_f64().unwrap_or(0.0).round() as i64,
-        crate::runner::NO_CHECKS
-    );
     Ok(0)
 }
 

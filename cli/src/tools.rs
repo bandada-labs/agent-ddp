@@ -309,6 +309,8 @@ fn doctor_checks(platform: &str, device: &str, app: &str) -> Result<Vec<Step>> {
         if !booted {
             return Ok(steps);
         }
+        // What `--device` uses, for an app without the library: asked even when the app has it.
+        steps.extend(crate::runner::ios_hook_steps(device));
         let result = capture("xcrun", &["simctl", "get_app_container", device, app, "data"]);
         steps.push((result.code == 0, format!("app {app} installed"), "build and install the Debug build".into()));
         if result.code != 0 {

@@ -756,8 +756,9 @@ with tempfile.TemporaryDirectory() as directory:
     ddp_in(directory, "drag", "button", "0,200", "--for", "120ms")
     assert app.touches[1][3] - app.touches[0][3] >= 0.5 and app.touches[-1][0:3] == ("up", 0, 200), app.touches
     # Without the library: Android through the runner, reached by a fake adb whose forward points at the fake app.
-    ios_host = ddp_in(directory, "tap", "10,10", "--device", "5A9A96DD-128D-475C-B007-46F50ED266A7")
-    assert ios_host.returncode == 1 and "no public way to touch a simulator" in ios_host.stderr, ios_host.stderr
+    # iOS goes to the simulator from the Mac: a UDID no simulator has is refused before anything is sent.
+    ios_host = ddp_in(directory, "tap", "10,10", "--device", "00000000-0000-4000-8000-000000000000")
+    assert ios_host.returncode == 1 and ("no simulator 00000000" in ios_host.stderr or "Mac only" in ios_host.stderr), ios_host.stderr
     fake_adb = Path(directory, "bin", "adb")
     fake_adb.parent.mkdir()
     fake_adb.write_text(f"#!/bin/sh\necho 'runner-fake tcp:{app.port} localabstract:agentddp.runner.control'\n")
