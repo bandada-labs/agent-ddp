@@ -489,7 +489,7 @@ class FakeApp:
                 result = {}
                 if method == "app.info":
                     result = {"protocol": 2, "platform": "ios", "app": "fake", "name": "Fake", "unit": "pt", "scale": 3, "screen": [390, 844],
-                              "runner": 2}
+                              "runner": 3}
                 elif method == "screen.frame":
                     result = self.frame(0)
                     if self.tapped_clock is not None and clock.monotonic() - self.tapped_clock > 0.05:
@@ -780,7 +780,8 @@ with tempfile.TemporaryDirectory() as directory:
     assert ios_host.returncode == 1 and ("no simulator 00000000" in ios_host.stderr or "Mac only" in ios_host.stderr), ios_host.stderr
     fake_adb = Path(directory, "bin", "adb")
     fake_adb.parent.mkdir()
-    fake_adb.write_text(f"#!/bin/sh\necho 'runner-fake tcp:{app.port} localabstract:agentddp.runner.control'\n")
+    adb_log = Path(directory, "adb.log")
+    fake_adb.write_text(f"#!/bin/sh\necho \"$*\" >> {adb_log}\necho 'runner-fake tcp:{app.port} localabstract:agentddp.runner.control'\n")
     fake_adb.chmod(0o755)
     host = {"PATH": f"{fake_adb.parent}:{os.environ['PATH']}"}
     double = ddp_in(directory, "double-tap", "10,10", "--device", "runner-fake", env=host)
@@ -961,6 +962,10 @@ with tempfile.TemporaryDirectory() as directory:
     failed = ddp_in(directory, "net", "fail", "*items*", "--error", "timeout", "--for", "5s", "--limit", "1",
                     "--then", f"{DDP[0]} run load")
     assert '"loaded timeout"' in failed.stdout and "1 request answered" in failed.stdout, failed.stdout + failed.stderr
+    # Last, as it ends the session: disconnect stops the runner: it holds UiAutomation, which the app's own UI tests need.
+    stopped = ddp_in(directory, "disconnect", "--device", "runner-fake", env=host)
+    assert "ddp's runner stopped on runner-fake: UiAutomation is free" in stopped.stdout and \
+        "-s runner-fake shell am force-stop dev.agentddp.runner" in adb_log.read_text(), stopped.stdout + stopped.stderr
 
 # History: a closed (gzipped) minute and the open one, cut mid-line as when the app dies.
 import gzip

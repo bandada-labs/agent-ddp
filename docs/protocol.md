@@ -103,8 +103,9 @@ Every result has `ms`, the time spent on the device.
 | `screen.elements` | | `elements`: `type`, `label`, `id`, `frame` [x,y,w,h], `tap`, `enabled`; `shown: false` for one the app holds off screen (scrolled away, under the keyboard's pan) |
 | `runner.stop` | | |
 
-`app.info` answers `runner`, the runner's version (2). A ddp that finds a runner with another version running stops it
-and installs its own.
+`app.info` answers `runner`, the runner's version (3). A ddp that finds a runner with another version running stops it
+and installs its own. The runner ends itself after 5 minutes without a request: it holds UiAutomation, which one process
+at a time may have, and the app's own UI tests need it.
 
 ## Messages
 

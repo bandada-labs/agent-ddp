@@ -23,7 +23,7 @@ const APK: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/runner.apk"));
 /// `am instrument` to the socket open took 2 s on an emulator; a cold device can take longer.
 const START_PATIENCE: Duration = Duration::from_secs(10);
 /// The runner's `VERSION` (Runner.kt) this ddp speaks.
-const RUNNER_VERSION: u64 = 2;
+const RUNNER_VERSION: u64 = 3;
 const POLL: Duration = Duration::from_millis(100);
 
 /// What every runner answer ends with: the runner did it, nothing was checked.
@@ -39,7 +39,7 @@ pub fn open(device: &str) -> Result<Control> {
         }
         control.call("runner.stop", json!({}))?;
         control.close();
-        adb(device, &["shell", "am", "force-stop", PACKAGE])?;
+        stop(device)?;
     }
     start(device)?;
     let deadline = Instant::now() + START_PATIENCE;
@@ -50,6 +50,15 @@ pub fn open(device: &str) -> Result<Control> {
             Err(_) => std::thread::sleep(POLL),
         }
     }
+}
+
+/// Ends ddp's runner on this device. It holds UiAutomation, which one process at a time may have: the app's own UI
+/// tests on the device fail with "UiAutomationService already registered" while it runs.
+/// Says whether it was running.
+pub fn stop(device: &str) -> Result<bool> {
+    let running = adb(device, &["shell", "pidof", PACKAGE])?.code == 0;
+    adb(device, &["shell", "am", "force-stop", PACKAGE])?;
+    Ok(running)
 }
 
 fn adb(device: &str, command: &[&str]) -> Result<crate::state::Output> {

@@ -25,7 +25,8 @@ import kotlin.concurrent.thread
 /**
  * Serves the control protocol (JSON-RPC over a WebSocket) on the abstract socket `agentddp.runner.control` for an app
  * that does not link AgentDDP. Touches and keys go through UiAutomation, as the system's own input; the tree is the
- * platform's accessibility tree. It runs until `runner.stop`: `am instrument dev.agentddp.runner/.Runner`.
+ * platform's accessibility tree. It runs until `runner.stop`, or [IDLE_MS] without a request:
+ * `am instrument dev.agentddp.runner/.Runner`.
  */
 class Runner : Instrumentation() {
     // Lazy: sessions run on their own threads and must see the same instance.
@@ -40,6 +41,7 @@ class Runner : Instrumentation() {
     }
     private val lock = Any()
     @Volatile private var stopped = false
+    @Volatile private var lastRequest = SystemClock.elapsedRealtime()
 
     override fun onCreate(arguments: Bundle?) {
         super.onCreate(arguments)
@@ -48,6 +50,13 @@ class Runner : Instrumentation() {
 
     override fun onStart() {
         val server = LocalServerSocket(SOCKET_NAME)
+        // Only one process may hold UiAutomation: while an idle runner keeps it, the app's own UI tests fail with
+        // "UiAutomationService already registered". ddp starts the runner again on its next command.
+        thread(name = "ddp-runner-idle", isDaemon = true) {
+            while (SystemClock.elapsedRealtime() - lastRequest < IDLE_MS) SystemClock.sleep(IDLE_CHECK_MS)
+            stopped = true
+            finish(0, Bundle())
+        }
         while (!stopped) {
             val socket = runCatching { server.accept() }.getOrNull() ?: continue
             // Abstract sockets are open to every app on the device: only adb (the shell user) and root may talk.
@@ -83,6 +92,7 @@ class Runner : Instrumentation() {
         val request = runCatching { JSONObject(text) }.getOrNull()
             ?: return JSONObject().put("error", JSONObject().put("code", -32700).put("message", "not JSON"))
         val reply = JSONObject().put("id", request.opt("id"))
+        lastRequest = SystemClock.elapsedRealtime()
         val started = SystemClock.elapsedRealtimeNanos()
         return try {
             // One action at a time: two agents' touches must not interleave.
@@ -254,7 +264,9 @@ class Runner : Instrumentation() {
         const val FRAME_MS = 16L
         const val ROOT_WAIT_MS = 2000L
         /** Raised when what the runner answers changes; the CLI replaces a runner with another number. */
-        const val VERSION = 2
+        const val VERSION = 3
+        const val IDLE_MS = 5 * 60_000L
+        const val IDLE_CHECK_MS = 10_000L
         val ALLOWED_UIDS = setOf(0, 2000)
         val KEYS = mapOf(
             "Enter" to KeyEvent.KEYCODE_ENTER,

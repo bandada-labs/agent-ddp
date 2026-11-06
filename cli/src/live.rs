@@ -444,8 +444,14 @@ pub fn keep_session(session: &Value, snapshot: &[Value]) -> Result<i32> {
     Ok(0)
 }
 
-pub fn disconnect(_args: &mut Args) -> Result<i32> {
+pub fn disconnect(args: &mut Args) -> Result<i32> {
     let context = ctx();
+    if let Ok((platform, device, _)) = crate::device::target(args) {
+        // Unreachable device or no adb: the session is still forgotten.
+        if platform == "android" && crate::runner::stop(&device).unwrap_or(false) {
+            say!("ddp's runner stopped on {device}: UiAutomation is free for the app's own tests");
+        }
+    }
     if let Some(session) = read_json(&context.session_file) {
         if session["platform"] == "android" {
             if let Ok(adb) = adb_path() {
