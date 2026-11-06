@@ -241,8 +241,10 @@ internal class Capture(private val density: Float) {
     // Untagged children inside it are not elements of their own.
     // clipRound: the innermost rounded clip around this node ([x, y, w, h, radius]), so `ddp check corners`
     // knows which draws a rounded clip cuts.
+    // cleared: under a clearAndSetSemantics. The unmerged tree still lists what is under it, but TalkBack and the
+    // merged tree do not: no element of its own, only paint owned by the node that cleared them.
     private fun walkLayout(layout: LayoutInfo, semantics: Map<Int, SemanticsNode>, clip: RectF, parentAlpha: Float,
-                           insideMerged: Boolean = false, clipRound: JSONArray? = null) {
+                           insideMerged: Boolean = false, clipRound: JSONArray? = null, cleared: Boolean = false) {
         if (!layout.isPlaced) return
         val modifierInfo = layout.getModifierInfo()
         val modifiers = modifierInfo.mapNotNull { info ->
@@ -269,7 +271,7 @@ internal class Capture(private val density: Float) {
             modifier.name == "blur" || modifier.name == "graphicsLayer" &&
                 (modifier.props["renderEffect"] != null || modifier.props["blendMode"].let { it != null && it.toString() != "SrcOver" })
         }
-        if (node != null && (tag != null || (label != null && !insideMerged))) {
+        if (node != null && !cleared && (tag != null || (label != null && !insideMerged))) {
             owner = elements.length()
             elements.put(JSONObject().put("frame", rectArray(frame)).apply {
                 tag?.let { put("id", it) }
@@ -340,7 +342,8 @@ internal class Capture(private val density: Float) {
         }
 
         zSortedChildren(layout).forEach {
-            walkLayout(it, semantics, childClip, alpha, insideMerged || merges, childClipRound)
+            walkLayout(it, semantics, childClip, alpha, insideMerged || merges, childClipRound,
+                cleared || node?.config?.isClearingSemantics == true)
         }
 
         // Border draws after content, so it goes after the children in paint order.

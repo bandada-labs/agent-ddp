@@ -101,6 +101,7 @@ class Runner : Instrumentation() {
             JSONObject().put("platform", "android").put("unit", "px").put("scale", metrics.density.toDouble())
                 .put("screen", JSONArray().put(metrics.widthPixels).put(metrics.heightPixels))
                 .put("app", automation.rootInActiveWindow?.packageName?.toString())
+                .put("runner", VERSION)
         }
         "input.tap" -> point(params).let { (x, y) -> tap(x, y); JSONObject() }
         "input.doubleTap" -> point(params).let { (x, y) ->
@@ -214,12 +215,15 @@ class Runner : Instrumentation() {
         return null
     }
 
-    // Only what an agent can act on or read: nodes with a label, an id, or that take a tap.
+    // Only what an agent can act on or read: nodes with a label, an id, or that take a tap. A node the app still
+    // holds but the user cannot see (scrolled away, panned off by the keyboard) is kept with `shown: false`, so the
+    // CLI can tell "out of view" from "gone".
     private fun collect(node: AccessibilityNodeInfo, elements: JSONArray) {
         val label = label(node)
         val id = node.viewIdResourceName?.substringAfter(":id/")
-        if (node.isVisibleToUser && (label != null || id != null || node.isClickable)) {
+        if (label != null || id != null || node.isClickable) {
             elements.put(JSONObject().apply {
+                if (!node.isVisibleToUser) put("shown", false)
                 put("type", node.className?.toString()?.substringAfterLast('.'))
                 label?.let { put("label", it) }
                 id?.let { put("id", it) }
@@ -249,6 +253,8 @@ class Runner : Instrumentation() {
         const val SOCKET_NAME = "agentddp.runner.control"
         const val FRAME_MS = 16L
         const val ROOT_WAIT_MS = 2000L
+        /** Raised when what the runner answers changes; the CLI replaces a runner with another number. */
+        const val VERSION = 2
         val ALLOWED_UIDS = setOf(0, 2000)
         val KEYS = mapOf(
             "Enter" to KeyEvent.KEYCODE_ENTER,

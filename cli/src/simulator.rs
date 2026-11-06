@@ -25,12 +25,18 @@ pub const START: u64 = 0;
 pub const MOVE: u64 = 1;
 pub const END: u64 = 2;
 /// The translator's flat tree, what VoiceOver reads: one element per thing a person can act on or read.
-const CLIENT_TYPE: u64 = 0;
+/// The flat tree, one element per VoiceOver stop.
+const FLAT_TREE: u64 = 0;
+/// Every element with its children. Only asked for a container the flat tree leaves empty: on iOS 26 and later
+/// SwiftUI's navigation bar and tab bar are such containers, their buttons only listed here.
+const FULL_TREE: u64 = 2;
 const FRONTMOST_APPLICATION: u64 = 4;
 const READ_ATTRIBUTES: u64 = 5;
 /// frame, role, isRemoteElement, label, identifier, value, isEnabled, children. Never isVisible (112): it makes the
 /// app hit-test every element, a whole tree goes from milliseconds to seconds.
 const ATTRIBUTES: [u64; 8] = [21, 45, 66, 33, 25, 53, 27, 8];
+/// Roles that hold other elements: one with no children in the flat tree is asked again in the full one.
+const CONTAINERS: [&str; 5] = ["Group", "TabGroup", "ScrollArea", "Grid", "Sheet"];
 const MAX_ELEMENTS: usize = 3000;
 const MAX_DEPTH: usize = 50;
 
@@ -189,6 +195,15 @@ fn rect_of(object: Id) -> Option<[f64; 4]> {
     let mut rect = [0f64; 4];
     unsafe { send2::<*mut c_void, usize, ()>(object, "getValue:size:", rect.as_mut_ptr().cast(), 32) };
     Some(rect)
+}
+
+/// The length of an NSArray; 0 for anything else.
+fn count_of(object: Id) -> usize {
+    if is_a(object, c"NSArray") {
+        unsafe { send0(object, "count") }
+    } else {
+        0
+    }
 }
 
 fn number_of(object: Id) -> Option<i64> {
@@ -507,7 +522,7 @@ impl Simulator {
         Ok(())
     }
 
-    fn accessibility_request(&mut self, kind: u64, translation: Id, parameters: Id) -> Result<Id> {
+    fn accessibility_request(&mut self, kind: u64, translation: Id, parameters: Id, client: u64) -> Result<Id> {
         self.load_accessibility()?;
         let silent = || {
             failure(
@@ -520,7 +535,7 @@ impl Simulator {
             let request: Id =
                 send1(objc_getClass(c"AXPTranslatorRequest".as_ptr()), "requestWithTranslation:", translation);
             send1::<u64, ()>(request, "setRequestType:", kind);
-            send1::<u64, ()>(request, "setClientType:", CLIENT_TYPE);
+            send1::<u64, ()>(request, "setClientType:", client);
             send1::<Id, ()>(request, "setParameters:", parameters);
             let null_error: *mut Id = std::ptr::null_mut();
             let archived: Id = send3(
@@ -593,7 +608,11 @@ impl Simulator {
             send2(objc_getClass(c"NSArray".as_ptr()), "arrayWithObjects:count:", attributes.as_ptr(), attributes.len())
         };
         let parameters = ns_dictionary("attributes", attributes);
-        let mut walk = Walk { token, parameters, elements: Vec::new(), read: 0, ancestors: HashSet::new() };
+        let children_attribute = [ns_number(8)];
+        let children_only = ns_dictionary("attributes", unsafe {
+            send2(objc_getClass(c"NSArray".as_ptr()), "arrayWithObjects:count:", children_attribute.as_ptr(), 1usize)
+        });
+        let mut walk = Walk { token, parameters, children_only, elements: Vec::new(), read: 0, seen: HashSet::new() };
         self.read(&mut walk, root, 0)?;
         Ok(walk.elements)
     }
@@ -606,8 +625,12 @@ impl Simulator {
                 std::thread::sleep(Duration::from_millis(300));
             }
             let fresh: Id = unsafe { send0(objc_getClass(c"AXPTranslationObject".as_ptr()), "new") };
-            let root =
-                self.accessibility_request(FRONTMOST_APPLICATION, fresh, ns_dictionary("displayId", ns_number(0)))?;
+            let root = self.accessibility_request(
+                FRONTMOST_APPLICATION,
+                fresh,
+                ns_dictionary("displayId", ns_number(0)),
+                FLAT_TREE,
+            )?;
             if is_a(root, c"AXPTranslationObject") {
                 return Ok(root);
             }
@@ -625,9 +648,9 @@ impl Simulator {
         if walk.read > MAX_ELEMENTS || depth > MAX_DEPTH {
             fail!(format!("more than {MAX_ELEMENTS} elements or {MAX_DEPTH} levels on screen"), "too_many_elements");
         }
-        let identity: (i32, u64) = unsafe { (send0(element, "pid"), send0(element, "objectID")) };
+        walk.seen.insert(unsafe { (send0(element, "pid"), send0(element, "objectID")) });
         unsafe { send1::<Id, ()>(element, "setBridgeDelegateToken:", walk.token) };
-        let answer = self.accessibility_request(READ_ATTRIBUTES, element, walk.parameters)?;
+        let answer = self.accessibility_request(READ_ATTRIBUTES, element, walk.parameters, FLAT_TREE)?;
         if !is_a(answer, c"NSDictionary") {
             fail!(
                 format!("the simulator could not read an element on screen ({ACCESSIBILITY_HOOK})"),
@@ -635,56 +658,63 @@ impl Simulator {
                 "try again when the screen is still"
             );
         }
-        let value = |attribute: u64| -> Id { unsafe { send1(answer, "objectForKey:", ns_number(attribute)) } };
-        let remote = number_of(value(66)).unwrap_or(0) != 0;
-        let role = if remote { "Group" } else { role_name(number_of(value(45)).unwrap_or(0)) };
-        let (label, id, shown) = (text_of(value(33)), text_of(value(25)), text_of(value(53)));
-        if role != "Application" && (label.is_some() || id.is_some() || shown.is_some()) {
-            let frame = rect_of(value(21)).unwrap_or_default();
-            let mut entry =
-                json!({"type": role, "frame": frame.iter().map(|v| (v * 10.0).round() / 10.0).collect::<Vec<_>>()});
-            if let Some(label) = label {
-                entry["label"] = json!(label);
-            }
-            if let Some(id) = id {
-                entry["id"] = json!(id);
-            }
-            if let Some(shown) = shown {
-                entry["value"] = json!(shown);
-            }
-            if number_of(value(27)) == Some(0) {
-                entry["enabled"] = json!(false);
-            }
+        let (role, entry) = entry_of(answer);
+        if role != "Application" && ["label", "id", "value"].iter().any(|field| entry.get(field).is_some()) {
             walk.elements.push(entry);
         }
-        let children = value(8);
-        if !is_a(children, c"NSArray") {
-            return Ok(());
+        let children_of = |answer: Id| -> Id {
+            if is_a(answer, c"NSDictionary") {
+                unsafe { send1(answer, "objectForKey:", ns_number(8)) }
+            } else {
+                std::ptr::null_mut()
+            }
+        };
+        let mut children = children_of(answer);
+        if count_of(children) == 0 && CONTAINERS.contains(&role) {
+            children =
+                children_of(self.accessibility_request(READ_ATTRIBUTES, element, walk.children_only, FULL_TREE)?);
         }
-        walk.ancestors.insert(identity);
-        let count: usize = unsafe { send0(children, "count") };
-        for index in 0..count {
+        for index in 0..count_of(children) {
             let child: Id = unsafe { send1(children, "objectAtIndex:", index) };
             if !is_a(child, c"AXPTranslationObject") {
                 continue;
             }
-            // An app can list an element among its own descendants: read it once on that path.
             let child_identity: (i32, u64) = unsafe { (send0(child, "pid"), send0(child, "objectID")) };
-            if !walk.ancestors.contains(&child_identity) {
+            if !walk.seen.contains(&child_identity) {
                 self.read(walk, child, depth + 1)?;
             }
         }
-        walk.ancestors.remove(&identity);
         Ok(())
     }
+}
+
+/// An element as `tree` lists it, from the translator's answer: role, frame in points, label, id, value, enabled.
+fn entry_of(answer: Id) -> (&'static str, Value) {
+    let value = |attribute: u64| -> Id { unsafe { send1(answer, "objectForKey:", ns_number(attribute)) } };
+    let remote = number_of(value(66)).unwrap_or(0) != 0;
+    let role = if remote { "Group" } else { role_name(number_of(value(45)).unwrap_or(0)) };
+    let frame = rect_of(value(21)).unwrap_or_default();
+    let mut entry = json!({"type": role, "frame": frame.iter().map(|v| (v * 10.0).round() / 10.0).collect::<Vec<_>>()});
+    for (field, attribute) in [("label", 33), ("id", 25), ("value", 53)] {
+        if let Some(text) = text_of(value(attribute)) {
+            entry[field] = json!(text);
+        }
+    }
+    if number_of(value(27)) == Some(0) {
+        entry["enabled"] = json!(false);
+    }
+    (role, entry)
 }
 
 struct Walk {
     token: Id,
     parameters: Id,
+    children_only: Id,
     elements: Vec<Value>,
     read: usize,
-    ancestors: HashSet<(i32, u64)>,
+    /// Elements read so far, by pid and object id: an element listed twice (among its own descendants, or by the
+    /// full tree too) is read once.
+    seen: HashSet<(i32, u64)>,
 }
 
 /// The translator's role numbers, by AppKit's names without the `AX` prefix.

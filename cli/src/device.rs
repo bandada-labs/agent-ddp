@@ -153,6 +153,8 @@ pub fn touch(control: &mut Control, (x, y): (f64, f64)) -> Result<()> {
 }
 
 const FOCUS_WAIT_MS: u64 = 200;
+/// How long `type --into` waits for the field to show what was typed.
+const TYPE_SHOW_WAIT_MS: u64 = 2000;
 
 /// Types into the focused field, or into `--into` after tapping it.
 pub fn type_text(args: &mut Args) -> Result<i32> {
@@ -171,11 +173,30 @@ pub fn type_text(args: &mut Args) -> Result<i32> {
         // The field takes the focus on a later turn of the main loop; typed text before that goes nowhere.
         std::thread::sleep(Duration::from_millis(FOCUS_WAIT_MS));
     }
+    // Compose takes the text at once and shows it a frame or more later. With --into a Compose field, return once
+    // its text changed, so the next command reads it. A field the library cannot read is not waited for.
+    let editable = |control: &mut Control| -> Option<Value> {
+        let id = args.id.as_ref().filter(|_| session["platform"] == "android")?;
+        let answer = control.call("screen.value", json!({"id": id, "path": "semantics.EditableText"})).ok()?;
+        (answer["type"] == "value").then(|| answer["value"].clone())
+    };
+    let before = editable(&mut control);
     control.call("input.type", json!({"text": text}))?;
+    let mut late = String::new();
+    if before.is_some() {
+        let deadline = Instant::now() + Duration::from_millis(TYPE_SHOW_WAIT_MS);
+        while editable(&mut control) == before {
+            if Instant::now() >= deadline {
+                late = format!("; the field's text did not change within {TYPE_SHOW_WAIT_MS}ms");
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
     control.close();
     crate::hit::note(&py::str(&session["platform"]), places, &[], json!({"text": text}));
     say!(
-        "typed {} characters{}",
+        "typed {} characters{}{late}",
         text.chars().count(),
         args.id.as_ref().map(|id| format!(" into {id}")).unwrap_or_default()
     );
@@ -196,6 +217,9 @@ pub fn press(args: &mut Args) -> Result<i32> {
 
 /// Live: until an element is drawn, a label shows, or nothing changes for a while.
 pub fn wait(args: &mut Args) -> Result<i32> {
+    if crate::runner::device_mode(args) {
+        return crate::runner::wait(args);
+    }
     let session = require_session()?;
     if args.by.is_none() && args.settled.is_none() {
         fail!("wait needs `id <id>`, `text <label>` or --settled 300ms", "missing_option");
@@ -345,6 +369,35 @@ pub fn logs(args: &mut Args) -> Result<i32> {
     Ok(0)
 }
 
+/// iOS content size categories as `simctl ui content_size` names them. `default` and `largest` are the names the
+/// Android side takes too, so one script runs on both. simctl says nothing about a name it does not know.
+fn ios_text_size(value: &str) -> Result<&str> {
+    const SIZES: [&str; 12] = [
+        "extra-small",
+        "small",
+        "medium",
+        "large",
+        "extra-large",
+        "extra-extra-large",
+        "extra-extra-extra-large",
+        "accessibility-medium",
+        "accessibility-large",
+        "accessibility-extra-large",
+        "accessibility-extra-extra-large",
+        "accessibility-extra-extra-extra-large",
+    ];
+    match value {
+        "default" => Ok("large"),
+        "largest" => Ok("accessibility-extra-extra-extra-large"),
+        size if SIZES.contains(&size) => Ok(size),
+        _ => fail!(
+            format!("iOS has no text size '{value}'"),
+            "bad_value",
+            format!("ddp set text-size default|largest, or one of {}", SIZES.join(", "))
+        ),
+    }
+}
+
 pub fn settings(args: &mut Args) -> Result<i32> {
     let (platform, device, app) = target(args)?;
     let what = args.what.clone().unwrap_or_default();
@@ -354,7 +407,7 @@ pub fn settings(args: &mut Args) -> Result<i32> {
             |rest: &[&str]| -> Vec<String> { ["xcrun", "simctl"].iter().chain(rest).map(|s| s.to_string()).collect() };
         match what.as_str() {
             "appearance" => vec![base(&["ui", &device, "appearance", &value])],
-            "text-size" => vec![base(&["ui", &device, "content_size", &value])],
+            "text-size" => vec![base(&["ui", &device, "content_size", ios_text_size(&value)?])],
             "location" => vec![base(&["location", &device, "set", &lat_lon(&value)?.join(",")])],
             "orientation" => fail!(
                 "the simulator has no public way to rotate from the host",
@@ -396,7 +449,12 @@ pub fn settings(args: &mut Args) -> Result<i32> {
                     "default" => "1.0",
                     "large" => "1.15",
                     "largest" => "1.3",
-                    other => other,
+                    other if other.parse::<f64>().is_ok_and(|factor| factor > 0.0) => other,
+                    _ => fail!(
+                        format!("Android has no text size '{value}'"),
+                        "bad_value",
+                        "ddp set text-size small|default|large|largest, or a factor like 1.3"
+                    ),
                 };
                 vec![base(&["settings", "put", "system", "font_scale", factor])]
             }
@@ -1072,5 +1130,13 @@ mod tests {
         let (width, height, back) = png_read(&png_write(5, 4, &rows)).unwrap();
         assert_eq!((width, height), (5, 4));
         assert_eq!(back, rows);
+    }
+
+    #[test]
+    fn ios_text_sizes() {
+        assert_eq!(ios_text_size("default").unwrap(), "large");
+        assert_eq!(ios_text_size("largest").unwrap(), "accessibility-extra-extra-extra-large");
+        assert_eq!(ios_text_size("accessibility-large").unwrap(), "accessibility-large");
+        assert_eq!(ios_text_size("huge").unwrap_err().code, "bad_value");
     }
 }

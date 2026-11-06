@@ -75,7 +75,7 @@ A platform that cannot do something from the host refuses with the reason and th
 
 ## Refs
 
-`tree` and `find text|id` print `@e1`, `@e2` ... Use them anywhere an element goes: `get @e3`, `watch @e3`, `eval @e3 layer.opacity`, `tap @e3`. In a recording refs never go stale. Live, `tap`, `swipe`, `type` and the other actions print what changed with refs for it (`new: @e9 "Saved"`): act on those, no `tree` needed. An element keeps its ref for the session: neither an action nor `tree` renumbers the ones you hold. Run `tree -i` again only when you need the whole screen. Two elements with the same label are `Open` and `Open [2]`.
+`tree` and `find text|id` print `@e1`, `@e2` ... Use them anywhere an element goes: `get @e3`, `watch @e3`, `eval @e3 layer.opacity`, `tap @e3`. In a recording refs never go stale. Live, `tap`, `swipe`, `type` and the other actions print what changed with refs for it (`new: @e9 "Saved"`): act on those, no `tree` needed. An element keeps its ref for the session: neither an action nor `tree` renumbers the ones you hold. Run `tree -i` again only when you need the whole screen. Two elements with the same label and no id are `Open` and `Open [2]`. Without the library, a label or id that more than one element has (a tab and the bar titled like it) is refused with the refs to pick from: act on the ref.
 
 ## Reading a screen cheaply
 
@@ -143,6 +143,7 @@ Sessions for `--on` are named: `ddp connect <sim> --app ID --session ios` and `.
 ddp up --platform ios --install Build/App.app --app <id>   # no library: the session says so; tree, tap, type, swipe, press work
 ddp tree                         # the platform's accessibility tree with refs; points (iOS) or pixels (Android)
 ddp tap "Add"                    # by label, id or ref; prints what changed, with refs; no checks (no SDK)
+ddp wait text "Saved"            # wait id|text, wait --settled 300ms and find text|id read the same tree
 ddp walk start "add a note, then delete it"   # every action from here is a step with a screenshot
 ddp walk expect "Note deleted"   # a check the replay repeats
 ddp walk end pass                # one line per step, the file, the screenshots
@@ -150,7 +151,7 @@ ddp walk replay add-a-note-then-delete-it --device <other>   # again with no mod
 ddp walk parity add-a-note-then-delete-it                    # last iOS replay against last Android replay
 ```
 
-Walk by label when the walk must run on both platforms: ids often differ between them.
+Walk by label when the walk must run on both platforms: ids often differ between them. Without the library ddp can't see a cover that has no accessibility (a splash hidden from VoiceOver that still takes touches): a tap under it says "nothing changed". Wait for the app's own sign that it is ready.
 
 ## What happened a while ago
 

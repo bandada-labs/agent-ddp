@@ -47,7 +47,7 @@ pub fn tap(args: &mut Args) -> Result<i32> {
         say!("tapped {key} at ({:.0}, {:.0})", x + w / 2.0, y + h / 2.0);
         return Ok(0);
     }
-    let (hit, moving) = wait_until_tappable(&mut control, &key, &element)?;
+    let (hit, moving) = wait_until_tappable(&mut control, "tap", &key, &element)?;
     let (x, y) = (f(&hit["point"][0]), f(&hit["point"][1]));
     // Two frames a little apart, so a clock that ticks every frame shows as busy.
     std::thread::sleep(Duration::from_millis(BUSY_SAMPLE_MS).saturating_sub(started.elapsed()));
@@ -133,7 +133,12 @@ fn detail(hit: &Value) -> String {
 
 /// Asks the app until the element holds still, is enabled and has a point a touch reaches, or the wait is over.
 /// Returns the hit and whether the element was still moving when the wait ran out.
-fn wait_until_tappable(control: &mut crate::control::Control, key: &str, element: &Value) -> Result<(Value, bool)> {
+fn wait_until_tappable(
+    control: &mut crate::control::Control,
+    command: &str,
+    key: &str,
+    element: &Value,
+) -> Result<(Value, bool)> {
     let name = py::str(element.get("id").filter(|v| truthy(Some(*v))).unwrap_or(&element["label"]));
     let deadline = Instant::now() + Duration::from_millis(TAP_WAIT_MS);
     let mut last = rect(&element["frame"]);
@@ -158,7 +163,7 @@ fn wait_until_tappable(control: &mut crate::control::Control, key: &str, element
                 return Ok((hit, true));
             }
             let reason = text(&hit, "reason");
-            let next = format!("ddp check tappable, or ddp tap {key} --force to touch it anyway");
+            let next = format!("ddp check tappable, or ddp {command} {key} --force to touch it anyway");
             let message = if reason == "disabled" {
                 format!("{key} is disabled")
             } else {
@@ -373,11 +378,20 @@ pub fn gesture(args: &mut Args) -> Result<i32> {
         _ => 800.0,
     };
     let ms = args.duration.as_deref().map(crate::state::parse_ms).transpose()?.unwrap_or(default_ms);
+    let started = Instant::now();
+    let mut control = open(&session)?;
+    // A press on an element waits, like tap, until the app's hit test says a touch reaches it, and goes where it does.
+    let from = match (&gesture[..], frame.element(&from_text)) {
+        ("double-tap" | "long-press", Some(element)) if !args.force => {
+            let (hit, _) = wait_until_tappable(&mut control, &gesture, &from_text, element)?;
+            (f(&hit["point"][0]), f(&hit["point"][1]))
+        }
+        _ => from,
+    };
     // Two frames a little apart, so a clock that ticks every frame shows as busy.
-    std::thread::sleep(Duration::from_millis(BUSY_SAMPLE_MS));
+    std::thread::sleep(Duration::from_millis(BUSY_SAMPLE_MS).saturating_sub(started.elapsed()));
     let settled = frame_now(&session)?;
     let busy = changed_keys(frame, &settled);
-    let mut control = open(&session)?;
     let mut finger = |phase: &str, (x, y): (f64, f64)| {
         control.call("input.touch", json!({"phase": phase, "x": x, "y": y})).map(|_| ())
     };

@@ -18,6 +18,8 @@ pub struct Args {
     pub frames: Option<i64>,
     pub then: Option<String>,
     pub id: Option<String>,
+    /// `id` came from an `@eN` ref: it names one element exactly.
+    pub id_from_ref: bool,
     pub device: Option<String>,
     pub app: Option<String>,
     pub platform: Option<String>,
@@ -239,28 +241,30 @@ pub fn parser() -> Command {
         .subcommand(sub("tap", "live: tap an element with a real touch, once the app's hit test says a touch reaches it")
             .arg(positional("id", "element id, label or @ref; or x,y to touch a point").required(true))
             .arg(flag("force", "touch the center without the checks"))
-            .arg(opt("device", "without the library: x,y in screen pixels with adb input (Android only)")))
+            .arg(opt("device", "without the library: an iOS simulator or Android device (x,y in points on iOS, pixels on Android)")))
         .subcommand(sub("swipe", "live: a quick finger move from one place to another, then what changed")
             .arg(positional("id", "from: an element (its center) or x,y").required(true))
             .arg(positional("value", "to: an element or x,y").required(true))
             .arg(opt("for", "how long the move takes (default 300ms)").id("duration"))
-            .arg(opt("device", "without the library: Android only, adb input in screen pixels")))
+            .arg(opt("device", "without the library: an iOS simulator or Android device (x,y in points on iOS, pixels on Android)")))
         .subcommand(sub("drag", "live: hold, then move slowly to another place and let go, then what changed")
             .arg(positional("id", "from: an element (its center) or x,y").required(true))
             .arg(positional("value", "to: an element or x,y").required(true))
             .arg(opt("for", "how long the move takes after a 500ms hold (default 600ms)").id("duration"))
-            .arg(opt("device", "without the library: Android only, adb input in screen pixels")))
+            .arg(opt("device", "without the library: an iOS simulator or Android device (x,y in points on iOS, pixels on Android)")))
         .subcommand(sub("double-tap", "live: two quick taps, then what changed")
             .arg(positional("id", "an element (its center) or x,y").required(true))
-            .arg(opt("device", "without the library: Android only, adb input in screen pixels")))
+            .arg(flag("force", "touch the center without waiting for the hit test to reach the element"))
+            .arg(opt("device", "without the library: an iOS simulator or Android device (x,y in points on iOS, pixels on Android)")))
         .subcommand(sub("long-press", "live: hold a finger down, then what changed")
             .arg(positional("id", "an element (its center) or x,y").required(true))
+            .arg(flag("force", "touch the center without waiting for the hit test to reach the element"))
             .arg(opt("for", "how long to hold (default 800ms)").id("duration"))
-            .arg(opt("device", "without the library: Android only, adb input in screen pixels")))
+            .arg(opt("device", "without the library: an iOS simulator or Android device (x,y in points on iOS, pixels on Android)")))
         .subcommand(sub("type", "live: type into the focused field, as the keyboard does")
             .arg(positional("value", "the text").required(true))
             .arg(opt("into", "tap this element first (id, label or @ref)").id("id"))
-            .arg(opt("device", "without the library: Android only, through ddp's runner")))
+            .arg(opt("device", "without the library: an iOS simulator or Android device")))
         .subcommand(sub("walk", "a task walked step by step and kept as a file; replayed later with no model")
             .arg(choices("action", &["start", "end", "expect", "show", "list", "replay", "parity"]).required(true))
             .arg(positional("value", "start: the task in plain words; end: pass or fail; expect: an element; show, replay, parity: the walk (default the last)"))
@@ -269,7 +273,7 @@ pub fn parser() -> Command {
             .arg(opt("platform", "with --device: ios or android (default: guessed from the id)").value_parser(["ios", "android"])))
         .subcommand(sub("press", "live: press a key in the focused field")
             .arg(choices("value", &["Enter", "Tab", "Backspace"]).required(true))
-            .arg(opt("device", "without the library: Android only, through ddp's runner")))
+            .arg(opt("device", "without the library: an iOS simulator or Android device")))
         .subcommand(sub("prefs", "live: the app's UserDefaults (iOS) or SharedPreferences (Android), secrets redacted")
             .arg(choices("action", &["list", "set", "rm", "clear", "files"]).default_value("list"))
             .arg(positional("key", "set, rm: the key"))
@@ -294,7 +298,8 @@ pub fn parser() -> Command {
             .arg(positional("value", "the id or the text"))
             .arg(opt("settled", "until nothing changes for this long (300ms)"))
             .arg(opt("timeout", "give up after this long").default_value("10s"))
-            .arg(many("ignore", "--settled: elements that never stop (a spinner, a clock) and should not count")))
+            .arg(many("ignore", "--settled: elements that never stop (a spinner, a clock) and should not count"))
+            .arg(opt("device", "without the library: the accessibility tree of an iOS simulator or Android device")))
         .subcommand(file(device_options(sub("logs", "the app's log lines during the last take, at their time in it")
             .arg(flag("follow", "live: the last 100 lines, then each new one"))
             .arg(flag("source", "--follow: where each line came from (iOS: subsystem and library)"))
@@ -329,8 +334,8 @@ pub fn parser() -> Command {
             .arg(opt("dir", "read history files from this folder instead of the device"))))
         .subcommand(device_options(sub("set", "device settings: appearance, text size, reduce motion, locale, location, orientation")
             .arg(choices("what", &["appearance", "text-size", "reduce-motion", "locale", "location", "orientation"]).required(true))
-            .arg(positional("value", "appearance dark|light; text-size (iOS: large, extra-large, accessibility-large...; \
-                                      Android: small|default|large|largest or a factor); reduce-motion on|off; locale es-ES; \
+            .arg(positional("value", "appearance dark|light; text-size (both: default, largest; iOS: large, extra-large, \
+                                      accessibility-large...; Android: small|large or a factor); reduce-motion on|off; locale es-ES; \
                                       location LAT,LON; orientation portrait|landscape (Android)")
                 .required(true))))
         .subcommand(device_options(sub("profile", "where the app spends its time, from the platform's sampler (sample, simpleperf)")
@@ -388,7 +393,7 @@ pub fn parser() -> Command {
             .arg(choices("action", &["save"]).required(true))
             .arg(positional("name", "the baseline's name").required(true))))
         .subcommand(file(window(sub("tree", "elements and what they drew at one moment (live: now)")
-            .arg(opt("device", "without the library: the platform's accessibility elements (Android only)"))
+            .arg(opt("device", "without the library: the platform's accessibility elements on an iOS simulator or Android device"))
             .arg(opt("at", "offline: time (1.5s, 1500ms, 1500); default the last frame"))
             .arg(opt("id", "only this element"))
             .arg(Arg::new("interactive").short('i').long("interactive").action(ArgAction::SetTrue)
@@ -409,7 +414,8 @@ pub fn parser() -> Command {
             .arg(opt("where", "e.g. 'kind=draw and alpha>0'; fields: t z kind op owner source fill border \
                                borderColor corner opacity alpha x y w h; operators = != > < >= <= ~(contains)"))
             .arg(Arg::new("between").long("between").num_args(2).value_names(["FROM", "TO"]).allow_hyphen_values(true))
-            .arg(opt("limit", "at most this many rows").value_parser(clap::value_parser!(usize)).default_value("20")))))
+            .arg(opt("limit", "at most this many rows").value_parser(clap::value_parser!(usize)).default_value("20"))
+            .arg(opt("device", "without the library: text or id in the accessibility tree of an iOS simulator or Android device")))))
         .subcommand(sub("diff", "two recordings (default: the last two takes): the screen, or one element")
             .arg(positional("recordings", "0, 1 (against the last take) or 2 recordings").num_args(0..))
             .arg(opt("id", "one element frame by frame; without it, the screen at the end of each"))
@@ -528,6 +534,7 @@ pub fn parse(argv: &[String]) -> Result<Args, clap::Error> {
         follow: boolean(m, "follow"),
         source: boolean(m, "source"),
         force: boolean(m, "force"),
+        id_from_ref: false,
         reset: boolean(m, "reset"),
         structure: boolean(m, "structure"),
     })

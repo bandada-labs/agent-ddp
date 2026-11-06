@@ -408,6 +408,7 @@ class FakeApp:
         # App values: total grows by 10 on every read; mode is writable.
         self.total, self.mode = 0, "idle"
         self.touches, self.runner, self.saved, self.hide_save, self.rows = [], [], False, False, False
+        self.scrolls = False
         self.server = socket.socket()
         self.server.bind(("127.0.0.1", 0))
         self.server.listen()
@@ -487,7 +488,8 @@ class FakeApp:
                 method, params = message["method"], message.get("params", {})
                 result = {}
                 if method == "app.info":
-                    result = {"protocol": 2, "platform": "ios", "app": "fake", "name": "Fake", "unit": "pt", "scale": 3, "screen": [390, 844]}
+                    result = {"protocol": 2, "platform": "ios", "app": "fake", "name": "Fake", "unit": "pt", "scale": 3, "screen": [390, 844],
+                              "runner": 2}
                 elif method == "screen.frame":
                     result = self.frame(0)
                     if self.tapped_clock is not None and clock.monotonic() - self.tapped_clock > 0.05:
@@ -511,6 +513,12 @@ class FakeApp:
                     result = {"ms": 30.4}
                 elif method == "screen.elements":
                     shown = [{"type": "TextView", "label": "Off", "frame": [0, 0, 50, 10], "enabled": False}]
+                    if self.scrolls:
+                        # Below the fold: the app holds it, the user can't see it. After Save the screen scrolls: Off
+                        # goes out of view the same way, which is a move, not "gone".
+                        shown.append({"type": "TextView", "label": "Below", "frame": [0, 900, 50, 10], "shown": False})
+                        if self.saved:
+                            shown[0] = {**shown[0], "frame": [0, -40, 50, 10], "shown": False}
                     if not self.hide_save:
                         shown.insert(0, {"type": "Button", "label": "Save", "id": "save", "frame": [10, 20, 200, 80], "tap": True})
                     if self.saved:
@@ -816,9 +824,31 @@ with tempfile.TemporaryDirectory() as directory:
     second = re.search(r'(@e\d+) Button "Delete" \[0,400 100x50\]', rows)
     assert second and re.search(r'@e\d+ Button "Delete" \[0,300 100x50\]', rows), rows
     ddp_in(directory, "tap", second.group(1), "--device", "runner-fake", env=host)
-    ddp_in(directory, "tap", "Delete", "--device", "runner-fake", env=host)
-    assert app.runner == [("input.tap", {"x": 50, "y": 425}), ("input.tap", {"x": 50, "y": 325})], app.runner
+    ddp_in(directory, "tap", "Delete [2]", "--device", "runner-fake", env=host)
+    assert app.runner == [("input.tap", {"x": 50, "y": 425})] * 2, app.runner
+    # A label two elements share names neither: no guess, the refs to pick from.
+    either = ddp_in(directory, "tap", "Delete", "--device", "runner-fake", env=host)
+    assert either.returncode == 1 and re.search(r"'Delete' names 2 elements: @e\d+ Button \"Delete\" \[0,300 100x50\], "
+                                                r"@e\d+ Button \"Delete\" \[0,400 100x50\]", either.stderr) and \
+        "next: act on one by its ref" in either.stderr and len(app.runner) == 2, either.stderr
     app.rows = False
+    # wait and find on the accessibility tree.
+    app.saved = True
+    waited = ddp_in(directory, "wait", "text", "saved", "--device", "runner-fake", env=host)
+    assert waited.returncode == 0 and re.fullmatch(r'@e\d+ TextView "Saved" \[10,120 100x30\] on screen after \d+ms; no checks \(no SDK\)\n',
+                                                   waited.stdout), waited.stdout + waited.stderr
+    found = ddp_in(directory, "find", "id", "save", "--device", "runner-fake", env=host)
+    assert re.fullmatch(r'@e\d+ Button "Save" #save \[10,20 200x80\] tap\n1 of 3 elements on runner-fake; no checks \(no SDK\)\n',
+                        found.stdout), found.stdout + found.stderr
+    late = ddp_in(directory, "wait", "id", "nope", "--timeout", "300ms", "--device", "runner-fake", env=host)
+    assert late.returncode == 1 and "timed out after 300ms waiting for id nope" in late.stderr, late.stderr
+    # Off screen: not in tree, and an element that scrolls out of view moved, it did not go.
+    app.saved, app.scrolls = False, True
+    listed = ddp_in(directory, "tree", "--device", "runner-fake", env=host).stdout
+    assert "Below" not in listed and "2 elements on runner-fake" in listed, listed
+    scrolled = ddp_in(directory, "tap", "Save", "--device", "runner-fake", env=host)
+    assert re.search(r'new: @e\d+ "Saved"; 1 moved; no checks', scrolled.stdout), scrolled.stdout + scrolled.stderr
+    app.scrolls, app.saved = False, False
     # Parity compares the labels that appeared after each step, not elements: iOS keys a button by id, Android by label.
     walks = Path(directory, ".ddp", "walks")
     (walks / "save-the-form.ios.replay.json").write_text(json.dumps({"ok": True, "steps": [

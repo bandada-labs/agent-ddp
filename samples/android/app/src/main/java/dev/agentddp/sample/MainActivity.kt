@@ -44,6 +44,9 @@ import android.content.Context
 import android.widget.FrameLayout
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import okhttp3.OkHttpClient
@@ -319,6 +322,12 @@ fun SampleScreen(initialAction: String = "none") {
                         Thread.sleep(250)
                         lastAction = "busy"
                     }.padding(16.dp))
+                }
+            }
+            item {
+                // A preview whose inside TalkBack never reads: one element "Preview", not the button in it.
+                Box(Modifier.padding(16.dp).clearAndSetSemantics { contentDescription = "Preview"; testTag = "previewFrame" }) {
+                    Button({ lastAction = "inner" }, Modifier.testTag("previewInner")) { Text("Inner") }
                 }
             }
         }

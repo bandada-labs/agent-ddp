@@ -213,11 +213,14 @@ pub fn tree(args: &mut Args) -> Result<i32> {
                 row
             })
             .collect();
-        let mut out = obj(vec![
-            ("t", frame.t_value().clone()),
-            ("unit", recording.header["unit"].clone()),
-            ("elements", json!(elements)),
-        ]);
+        let mut out = obj(vec![("t", frame.t_value().clone()), ("unit", recording.header["unit"].clone())]);
+        // Screen size in the unit, and the scale to points or dp: what a size check needs besides the frames.
+        for field in ["screen", "scale"] {
+            if let Some(value) = recording.header.get(field).filter(|v| !v.is_null()) {
+                out[field] = value.clone();
+            }
+        }
+        out["elements"] = json!(elements);
         if !unowned.is_empty() {
             out["unowned"] = json!(unowned.into_iter().map(public_node).collect::<Vec<_>>());
         }
@@ -429,6 +432,9 @@ fn find_elements(recording: &Recording, by: &str, value: &str) -> Result<()> {
 }
 
 pub fn find(args: &mut Args) -> Result<i32> {
+    if crate::runner::device_mode(args) {
+        return crate::runner::find(args);
+    }
     let recording = recording_for(args)?;
     if let Some(by) = &args.by {
         let Some(value) = args.value.as_ref().filter(|_| by == "text" || by == "id") else {

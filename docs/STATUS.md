@@ -20,6 +20,8 @@ A small library inside a Debug build of an iOS or Android app serves what the ap
 
 ## In progress: 0.5.0 (not released)
 
+An app team uses an unofficial beta (0.5.0-beta.N, not on npm) as its only device tool and reports gaps; beta.2 (2026-11-06) fixed its first 10 findings, checked live on both platforms (19 iOS and 16 Android no-SDK taps against the library: 0 false positives, 0 misses).
+
 Done and checked live on the iOS 27.0 simulator and the API 36 emulator with the sample apps: `ddp up` / `ddp down` (own device from a warm base, boot under 10 s); apps without the library on both platforms (`--device`, or a session `up` keeps): Android through ddp's runner instrumentation (a tap in about 35 ms), iOS from the Mac through the simulator's HID and accessibility services (about 200 ms per command, no XCTest); every action prints what changed with refs; `ddp walk` start, expect, end, replay with no model, and parity between iOS and Android (a walk made on iOS replayed on Android, parity 0 differences). Before the tag: the version bump, the release workflow building the runner APK first (changed, untested until a tag), and the hook matrix for the two new Mac-side hooks.
 
 ## Next

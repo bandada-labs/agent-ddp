@@ -22,16 +22,24 @@ const PACKAGE: &str = "dev.agentddp.runner";
 const APK: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/runner.apk"));
 /// `am instrument` to the socket open took 2 s on an emulator; a cold device can take longer.
 const START_PATIENCE: Duration = Duration::from_secs(10);
+/// The runner's `VERSION` (Runner.kt) this ddp speaks.
+const RUNNER_VERSION: u64 = 2;
 const POLL: Duration = Duration::from_millis(100);
 
 /// What every runner answer ends with: the runner did it, nothing was checked.
 pub const NO_CHECKS: &str = "no checks (no SDK)";
 
-/// A connection to the runner on this Android device, started (and installed) when it is not running.
+/// A connection to the runner on this Android device, started (and installed) when it is not running. A runner
+/// another ddp left running answers differently: it is stopped and replaced by the one this ddp carries.
 pub fn open(device: &str) -> Result<Control> {
     let session = json!({"device": device, "app": PACKAGE, "port": forward(device)?});
-    if let Ok(control) = Control::open(&session) {
-        return Ok(control);
+    if let Ok(mut control) = Control::open(&session) {
+        if control.call("app.info", json!({}))?["runner"] == RUNNER_VERSION {
+            return Ok(control);
+        }
+        control.call("runner.stop", json!({}))?;
+        control.close();
+        adb(device, &["shell", "am", "force-stop", PACKAGE])?;
     }
     start(device)?;
     let deadline = Instant::now() + START_PATIENCE;
@@ -132,7 +140,14 @@ impl Screen {
     /// What is on screen: `type`, `label`, `id`, `value`, `frame`, and `tap`/`enabled` where the platform says.
     /// Named as the library names them: elements that share a label are `Delete`, `Delete [2]` in reading order, so
     /// a ref or a name points at one element, never at the first of several.
+    /// What a person sees: the elements on screen.
     fn elements(&mut self) -> Result<Vec<Value>> {
+        Ok(on_screen(&self.look()?))
+    }
+
+    /// Every element the platform lists, with the ones the app holds off screen (Android: `shown: false`), so an
+    /// action can tell "scrolled out of view" from "gone". Names come from all of them, so a scroll keeps them.
+    fn look(&mut self) -> Result<Vec<Value>> {
         let elements = match self {
             Screen::Ios(simulator) => simulator.elements()?,
             Screen::Android(control) => {
@@ -244,7 +259,7 @@ fn center(element: &Value) -> (f64, f64) {
 }
 
 /// `x,y`, or the first element whose label or id is `text` (reading order, as a person scans the screen).
-fn place(elements: &[Value], text: &str, device: &str) -> Result<Place> {
+fn place(elements: &[Value], text: &str, from_ref: bool, device: &str) -> Result<Place> {
     if let Some(at) = crate::hit::point(text) {
         // The smallest element under the point is what the finger lands on.
         let seen = elements
@@ -257,15 +272,30 @@ fn place(elements: &[Value], text: &str, device: &str) -> Result<Place> {
             .cloned();
         return Ok(Place { given: text.to_string(), at, seen });
     }
-    // An exact name first (`Delete [2]`, from a ref), then a label or id: the first in reading order.
-    let named = elements.iter().find(|e| element_key(e) == text);
-    match named.or_else(|| elements.iter().find(|e| e["label"] == text || e["id"] == text)) {
-        Some(element) => Ok(Place { given: text.to_string(), at: center(element), seen: Some(element.clone()) }),
-        None => fail!(
+    // A ref or a numbered name (`Delete [2]`) names one element. A plain label or id may name several (a tab and
+    // the bar titled like it): then no guess, a touch on the wrong one would read as the app's doing.
+    let exact = from_ref || text.ends_with(']');
+    let named = elements.iter().find(|e| element_key(e) == text).filter(|_| exact);
+    let candidates: Vec<&Value> = match named {
+        Some(element) => vec![element],
+        None => elements.iter().filter(|e| element_key(e) == text || e["label"] == text || e["id"] == text).collect(),
+    };
+    match candidates[..] {
+        [element] => Ok(Place { given: text.to_string(), at: center(element), seen: Some(element.clone()) }),
+        [] => fail!(
             format!("no element '{text}' in the accessibility tree (not in it: what the iOS keyboard covers, an Android Compose testTag without testTagsAsResourceId)"),
             "unknown_element",
             format!("ddp tree --device {device}")
         ),
+        _ => {
+            let refs = refs_for(&candidates.iter().map(|e| element_key(e)).collect::<Vec<_>>())?;
+            let listed: Vec<String> = candidates.iter().map(|element| tree_line(element, &refs)).collect();
+            fail!(
+                format!("'{text}' names {} elements: {}", candidates.len(), listed.join(", ")),
+                "ambiguous_element",
+                "act on one by its ref"
+            )
+        }
     }
 }
 
@@ -318,6 +348,14 @@ pub struct Change {
     pub still_changing: bool,
 }
 
+fn off_screen(element: &Value) -> bool {
+    element["shown"] == false
+}
+
+fn on_screen(elements: &[Value]) -> Vec<Value> {
+    elements.iter().filter(|e| !off_screen(e)).cloned().collect()
+}
+
 fn change(before: &[Value], after: &[Value], busy: &HashSet<String>) -> Change {
     let (was, is) = (keyed(before), keyed(after));
     let mut change = Change::default();
@@ -326,6 +364,11 @@ fn change(before: &[Value], after: &[Value], busy: &HashSet<String>) -> Change {
             continue;
         }
         match was.get(key) {
+            // Off screen, after and maybe before: nothing a person sees.
+            None if off_screen(element) => {}
+            Some(old) if off_screen(old) && off_screen(element) => {}
+            // Scrolled into or out of view: the app still holds it, as the library would say.
+            Some(old) if off_screen(old) != off_screen(element) => change.moved += 1,
             None => change.new.push((*element).clone()),
             Some(old) if state(old) != state(element) => change.changed.push((*element).clone()),
             Some(old) if frame_of(old) != frame_of(element) => change.moved += 1,
@@ -334,7 +377,7 @@ fn change(before: &[Value], after: &[Value], busy: &HashSet<String>) -> Change {
     }
     change.gone = was
         .iter()
-        .filter(|(key, _)| !busy.contains(*key) && !is.contains_key(*key))
+        .filter(|(key, element)| !busy.contains(*key) && !is.contains_key(*key) && !off_screen(element))
         .map(|(_, e)| (*e).clone())
         .collect();
     change
@@ -347,7 +390,7 @@ fn settle(screen: &mut Screen, before: &[Value], busy: &HashSet<String>) -> Resu
     let mut quiet = 0;
     loop {
         pause(LOOK_EVERY);
-        let now = screen.elements()?;
+        let now = screen.look()?;
         match &last {
             None if differing(before, &now).is_subset(busy) => {
                 if started.elapsed() >= FIRST_CHANGE_WAIT {
@@ -494,10 +537,10 @@ fn perform(
 ) -> Result<i32> {
     let (platform, device, _) = crate::device::target(args)?;
     let mut screen = Screen::open(&platform, &device)?;
-    let before = screen.elements()?;
-    let (action, places) = build(&before, &device)?;
+    let before = screen.look()?;
+    let (action, places) = build(&on_screen(&before), &device)?;
     pause(BUSY_SAMPLE);
-    let settled = screen.elements()?;
+    let settled = screen.look()?;
     let busy = differing(&before, &settled);
     let started = Instant::now();
     if let (Action::Type(_), Some(field)) = (&action, places.first()) {
@@ -517,7 +560,7 @@ fn perform(
         "platform": platform,
         "places": places.iter().map(|p| json!({"given": p.given, "at": [p.at.0, p.at.1], "seen": p.seen})).collect::<Vec<_>>(),
         "new": change.new.iter().map(display).collect::<Vec<_>>(),
-        "appeared": confirmed(&mut screen, appeared(&settled, &after, &busy))?,
+        "appeared": confirmed(&mut screen, appeared(&on_screen(&settled), &on_screen(&after), &busy))?,
         "gone": change.gone.iter().map(display).collect::<Vec<_>>(),
         "changed": change.changed.iter().map(display).collect::<Vec<_>>(),
         "ms": took.round(),
@@ -538,6 +581,7 @@ fn duration(args: &Args, default_ms: f64) -> Result<f64> {
 pub fn gesture(args: &Args) -> Result<i32> {
     let gesture = args.command.clone();
     let from_text = args.id.clone().unwrap_or_default();
+    let to_from_ref = args.value.as_deref().is_some_and(|text| text.starts_with("@e"));
     let to_text = match (&gesture[..], &args.value) {
         ("swipe" | "drag", Some(text)) => Some(crate::queries::resolve_ref(text)?),
         ("swipe" | "drag", None) => fail!(
@@ -562,8 +606,8 @@ pub fn gesture(args: &Args) -> Result<i32> {
         _ => json!({"ms_given": args.duration.as_deref().map(crate::state::parse_ms).transpose()?}),
     };
     perform(args, &verb, given, |elements, device| {
-        let from = place(elements, &from_text, device)?;
-        let to = to_text.as_deref().map(|to| place(elements, to, device)).transpose()?;
+        let from = place(elements, &from_text, args.id_from_ref, device)?;
+        let to = to_text.as_deref().map(|to| place(elements, to, to_from_ref, device)).transpose()?;
         let action = match (&gesture[..], &to) {
             ("tap", _) => Action::Tap(from.at),
             ("double-tap", _) => Action::DoubleTap(from.at),
@@ -585,7 +629,7 @@ pub fn type_text(args: &Args) -> Result<i32> {
         &format!("typed {} characters{into}", text.chars().count()),
         json!({"text": text}),
         |elements, device| {
-            let field = args.id.as_deref().map(|id| place(elements, id, device)).transpose()?;
+            let field = args.id.as_deref().map(|id| place(elements, id, args.id_from_ref, device)).transpose()?;
             Ok((Action::Type(text.clone()), field.into_iter().collect()))
         },
     )
@@ -608,29 +652,120 @@ pub fn tree(args: &Args) -> Result<i32> {
     }
     let refs = refs_for(&elements.iter().map(element_key).filter(|k| k != "?").collect::<Vec<_>>())?;
     for element in &elements {
-        let frame = frame_of(element);
-        let mut line = refs.get(&element_key(element)).map(|r| format!("{r} ")).unwrap_or_default();
-        line += &py::str(&element["type"]);
-        if let Some(label) = element["label"].as_str() {
-            line += &format!(" {}", py::dumps(&json!(label)));
-        }
-        if let Some(id) = element["id"].as_str() {
-            line += &format!(" #{id}");
-        }
-        if let Some(value) = element["value"].as_str() {
-            line += &format!(" = {}", py::dumps(&json!(value)));
-        }
-        line += &format!(" [{},{} {}x{}]", frame[0], frame[1], frame[2], frame[3]);
-        if element["tap"] == true {
-            line += " tap";
-        }
-        if element["enabled"] == false {
-            line += " disabled";
-        }
-        say!("{line}");
+        say!("{}", tree_line(element, &refs));
     }
     say!("{} elements on {device}; {NO_CHECKS}", elements.len());
     Ok(0)
+}
+
+/// An element `wait` and `find` look for: `id` an id (or `Delete [2]`), `text` part of a label, any case.
+fn matches(element: &Value, by: &str, value: &str) -> bool {
+    if by == "id" {
+        element_key(element) == value || element["id"] == value
+    } else {
+        let wanted = crate::model::normalize_label(value).to_lowercase();
+        element["label"].as_str().is_some_and(|label| label.to_lowercase().contains(&wanted))
+    }
+}
+
+/// `wait` without the library: until an element is in the accessibility tree, or the tree stops changing.
+pub fn wait(args: &Args) -> Result<i32> {
+    let (platform, device, _) = crate::device::target(args)?;
+    let settled_ms = args.settled.as_deref().map(crate::state::parse_ms).transpose()?;
+    if args.by.is_none() && settled_ms.is_none() {
+        fail!("wait needs `id <id>`, `text <label>` or --settled 300ms", "missing_option");
+    }
+    let timeout = crate::state::parse_ms(&args.timeout)?;
+    let value = args.value.clone().unwrap_or_default();
+    let ignored: HashSet<String> = args.ignore.iter().cloned().collect();
+    let mut screen = Screen::open(&platform, &device)?;
+    let started = Instant::now();
+    let (mut previous, mut still_since): (Option<Vec<Value>>, Instant) = (None, started);
+    loop {
+        let elements = screen.elements()?;
+        let ms = started.elapsed().as_millis();
+        if let Some(by) = &args.by {
+            if let Some(found) = elements.iter().find(|e| matches(e, by, &value)) {
+                let refs = refs_for(&[element_key(found)])?;
+                say!("{} on screen after {ms}ms; {NO_CHECKS}", tree_line(found, &refs));
+                return Ok(0);
+            }
+        } else {
+            let changed = previous
+                .as_ref()
+                .is_none_or(|before| differing(before, &elements).iter().any(|key| !ignored.contains(key)));
+            if changed {
+                still_since = Instant::now();
+            } else if still_since.elapsed().as_secs_f64() * 1000.0 >= settled_ms.unwrap() {
+                say!(
+                    "settled: nothing changed for {}ms (after {ms}ms); {NO_CHECKS}",
+                    still_since.elapsed().as_millis()
+                );
+                return Ok(0);
+            }
+            previous = Some(elements);
+        }
+        if ms as f64 >= timeout {
+            let what = match &args.by {
+                Some(by) => format!("{by} {value}"),
+                None => format!("{} without change", args.settled.clone().unwrap_or_default()),
+            };
+            fail!(
+                format!("timed out after {} waiting for {what}", args.timeout),
+                "timeout",
+                format!("ddp tree --device {device} to see what is there, or a longer --timeout")
+            );
+        }
+        pause(LOOK_EVERY);
+    }
+}
+
+/// `find text|id` without the library: the matching elements of the accessibility tree, as `tree` lists them.
+pub fn find(args: &Args) -> Result<i32> {
+    let (platform, device, _) = crate::device::target(args)?;
+    let (Some(by), Some(value)) = (args.by.as_deref().filter(|by| *by == "text" || *by == "id"), &args.value) else {
+        fail!("find without the library takes `text <part of a label>` or `id <id>`", "bad_find");
+    };
+    let elements = Screen::open(&platform, &device)?.elements()?;
+    let found: Vec<&Value> = elements.iter().filter(|e| matches(e, by, value)).collect();
+    if args.json {
+        say!("{}", py::dumps(&json!({"elements": found, "checks": false})));
+        return Ok(0);
+    }
+    if found.is_empty() {
+        say!("no match");
+        return Ok(0);
+    }
+    let refs = refs_for(&found.iter().map(|e| element_key(e)).collect::<Vec<_>>())?;
+    for element in &found {
+        say!("{}", tree_line(element, &refs));
+    }
+    say!("{} of {} elements on {device}; {NO_CHECKS}", found.len(), elements.len());
+    Ok(0)
+}
+
+/// `@e3 Button "Save" #save = "value" [x,y wxh] tap disabled`
+fn tree_line(element: &Value, refs: &BTreeMap<String, String>) -> String {
+    let frame = frame_of(element);
+    let mut line = refs.get(&element_key(element)).map(|r| format!("{r} ")).unwrap_or_default();
+    line += &py::str(&element["type"]);
+    if let Some(label) = element["label"].as_str() {
+        line += &format!(" {}", py::dumps(&json!(label)));
+    }
+    if let Some(id) = element["id"].as_str() {
+        line += &format!(" #{id}");
+    }
+    if let Some(value) = element["value"].as_str() {
+        line += &format!(" = {}", py::dumps(&json!(value)));
+    }
+    line += &format!(" [{},{} {}x{}]", frame[0], frame[1], frame[2], frame[3]);
+    if element["tap"] == true {
+        line += " tap";
+    }
+    if element["enabled"] == false {
+        line += " disabled";
+    }
+    line
 }
 
 /// `ddp doctor`: the Mac-side hooks for iOS apps without the library, each asked once (an empty key release, the

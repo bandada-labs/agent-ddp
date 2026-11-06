@@ -193,8 +193,12 @@ pub fn open(session: &Value) -> Result<Control> {
 fn header(control: &mut Control, frames: u64) -> Result<Value> {
     let info = control.call("app.info", json!({}))?;
     model::check_protocol(&info)?;
-    Ok(json!({"type": "header", "protocol": model::PROTOCOL, "platform": info["platform"], "unit": info["unit"],
-              "scale": info["scale"], "frames": frames, "startedAt": py::fnum(state::now_ms().round())}))
+    let mut header = json!({"type": "header", "protocol": model::PROTOCOL, "platform": info["platform"], "unit": info["unit"],
+              "scale": info["scale"], "frames": frames, "startedAt": py::fnum(state::now_ms().round())});
+    if info.get("screen").is_some_and(|screen| !screen.is_null()) {
+        header["screen"] = info["screen"].clone();
+    }
+    Ok(header)
 }
 
 /// What is on screen now as a recording: header, one frame, end.

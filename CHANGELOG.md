@@ -12,6 +12,22 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 - `ddp up --platform ios|android [--install <build>] [--app <id>]`: a simulator or emulator of ddp's own for a run. iOS clones a base simulator (`ddp-base`, made and booted once on first use); Android starts the base AVD (`ddp_base`) read-only from its quickboot snapshot on the first free even port from 5560, never 5554-5558. Then it installs and starts the app and connects. `ddp down [<device>] [--all]` shuts down and removes only devices `ddp up` made, listed in `.ddp/devices.json`.
 - Android apps without the library: `tap`, `double-tap`, `long-press`, `swipe`, `drag`, `type`, `press` and `tree` with `--device` go through ddp's runner, an instrumentation inside the ddp binary that it installs and starts when needed. Touches are the system's own input (a tap in about 35 ms, `adb shell input` took 70-115 ms), and a place can be a label or resource id from the platform's accessibility tree, not only `x,y`. iOS simulators work the same way, from the Mac, with nothing installed in the simulator and no XCTest: touches and keys go into the simulator's own HID service and `tree --device` reads its accessibility service (two private hooks, `simulator.hid` and `simulator.accessibility`, asked by `ddp doctor`). Before, iOS refused `--device`. Nothing is checked without the library: the output says `no checks (no SDK)`. Double tap now works too.
 
+### Fixed
+
+- iOS without the library: `tree --device` showed SwiftUI's navigation bar and tab bar (iOS 26 and later) as one empty `Group`, so Close, toolbar buttons and tabs could not be tapped by name. Their children now come from the full accessibility tree.
+- Without the library, a label or id that names more than one element (the tab "Sets" and a bar titled "Sets") touched the first one. It is now refused with the refs to pick from.
+- Android without the library: an element that scrolled out of view, or that the keyboard pushed off screen, was reported `gone`. It now counts as moved, as with the library; the runner marks such elements `shown: false` and `tree` leaves them out. A runner left running by another ddp is replaced.
+- Android library: nodes under `clearAndSetSemantics` were elements (with `tap`) although TalkBack never reads them. They are now paint of the element that cleared them.
+- `long-press` and `double-tap` with the library did not wait for the hit test as `tap` does, so a press on a covered element went to the cover. They now refuse it the same way (`--force` presses anyway).
+- `type --into` on an Android Compose field returned before the field held the text. It now waits until the field's text changed (2 s at most, and says so).
+- iOS `set text-size largest` said done and changed nothing: simctl ignores names it does not know. `default` and `largest` now work on both platforms, and a name the platform does not take is refused.
+- `--help` said `--device` was Android only on `tap`, `type`, `long-press` and others; it works on iOS simulators too.
+
+### Added (beta.2)
+
+- `wait id|text`, `wait --settled` and `find text|id` take `--device`: they read the platform's accessibility tree for an app without the library.
+- `tree --json` with the library has the screen size and the scale (`screen`, `scale`), so a dp or pt check needs no `wm size`.
+
 ## 0.4.0 (2026-11-03)
 
 - `ddp recompositions [--for 3s] [--then CMD]` (Android): which composables ran in the window, how often, and which state objects made Compose run them again; androidx's own composables are counted and listed with `--full`. The counts come from the trace calls the Compose compiler writes in every composable body, the causes from Compose's composition observer. A tracer the app has (Perfetto's runtime-tracing) keeps working. Two new engine hooks: `compose.tracer`, `compose.wrappedComposition`.

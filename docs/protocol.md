@@ -100,8 +100,11 @@ Every result has `ms`, the time spent on the device.
 | `input.type` | `text` (ASCII) | |
 | `input.key` | `key`: `Enter`, `Tab`, `Backspace`, `Back` | |
 | `screen.find` | `label` | `found`, `frame` |
-| `screen.elements` | | `elements`: `type`, `label`, `id`, `frame` [x,y,w,h], `tap`, `enabled` |
+| `screen.elements` | | `elements`: `type`, `label`, `id`, `frame` [x,y,w,h], `tap`, `enabled`; `shown: false` for one the app holds off screen (scrolled away, under the keyboard's pan) |
 | `runner.stop` | | |
+
+`app.info` answers `runner`, the runner's version (2). A ddp that finds a runner with another version running stops it
+and installs its own.
 
 ## Messages
 

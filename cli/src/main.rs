@@ -129,6 +129,7 @@ pub fn run_command(argv: Vec<String>) -> i32 {
     }
     let result = (|| {
         if let Some(id) = &args.id {
+            args.id_from_ref = id.starts_with("@e");
             args.id = Some(queries::resolve_ref(id)?);
         }
         handler(&args.command.clone())(&mut args)
