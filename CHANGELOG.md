@@ -21,6 +21,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 - `long-press` and `double-tap` with the library did not wait for the hit test as `tap` does, so a press on a covered element went to the cover. They now refuse it the same way (`--force` presses anyway).
 - `type --into` on an Android Compose field returned before the field held the text. It now waits until the field's text changed (2 s at most, and says so).
 - iOS `set text-size largest` said done and changed nothing: simctl ignores names it does not know. `default` and `largest` now work on both platforms, and a name the platform does not take is refused.
+- `check overlap` said COVERED for a text its list had scrolled almost away (7 px left at the list's edge): the strip held none of its glyphs. A text cut by its container is no longer judged.
 - `--help` said `--device` was Android only on `tap`, `type`, `long-press` and others; it works on iOS simulators too.
 
 ### Added (beta.2)

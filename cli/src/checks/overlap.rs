@@ -1,6 +1,7 @@
 //! `check overlap`: a text something is drawn over. The app's own pixels decide (inspect). iOS: the screen shows the
 //! same color where the text has ink as where it has none, so its shape cannot be seen. Android: the text's colors
-//! show nowhere in its frame. Partly covered text is not reported; the pixels cannot tell it for sure.
+//! show nowhere in its frame. Partly covered text, and text its container cuts (a list's edge), is not reported; the
+//! pixels cannot tell it for sure.
 use crate::args::Args;
 use crate::inspect::VISIBLE;
 use crate::model::Recording;

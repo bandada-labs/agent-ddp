@@ -307,6 +307,12 @@ fn judge_texts(
         if moving.iter().any(|m| overlaps(*m, box_)) {
             continue;
         }
+        // Cut by its container's edge (a list scrolled it half away): what is left may hold none of its glyphs, so
+        // its color missing there says nothing. Not judged.
+        let [_, _, width, height] = rect(&node["frame"]);
+        if box_[2] < width - 1.0 || box_[3] < height - 1.0 {
+            continue;
+        }
         let owner = node["owner"].as_str().filter(|key| frame.element(key).is_some());
         let key = owner.map(String::from).unwrap_or_else(|| format!("text at {}", py::str(&node["frame"])));
         let mut evidence = json!({"key": key, "z": node["z"], "rect": box_,
@@ -485,6 +491,15 @@ mod tests {
         assert_eq!(shown[0]["uniform"], 1.0);
         // While the text moves, the pixels may show another moment: not judged.
         assert!(judge_texts(&frame, &nodes, &covered, None, &[[0.0, 0.0, 20.0, 20.0]]).is_empty());
+        // Cut to a strip by its list's edge: the strip may hold no glyph. Not judged.
+        let cut = Frame::from(
+            json!({"type": "frame", "t": 0,
+                   "elements": [{"id": "label", "frame": [10, 10, 40, 10]}],
+                   "nodes": [{"z": 0, "kind": "bitmap", "frame": [10, 10, 40, 10], "visible": [10, 18, 40, 2],
+                              "text": {"color": "#000000FF", "size": 14}}]}),
+            1.0,
+        );
+        assert!(judge_texts(&cut, &text_nodes(&cut), &covered, None, &[]).is_empty());
         // iOS answers with the screen at the text's own ink and clear points: the same color at both is covered.
         let gray = vec!["#8E8E93FF"; 8];
         let ink = json!([{"frame": [10, 10, 40, 10], "ink": gray, "clear": gray}]);
