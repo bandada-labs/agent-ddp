@@ -33,6 +33,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 
 - `tree --device --json`: each element's `parent` (the key of the nearest listed element above it) on iOS and Android, and on iOS its UIAccessibility `traits` (`keyboardKey`, `selected`, `header`, ...), so a checker can tell the keyboard and the bars from the app's own elements. Android runner version 4.
 
+- Android library: each element has its `parent` from the semantics and View trees and, when a clip or the window cuts it, `visible` (null when none of it shows). `tree` nests by that parent, and `tree --json` gives both, so a message scrolled half out of its list still has the list as parent. Before, the parent came from frame containment and was null there. iOS sends neither (its elements are VoiceOver's leaves).
 - `wait id|text`, `wait --settled` and `find text|id` take `--device`: they read the platform's accessibility tree for an app without the library.
 - `tree --json` with the library has the screen size and the scale (`screen`, `scale`), so a dp or pt check needs no `wm size`.
 

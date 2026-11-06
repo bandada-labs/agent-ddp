@@ -71,10 +71,14 @@ pub fn resolve_ref(text: &str) -> Result<String> {
     }
 }
 
-/// Each element's parent: the smallest element listed before it whose frame holds it. Recorders list
-/// elements in tree order, so a parent always comes first; a popup listed later never adopts the screen below.
-pub fn parents_by_containment(frame: &Frame, tolerance: f64) -> HashMap<String, Option<String>> {
+/// Each element's parent: the one the platform's tree gives (Android library 0.5), else the smallest element listed
+/// before it whose frame holds it. Recorders list elements in tree order, so a parent always comes first; a popup
+/// listed later never adopts the screen below.
+pub fn parents(frame: &Frame, tolerance: f64) -> HashMap<String, Option<String>> {
     let elements = frame.elements();
+    if !elements.is_empty() && elements.iter().all(|e| e.get("parent").is_some()) {
+        return elements.iter().map(|e| (element_key(e), e["parent"].as_str().map(String::from))).collect();
+    }
     elements
         .iter()
         .enumerate()
@@ -134,7 +138,7 @@ pub fn tree(args: &mut Args) -> Result<i32> {
             .ok_or_else(|| crate::state::failure("no frames in the recording", "bad_recording", None))?,
     };
     let refs = save_refs(&recording.frames)?;
-    let parents = parents_by_containment(frame, recording.tolerance);
+    let parents = parents(frame, recording.tolerance);
     let mut children: HashMap<Option<String>, Vec<&Value>> = HashMap::new();
     for element in frame.elements() {
         children.entry(parents[&element_key(element)].clone()).or_default().push(element);
@@ -206,6 +210,10 @@ pub fn tree(args: &mut Args) -> Result<i32> {
                     if let Some(value) = e.get(field).filter(|v| !v.is_null()) {
                         row[field] = value.clone();
                     }
+                }
+                // Where the recorder knows the clips: null when none of it shows, absent when all of it does.
+                if let Some(visible) = e.get("visible") {
+                    row["visible"] = visible.clone();
                 }
                 if !args.interactive {
                     row["nodes"] = json!(frame.owned(Some(&key)).into_iter().map(public_node).collect::<Vec<_>>());

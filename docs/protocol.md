@@ -128,6 +128,7 @@ at a time may have, and the app's own UI tests need it.
 
 - `i` is the frame index, `t` the ms since the first frame. `missed`: refreshes the main thread missed before this frame by the platform's own frame times (`CADisplayLink`, Choreographer), counting only what the app's work alone took, without the library's capture.
 - `elements` are what a person would tap or read: accessibility elements on iOS, semantics nodes and Views with a test tag, text or content description on Android.
+- Android elements carry `parent`, the index in `elements` of the element whose subtree holds them (null at the top), and `visible` when their clips cut them (null: none of it shows). iOS elements are VoiceOver's leaves: they never nest, and SwiftUI's clips are not on the accessibility path, so iOS sends neither.
 - `nodes` are what was drawn, in paint order. A higher `z` paints over a lower one. Only nodes that draw something are listed.
 - Coordinates are window coordinates in `unit`.
 

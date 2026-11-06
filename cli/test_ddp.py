@@ -229,6 +229,19 @@ with tempfile.TemporaryDirectory() as directory:
     tree_json = json.loads(run("tree", "-i", "--json", recording=recording))
     assert tree_json["elements"][0]["ref"] == "@e1" and tree_json["elements"][1]["parent"] == "button", tree_json
     assert json.loads(run("find", "text", "open", "--json", recording=recording))[0]["key"] == "Open"
+    # Android library: parent from the semantics tree, visible from the clips, even when the frame leaves the list's.
+    chat = Path(directory, "chat.jsonl")
+    chat.write_text("\n".join(json.dumps(line) for line in [
+        {"type": "header", "platform": "android", "unit": "px", "scale": 1, "frames": 1},
+        {"type": "frame", "i": 0, "t": 0, "nodes": [], "elements": [
+            {"id": "chat", "frame": [0, 300, 400, 500], "parent": None},
+            {"id": "agent-message", "frame": [0, 214, 400, 150], "parent": 0, "visible": [0, 300, 400, 64]},
+            {"id": "old-message", "frame": [0, 50, 400, 100], "parent": 0, "visible": None},
+            {"id": "send", "frame": [0, 820, 400, 60], "parent": None}]}]))
+    placed = {e["key"]: e for e in json.loads(run("tree", "--json", recording=chat))["elements"]}
+    assert placed["agent-message"]["parent"] == "chat" and placed["agent-message"]["visible"] == [0, 300, 400, 64], placed
+    assert placed["old-message"]["visible"] is None and "visible" not in placed["send"], placed
+    assert placed["send"]["parent"] is None and placed["agent-message"]["depth"] == 1, placed
     rows = [json.loads(line) for line in run("get", "button", "--json", recording=recording).splitlines()]
     assert len(rows) == 5 and rows[2]["border"] == 4, rows
     checked = ddp_in(directory, "check", "overlap", "--json", "--file", "r.jsonl")

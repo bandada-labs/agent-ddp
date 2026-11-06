@@ -259,7 +259,7 @@ pub fn from_lines(lines: Vec<Value>, path: PathBuf) -> Result<Recording> {
 pub fn name_elements(frame: &mut Value) {
     let mut seen: HashMap<String, usize> = HashMap::new();
     if let Some(elements) = frame["elements"].as_array_mut() {
-        for element in elements {
+        for element in elements.iter_mut() {
             element["label"] = match element.get("label") {
                 Some(Value::String(label)) if !label.is_empty() => normalize_label(label).into(),
                 Some(other) => other.clone(),
@@ -273,6 +273,13 @@ pub fn name_elements(frame: &mut Value) {
             let count = seen.entry(name.clone()).or_insert(0);
             *count += 1;
             element["key"] = if *count == 1 { name.into() } else { format!("{name} [{count}]").into() };
+        }
+        // The platform gives the parent's place in the list; an agent reads keys.
+        let keys: Vec<String> = elements.iter().map(element_key).collect();
+        for element in elements.iter_mut() {
+            if let Some(at) = element["parent"].as_u64() {
+                element["parent"] = keys.get(at as usize).map_or(Value::Null, |key| key.as_str().into());
+            }
         }
     }
 }

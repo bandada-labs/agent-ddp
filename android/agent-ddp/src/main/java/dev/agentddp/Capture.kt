@@ -94,7 +94,7 @@ internal class Capture(private val density: Float) {
         val outerOwner = owner
         val outerEffects = effects
         effects = effects || view.layerType != View.LAYER_TYPE_NONE
-        viewElement(view, frame)?.let { owner = it }
+        viewElement(view, frame, visible)?.let { owner = it }
         val source = view.javaClass.simpleName
         view.background?.let { addNode(drawableNode(it).put("source", source), frame, visible, alpha) }
         if (view is TextView && view.text.isNotEmpty()) {
@@ -166,7 +166,7 @@ internal class Capture(private val density: Float) {
     }
 
     /** The new element's index, or null when the view is not one. */
-    private fun viewElement(view: View, frame: RectF): Int? {
+    private fun viewElement(view: View, frame: RectF, visible: RectF): Int? {
         val label = (view as? TextView)?.text?.toString()?.takeIf { it.isNotEmpty() }
             ?: view.contentDescription?.toString()
         val id = view.id.takeIf { it != View.NO_ID }?.let {
@@ -177,6 +177,7 @@ internal class Capture(private val density: Float) {
         }
         if (label == null && id == null) return null
         elements.put(JSONObject().put("frame", rectArray(frame)).apply {
+            putPlace(this, frame, visible, owner)
             id?.let { put("id", it) }
             label?.let { put("label", it) }
             if (view.isClickable && view.hasOnClickListeners()) put("tap", true)
@@ -185,6 +186,18 @@ internal class Capture(private val density: Float) {
         })
         targets.add(Target(view, null))
         return elements.length() - 1
+    }
+
+    /**
+     * `parent`: the element whose subtree holds this one (the walk's owner then), by index, null at the top. `visible`: the
+     * part its clips and the window let show when that is not all of it, null when none of it shows.
+     */
+    private fun putPlace(element: JSONObject, frame: RectF, visible: RectF?, parent: Int) {
+        element.put("parent", if (parent >= 0) parent else JSONObject.NULL)
+        // Compared rounded: semantics and layout coordinates differ by float noise.
+        if (visible == null || rectArray(visible).toString() != rectArray(frame).toString()) {
+            element.put("visible", visible?.let(::rectArray) ?: JSONObject.NULL)
+        }
     }
 
     /** The ARIA role a browser would give it, so agents read the same words on both platforms. Subclasses first. */
@@ -274,6 +287,7 @@ internal class Capture(private val density: Float) {
         if (node != null && !cleared && (tag != null || (label != null && !insideMerged))) {
             owner = elements.length()
             elements.put(JSONObject().put("frame", rectArray(frame)).apply {
+                putPlace(this, frame, visible, outerOwner)
                 tag?.let { put("id", it) }
                 label?.let { put("label", it) }
                 put("role", composeRole(node))

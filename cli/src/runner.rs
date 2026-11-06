@@ -168,15 +168,7 @@ impl Screen {
         };
         let mut frame = json!({"elements": elements});
         crate::model::name_elements(&mut frame);
-        let mut elements = frame["elements"].as_array().cloned().unwrap_or_default();
-        // The platform gives the parent's place in the list; an agent acts on keys.
-        let keys: Vec<String> = elements.iter().map(element_key).collect();
-        for element in &mut elements {
-            if let Some(at) = element["parent"].as_u64() {
-                element["parent"] = json!(keys[at as usize]);
-            }
-        }
-        Ok(elements)
+        Ok(frame["elements"].as_array().cloned().unwrap_or_default())
     }
 
     fn android(&mut self, method: &str, params: Value) -> Result<()> {
