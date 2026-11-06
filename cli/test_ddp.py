@@ -408,7 +408,7 @@ class FakeApp:
         # App values: total grows by 10 on every read; mode is writable.
         self.total, self.mode = 0, "idle"
         self.touches, self.runner, self.saved, self.hide_save, self.rows = [], [], False, False, False
-        self.scrolls, self.save_late = False, 0
+        self.scrolls, self.save_late, self.late_id = False, 0, False
         self.server = socket.socket()
         self.server.bind(("127.0.0.1", 0))
         self.server.listen()
@@ -489,7 +489,7 @@ class FakeApp:
                 result = {}
                 if method == "app.info":
                     result = {"protocol": 2, "platform": "ios", "app": "fake", "name": "Fake", "unit": "pt", "scale": 3, "screen": [390, 844],
-                              "runner": 3}
+                              "runner": 4}
                 elif method == "screen.frame":
                     result = self.frame(0)
                     if self.tapped_clock is not None and clock.monotonic() - self.tapped_clock > 0.05:
@@ -513,6 +513,9 @@ class FakeApp:
                     result = {"ms": 30.4}
                 elif method == "screen.elements":
                     shown = [{"type": "TextView", "label": "Off", "frame": [0, 0, 50, 10], "enabled": False}]
+                    if self.late_id and self.saved:
+                        # The app names it a moment later: the key changes, what a person sees does not.
+                        shown[0]["id"] = "off"
                     if self.scrolls:
                         # Below the fold: the app holds it, the user can't see it. After Save the screen scrolls: Off
                         # goes out of view the same way, which is a move, not "gone".
@@ -526,7 +529,7 @@ class FakeApp:
                     if self.saved:
                         shown.append({"type": "TextView", "label": "Saved", "frame": [10, 120, 100, 30]})
                     if self.rows:
-                        shown += [{"type": "Button", "label": "Delete", "frame": [0, 300 + 100 * i, 100, 50]} for i in range(2)]
+                        shown += [{"type": "Button", "label": "Delete", "frame": [0, 300 + 100 * i, 100, 50], "parent": 0} for i in range(2)]
                     result = {"elements": shown}
                 elif method == "input.touch":
                     self.touches.append((params["phase"], round(params["x"]), round(params["y"]), clock.monotonic()))
@@ -839,7 +842,14 @@ with tempfile.TemporaryDirectory() as directory:
     assert either.returncode == 1 and re.search(r"'Delete' names 2 elements: @e\d+ Button \"Delete\" \[0,300 100x50\], "
                                                 r"@e\d+ Button \"Delete\" \[0,400 100x50\]", either.stderr) and \
         "next: act on one by its ref" in either.stderr and len(app.runner) == 2, either.stderr
+    rows_json = json.loads(ddp_in(directory, "tree", "--device", "runner-fake", "--json", env=host).stdout)["elements"]
+    assert [e.get("parent") for e in rows_json if e.get("label") == "Delete"] == ["save", "save"], rows_json
     app.rows = False
+    # An id that shows up later is the same element, not one gone and one new.
+    app.saved, app.late_id = False, True
+    renamed = ddp_in(directory, "tap", "Save", "--device", "runner-fake", env=host)
+    assert re.search(r'in \d+ms; new: @e\d+ "Saved"; no checks', renamed.stdout), renamed.stdout + renamed.stderr
+    app.saved, app.late_id = False, False
     # wait and find on the accessibility tree.
     app.saved = True
     waited = ddp_in(directory, "wait", "text", "saved", "--device", "runner-fake", env=host)
@@ -854,6 +864,8 @@ with tempfile.TemporaryDirectory() as directory:
     app.saved, app.scrolls = False, True
     listed = ddp_in(directory, "tree", "--device", "runner-fake", env=host).stdout
     assert "Below" not in listed and "2 elements on runner-fake" in listed, listed
+    below = ddp_in(directory, "tap", "Below", "--device", "runner-fake", env=host)
+    assert below.returncode == 1 and "'Below' is off screen at [0,900 50x10]: swipe it into view first" in below.stderr, below.stderr
     scrolled = ddp_in(directory, "tap", "Save", "--device", "runner-fake", env=host)
     assert re.search(r'new: @e\d+ "Saved"; 1 moved; no checks', scrolled.stdout), scrolled.stdout + scrolled.stderr
     app.scrolls, app.saved = False, False

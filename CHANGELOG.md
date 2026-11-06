@@ -25,9 +25,13 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 - `check overlap` said COVERED for a text its list had scrolled almost away (7 px left at the list's edge): the strip held none of its glyphs. A text cut by its container is no longer judged.
 - Without the library, an action on an element failed at once when the tree did not list it at that moment, as while an iOS context menu opens. It now waits up to 2 s for the element, as `tap` with the library does.
 - Android without the library: ddp's runner kept running after the last command and held UiAutomation, so the app's own UI tests on that device failed with "UiAutomationService already registered". It now ends itself after 5 minutes without a command, and `ddp disconnect [--device <device>]` stops it at once.
+- iOS without the library: a tap on an element below the fold (a long consent sheet at the largest text size) touched outside the screen and said "nothing changed". VoiceOver lists a scroll view's whole content; ddp now marks elements with no part on screen `shown: false` as on Android, leaves them out of `tree`, and refuses a touch on one with its frame. An element partly on screen has the frame of that part.
+- Without the library, an element whose id showed up between two looks (SwiftUI's tab buttons, a moment after launch) was reported gone and new. The same label, type and place is now one element.
 - `--help` said `--device` was Android only on `tap`, `type`, `long-press` and others; it works on iOS simulators too.
 
 ### Added (beta.2)
+
+- `tree --device --json`: each element's `parent` (the key of the nearest listed element above it) on iOS and Android, and on iOS its UIAccessibility `traits` (`keyboardKey`, `selected`, `header`, ...), so a checker can tell the keyboard and the bars from the app's own elements. Android runner version 4.
 
 - `wait id|text`, `wait --settled` and `find text|id` take `--device`: they read the platform's accessibility tree for an app without the library.
 - `tree --json` with the library has the screen size and the scale (`screen`, `scale`), so a dp or pt check needs no `wm size`.

@@ -23,7 +23,7 @@ const APK: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/runner.apk"));
 /// `am instrument` to the socket open took 2 s on an emulator; a cold device can take longer.
 const START_PATIENCE: Duration = Duration::from_secs(10);
 /// The runner's `VERSION` (Runner.kt) this ddp speaks.
-const RUNNER_VERSION: u64 = 3;
+const RUNNER_VERSION: u64 = 4;
 const POLL: Duration = Duration::from_millis(100);
 
 /// What every runner answer ends with: the runner did it, nothing was checked.
@@ -168,7 +168,15 @@ impl Screen {
         };
         let mut frame = json!({"elements": elements});
         crate::model::name_elements(&mut frame);
-        Ok(frame["elements"].as_array().cloned().unwrap_or_default())
+        let mut elements = frame["elements"].as_array().cloned().unwrap_or_default();
+        // The platform gives the parent's place in the list; an agent acts on keys.
+        let keys: Vec<String> = elements.iter().map(element_key).collect();
+        for element in &mut elements {
+            if let Some(at) = element["parent"].as_u64() {
+                element["parent"] = json!(keys[at as usize]);
+            }
+        }
+        Ok(elements)
     }
 
     fn android(&mut self, method: &str, params: Value) -> Result<()> {
@@ -292,8 +300,16 @@ fn place(elements: &[Value], text: &str, from_ref: bool, device: &str) -> Result
         Some(element) => vec![element],
         None => elements.iter().filter(|e| element_key(e) == text || e["label"] == text || e["id"] == text).collect(),
     };
+    // Off screen (scrolled away, below the fold): a touch at its middle lands on nothing, and "nothing changed"
+    // would read as the app's answer. The agent scrolls first.
+    let (candidates, off): (Vec<&Value>, Vec<&Value>) = candidates.into_iter().partition(|e| !off_screen(e));
     match candidates[..] {
         [element] => Ok(Place { given: text.to_string(), at: center(element), seen: Some(element.clone()) }),
+        [] if !off.is_empty() => fail!(
+            format!("'{text}' is off screen at {}: swipe it into view first", bracket(&frame_of(off[0]))),
+            "off_screen",
+            format!("ddp swipe <from> <to> --device {device}, then ddp tree --device {device}")
+        ),
         [] => fail!(
             format!("no element '{text}' in the accessibility tree (not in it: what the iOS keyboard covers, an Android Compose testTag without testTagsAsResourceId)"),
             "unknown_element",
@@ -392,6 +408,16 @@ fn change(before: &[Value], after: &[Value], busy: &HashSet<String>) -> Change {
         .filter(|(key, element)| !busy.contains(*key) && !is.contains_key(*key) && !off_screen(element))
         .map(|(_, e)| (*e).clone())
         .collect();
+    // An id that shows up or goes away between looks (SwiftUI names tab buttons a moment after launch) changes the
+    // key, not what a person sees: the same label, type and place on both sides is one element.
+    let same_place = |element: &Value, others: &[Value]| {
+        others
+            .iter()
+            .any(|o| o["label"] == element["label"] && o["type"] == element["type"] && frame_of(o) == frame_of(element))
+    };
+    let (new, gone) = (change.new.clone(), change.gone.clone());
+    change.new.retain(|element| !same_place(element, &gone));
+    change.gone.retain(|element| !same_place(element, &new));
     change
 }
 
@@ -552,7 +578,7 @@ fn perform(
     let looking = Instant::now();
     let mut before = screen.look()?;
     let (action, places) = loop {
-        match build(&on_screen(&before), &device) {
+        match build(&before, &device) {
             Err(missing) if missing.code == "unknown_element" && looking.elapsed() < ELEMENT_WAIT => {
                 pause(LOOK_EVERY);
                 before = screen.look()?;
@@ -766,6 +792,11 @@ pub fn find(args: &Args) -> Result<i32> {
 }
 
 /// `@e3 Button "Save" #save = "value" [x,y wxh] tap disabled`
+/// `[x,y wxh]`, as `tree` prints a frame.
+fn bracket(frame: &[i64]) -> String {
+    format!("[{},{} {}x{}]", frame[0], frame[1], frame[2], frame[3])
+}
+
 fn tree_line(element: &Value, refs: &BTreeMap<String, String>) -> String {
     let frame = frame_of(element);
     let mut line = refs.get(&element_key(element)).map(|r| format!("{r} ")).unwrap_or_default();
@@ -779,7 +810,7 @@ fn tree_line(element: &Value, refs: &BTreeMap<String, String>) -> String {
     if let Some(value) = element["value"].as_str() {
         line += &format!(" = {}", py::dumps(&json!(value)));
     }
-    line += &format!(" [{},{} {}x{}]", frame[0], frame[1], frame[2], frame[3]);
+    line += &format!(" {}", bracket(&frame));
     if element["tap"] == true {
         line += " tap";
     }

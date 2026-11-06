@@ -34,7 +34,27 @@ const FRONTMOST_APPLICATION: u64 = 4;
 const READ_ATTRIBUTES: u64 = 5;
 /// frame, role, isRemoteElement, label, identifier, value, isEnabled, children. Never isVisible (112): it makes the
 /// app hit-test every element, a whole tree goes from milliseconds to seconds.
-const ATTRIBUTES: [u64; 8] = [21, 45, 66, 33, 25, 53, 27, 8];
+const ATTRIBUTES: [u64; 9] = [21, 45, 66, 33, 25, 53, 27, 77, 8];
+/// UIAccessibilityTraits bits (attribute 77) by UIKit's names; the private bits above them are left out.
+const TRAITS: [(u64, &str); 17] = [
+    (1, "button"),
+    (1 << 1, "link"),
+    (1 << 2, "image"),
+    (1 << 3, "selected"),
+    (1 << 4, "playsSound"),
+    (1 << 5, "keyboardKey"),
+    (1 << 6, "staticText"),
+    (1 << 7, "summaryElement"),
+    (1 << 8, "notEnabled"),
+    (1 << 9, "updatesFrequently"),
+    (1 << 10, "searchField"),
+    (1 << 11, "startsMediaSession"),
+    (1 << 12, "adjustable"),
+    (1 << 13, "allowsDirectInteraction"),
+    (1 << 14, "causesPageTurn"),
+    (1 << 15, "tabBar"),
+    (1 << 16, "header"),
+];
 /// Roles that hold other elements: one with no children in the flat tree is asked again in the full one.
 const CONTAINERS: [&str; 5] = ["Group", "TabGroup", "ScrollArea", "Grid", "Sheet"];
 const MAX_ELEMENTS: usize = 3000;
@@ -676,8 +696,30 @@ impl Simulator {
         let children_only = ns_dictionary("attributes", unsafe {
             send2(objc_getClass(c"NSArray".as_ptr()), "arrayWithObjects:count:", children_attribute.as_ptr(), 1usize)
         });
-        let mut walk = Walk { token, parameters, children_only, elements: Vec::new(), read: 0, seen: HashSet::new() };
-        self.read(&mut walk, root, 0)?;
+        let mut walk = Walk {
+            token,
+            parameters,
+            children_only,
+            elements: Vec::new(),
+            read: 0,
+            seen: HashSet::new(),
+            screen: None,
+        };
+        self.read(&mut walk, root, 0, None)?;
+        // VoiceOver lists a scroll view's whole content. As Android gives it: an element partly on screen has the
+        // frame of that part, so a tap lands on it; one with no part on screen is `shown: false`, left out of `tree`.
+        if let Some([left, top, width, height]) = walk.screen.filter(|[_, _, w, h]| *w > 0.0 && *h > 0.0) {
+            for element in &mut walk.elements {
+                let [x, y, w, h] = crate::model::rect(&element["frame"]);
+                let (x0, y0) = (x.max(left), y.max(top));
+                let (x1, y1) = ((x + w).min(left + width), (y + h).min(top + height));
+                if x1 <= x0 || y1 <= y0 {
+                    element["shown"] = json!(false);
+                } else if [x0, y0, x1 - x0, y1 - y0] != [x, y, w, h] {
+                    element["frame"] = json!([x0, y0, x1 - x0, y1 - y0].map(|v| (v * 10.0).round() / 10.0));
+                }
+            }
+        }
         Ok(walk.elements)
     }
 
@@ -707,7 +749,8 @@ impl Simulator {
         self.hid().map(|_| ())
     }
 
-    fn read(&mut self, walk: &mut Walk, element: Id, depth: usize) -> Result<()> {
+    /// `parent`: where the nearest listed element above this one is in `walk.elements`; `look` turns it into a key.
+    fn read(&mut self, walk: &mut Walk, element: Id, depth: usize, parent: Option<usize>) -> Result<()> {
         walk.read += 1;
         if walk.read > MAX_ELEMENTS || depth > MAX_DEPTH {
             fail!(format!("more than {MAX_ELEMENTS} elements or {MAX_DEPTH} levels on screen"), "too_many_elements");
@@ -722,8 +765,16 @@ impl Simulator {
                 "try again when the screen is still"
             );
         }
-        let (role, entry) = entry_of(answer);
+        let (role, mut entry) = entry_of(answer);
+        if role == "Application" && walk.screen.is_none() {
+            walk.screen = Some(crate::model::rect(&entry["frame"]));
+        }
+        let mut above_children = parent;
         if role != "Application" && ["label", "id", "value"].iter().any(|field| entry.get(field).is_some()) {
+            if let Some(at) = parent {
+                entry["parent"] = json!(at);
+            }
+            above_children = Some(walk.elements.len());
             walk.elements.push(entry);
         }
         let children_of = |answer: Id| -> Id {
@@ -745,7 +796,7 @@ impl Simulator {
             }
             let child_identity: (i32, u64) = unsafe { (send0(child, "pid"), send0(child, "objectID")) };
             if !walk.seen.contains(&child_identity) {
-                self.read(walk, child, depth + 1)?;
+                self.read(walk, child, depth + 1, above_children)?;
             }
         }
         Ok(())
@@ -767,6 +818,11 @@ fn entry_of(answer: Id) -> (&'static str, Value) {
     if number_of(value(27)) == Some(0) {
         entry["enabled"] = json!(false);
     }
+    let bits = number_of(value(77)).unwrap_or(0) as u64;
+    let traits: Vec<&str> = TRAITS.iter().filter(|(bit, _)| bits & bit != 0).map(|(_, name)| *name).collect();
+    if !traits.is_empty() {
+        entry["traits"] = json!(traits);
+    }
     (role, entry)
 }
 
@@ -779,6 +835,8 @@ struct Walk {
     /// Elements read so far, by pid and object id: an element listed twice (among its own descendants, or by the
     /// full tree too) is read once.
     seen: HashSet<(i32, u64)>,
+    /// The app's frame, the screen in points.
+    screen: Option<[f64; 4]>,
 }
 
 /// The translator's role numbers, by AppKit's names without the `AX` prefix.

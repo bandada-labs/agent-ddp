@@ -228,11 +228,15 @@ class Runner : Instrumentation() {
     // Only what an agent can act on or read: nodes with a label, an id, or that take a tap. A node the app still
     // holds but the user cannot see (scrolled away, panned off by the keyboard) is kept with `shown: false`, so the
     // CLI can tell "out of view" from "gone".
-    private fun collect(node: AccessibilityNodeInfo, elements: JSONArray) {
+    /** [parent]: where the nearest listed node above this one is in [elements]; the CLI turns it into a key. */
+    private fun collect(node: AccessibilityNodeInfo, elements: JSONArray, parent: Int? = null) {
         val label = label(node)
         val id = node.viewIdResourceName?.substringAfter(":id/")
+        var aboveChildren = parent
         if (label != null || id != null || node.isClickable) {
+            aboveChildren = elements.length()
             elements.put(JSONObject().apply {
+                parent?.let { put("parent", it) }
                 if (!node.isVisibleToUser) put("shown", false)
                 put("type", node.className?.toString()?.substringAfterLast('.'))
                 label?.let { put("label", it) }
@@ -242,7 +246,7 @@ class Runner : Instrumentation() {
                 if (!node.isEnabled) put("enabled", false)
             })
         }
-        (0 until node.childCount).forEach { index -> node.getChild(index)?.let { collect(it, elements) } }
+        (0 until node.childCount).forEach { index -> node.getChild(index)?.let { collect(it, elements, aboveChildren) } }
     }
 
     private fun label(node: AccessibilityNodeInfo): String? =
@@ -264,7 +268,7 @@ class Runner : Instrumentation() {
         const val FRAME_MS = 16L
         const val ROOT_WAIT_MS = 2000L
         /** Raised when what the runner answers changes; the CLI replaces a runner with another number. */
-        const val VERSION = 3
+        const val VERSION = 4
         const val IDLE_MS = 5 * 60_000L
         const val IDLE_CHECK_MS = 10_000L
         val ALLOWED_UIDS = setOf(0, 2000)
