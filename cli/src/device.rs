@@ -398,6 +398,20 @@ fn ios_text_size(value: &str) -> Result<&str> {
     }
 }
 
+/// A BCP 47 tag as Foundation writes AppleLocale: the region after an underscore (es-ES -> es_ES, zh-Hans-CN ->
+/// zh-Hans_CN, es-419 -> es_419); a tag with no region stays as it is.
+fn apple_locale(tag: &str) -> String {
+    match tag.rsplit_once('-') {
+        Some((rest, region))
+            if (region.len() == 2 && region.chars().all(|c| c.is_ascii_alphabetic()))
+                || (region.len() == 3 && region.chars().all(|c| c.is_ascii_digit())) =>
+        {
+            format!("{rest}_{}", region.to_ascii_uppercase())
+        }
+        _ => tag.to_string(),
+    }
+}
+
 pub fn settings(args: &mut Args) -> Result<i32> {
     let (platform, device, app) = target(args)?;
     let what = args.what.clone().unwrap_or_default();
@@ -424,16 +438,23 @@ pub fn settings(args: &mut Args) -> Result<i32> {
                 "-bool",
                 if value == "on" { "YES" } else { "NO" },
             ])],
-            _ => vec![base(&[
-                "spawn",
-                &device,
-                "defaults",
-                "write",
-                app.as_deref().unwrap_or("-g"),
-                "AppleLanguages",
-                "-array",
-                &value,
-            ])],
+            // AppleLanguages picks the strings, AppleLocale the region that formats dates and numbers.
+            _ => {
+                let domain = app.as_deref().unwrap_or("-g");
+                vec![
+                    base(&["spawn", &device, "defaults", "write", domain, "AppleLanguages", "-array", &value]),
+                    base(&[
+                        "spawn",
+                        &device,
+                        "defaults",
+                        "write",
+                        domain,
+                        "AppleLocale",
+                        "-string",
+                        &apple_locale(&value),
+                    ]),
+                ]
+            }
         }
     } else {
         let adb = adb_path()?;
@@ -1123,6 +1144,15 @@ pub fn explore(args: &mut Args) -> Result<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn apple_locale_takes_the_region_after_an_underscore() {
+        assert_eq!(apple_locale("es-ES"), "es_ES");
+        assert_eq!(apple_locale("zh-Hans-CN"), "zh-Hans_CN");
+        assert_eq!(apple_locale("es-419"), "es_419");
+        assert_eq!(apple_locale("es"), "es");
+        assert_eq!(apple_locale("zh-Hans"), "zh-Hans");
+    }
 
     #[test]
     fn png_round_trip() {

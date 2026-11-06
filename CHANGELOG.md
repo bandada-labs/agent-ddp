@@ -27,6 +27,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 - Android without the library: ddp's runner kept running after the last command and held UiAutomation, so the app's own UI tests on that device failed with "UiAutomationService already registered". It now ends itself after 5 minutes without a command, and `ddp disconnect [--device <device>]` stops it at once.
 - iOS without the library: a tap on an element below the fold (a long consent sheet at the largest text size) touched outside the screen and said "nothing changed". VoiceOver lists a scroll view's whole content; ddp now marks elements with no part on screen `shown: false` as on Android, leaves them out of `tree`, and refuses a touch on one with its frame. An element partly on screen has the frame of that part.
 - Without the library, an element whose id showed up between two looks (SwiftUI's tab buttons, a moment after launch) was reported gone and new. The same label, type and place is now one element.
+- iOS `set locale es-ES` wrote only `AppleLanguages`, so dates and numbers kept the old region's format (`AppleLocale` stayed `en_CO`). It now writes both (`es_ES`).
 - `--help` said `--device` was Android only on `tap`, `type`, `long-press` and others; it works on iOS simulators too.
 
 ### Added (beta.2)
