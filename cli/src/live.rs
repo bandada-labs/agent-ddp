@@ -1546,26 +1546,44 @@ pub fn perf(args: &mut Args) -> Result<i32> {
         say!("{}", py::dumps(&answer));
         return Ok(0);
     }
+    say!("{}", perf_line(ms, &answer));
+    Ok(0)
+}
+
+/// One line: fps, missed refreshes and worst gap, then the app's work per frame (Android) or per refresh (iOS).
+fn perf_line(ms: f64, answer: &Value) -> String {
     let refreshes = answer["refreshes"].as_u64().unwrap_or(0);
+    let missed = answer["missed"].as_u64().unwrap_or(0);
+    // An app with an older library gives no fps.
+    let fps = if answer["fps"].is_number() { format!(" {} fps,", py::str(&answer["fps"])) } else { String::new() };
     let mut line = format!(
-        "{}s: the main thread missed {} of {refreshes} refreshes ({} ms each), worst gap {} ms",
+        "{}s:{fps} the main thread missed {missed} of {} refreshes ({} ms each), worst gap {} ms",
         py::fixed(&json!(ms / 1000.0), 1),
-        py::str(&answer["missed"]),
+        refreshes + missed,
         py::str(&answer["refreshMs"]),
         py::str(&answer["worstGapMs"])
     );
-    match answer["drawn"].as_u64() {
-        None => line.push_str("; work per frame not measured (iOS gives an app none)"),
-        Some(0) => line.push_str("; no frame drawn (nothing changed on screen)"),
-        Some(drawn) => line.push_str(&format!(
-            "; {drawn} frames drawn, the app's work per frame mean {} ms, p95 {} ms, {} over a refresh",
+    let work = |what: &str| {
+        format!(
+            "{what} mean {} ms, p95 {} ms, {} over a refresh",
             py::str(&answer["drawMeanMs"]),
             py::str(&answer["drawP95Ms"]),
             py::str(&answer["drawnOverRefresh"])
-        )),
+        )
+    };
+    match answer["drawn"].as_u64() {
+        Some(0) => line.push_str("; no frame drawn (nothing changed on screen)"),
+        Some(drawn) => line.push_str(&format!("; {drawn} frames drawn, {}", work("the app's work per frame"))),
+        // iOS does not tell an app which refreshes drew: its library gives the main thread's work per refresh.
+        None if answer["drawMeanMs"].is_number() => {
+            line.push_str(&format!("; {}", work("the main thread's work per refresh")))
+        }
+        None if answer.get("drawMeanMs").is_none() => {
+            line.push_str("; work per frame not measured (the app's AgentDDP is older than 0.5.0)")
+        }
+        None => line.push_str("; work per refresh not measured (no refresh came)"),
     }
-    say!("{line}");
-    Ok(0)
+    line
 }
 
 /// Events the app sent in Debug (`AgentDDP.event`, `AgentDdpEvents.send`): the last ones, or each as it comes.
@@ -1688,7 +1706,7 @@ pub fn net_line(request: &Value) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{media_session, shell_quoted};
+    use super::{media_session, perf_line, shell_quoted};
     use serde_json::json;
 
     #[test]
@@ -1699,6 +1717,27 @@ mod tests {
         let sample = "  dev.agentddp.sample/dev.agentddp.AgentDdpStarter:\n    Provider{c8bbda8 dev.agentddp.sample/dev.agentddp.AgentDdpStarter}\n";
         assert!(super::has_library_component(sample, "dev.agentddp.sample"));
         assert!(!super::has_library_component(sample, "dev.agentddp"));
+    }
+
+    #[test]
+    fn perf_says_work_per_frame_on_android_and_per_refresh_on_ios() {
+        let android = json!({"refreshMs": 16.67, "refreshes": 59, "missed": 3, "worstGapMs": 66.7, "fps": 57.1,
+                             "drawn": 20, "drawMeanMs": 6.1, "drawP95Ms": 12.4, "drawnOverRefresh": 1});
+        assert_eq!(
+            perf_line(1000.0, &android),
+            "1.0s: 57.1 fps, the main thread missed 3 of 62 refreshes (16.67 ms each), worst gap 66.7 ms; \
+             20 frames drawn, the app's work per frame mean 6.1 ms, p95 12.4 ms, 1 over a refresh"
+        );
+        let ios = json!({"refreshMs": 16.67, "refreshes": 300, "missed": 0, "worstGapMs": 17.1, "fps": 60.0,
+                         "drawn": null, "drawMeanMs": 3.2, "drawP95Ms": 7.9, "drawnOverRefresh": 0});
+        assert!(perf_line(5000.0, &ios)
+            .ends_with("; the main thread's work per refresh mean 3.2 ms, p95 7.9 ms, 0 over a refresh"));
+        let old_ios = json!({"refreshMs": 16.67, "refreshes": 300, "missed": 0, "worstGapMs": 17.1, "drawn": null});
+        assert_eq!(
+            perf_line(5000.0, &old_ios),
+            "5.0s: the main thread missed 0 of 300 refreshes (16.67 ms each), worst gap 17.1 ms; \
+             work per frame not measured (the app's AgentDDP is older than 0.5.0)"
+        );
     }
 
     #[test]

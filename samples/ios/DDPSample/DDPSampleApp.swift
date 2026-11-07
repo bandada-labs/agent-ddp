@@ -14,6 +14,8 @@ struct DDPSampleApp: App {
     private let showsSpinner = CommandLine.arguments.contains("-spinner")
     // `-media` opens a screen with a playing video, for `ddp media`.
     private let showsMedia = CommandLine.arguments.contains("-media")
+    // `-list` opens a long list, for `ddp perf` while it scrolls.
+    private let showsList = CommandLine.arguments.contains("-list")
 
     init() {
         guard !CommandLine.arguments.contains("-noDDP") else { return }
@@ -65,7 +67,7 @@ struct DDPSampleApp: App {
 
     var body: some Scene {
         WindowGroup {
-            if showsSpinner { SpinnerView() } else if showsMedia { PlayerView() } else { ContentView() }
+            if showsSpinner { SpinnerView() } else if showsMedia { PlayerView() } else if showsList { LongListView() } else { ContentView() }
         }
     }
 }
@@ -103,6 +105,18 @@ struct SpinnerView: View {
             ForEach(0..<30, id: \.self) { Text("Row \($0)").accessibilityIdentifier("row\($0)") }
         }
         .padding(24)
+    }
+}
+
+/// A thousand rows to scroll through, for `ddp perf`.
+struct LongListView: View {
+    var body: some View {
+        List(0..<1000, id: \.self) { row in
+            VStack(alignment: .leading) {
+                Text("Row \(row)").font(.headline)
+                Text("Detail for row \(row)").font(.subheadline).foregroundStyle(.secondary)
+            }
+        }
     }
 }
 

@@ -14,7 +14,7 @@ ddp down [<device>] [--all]                        shut down and remove what `dd
 ddp state [list] | get <name> | set <name> <value> | watch <name> [--until '>100'] [--for 10s]   the app's own values
 ddp events [--follow] [--for 10s] [--grep <text>]   events the app sent in Debug, also in ddp history
 ddp crash [--device <id> --app <id>]               the app's last crash as the platform recorded it, with its stack
-ddp perf [--for 5s]                                refreshes the main thread missed, worst gap; Android: draw time
+ddp perf [--for 5s]                                fps, refreshes missed, worst gap, the app's work per frame
 ddp recompositions [--for 3s] [--then CMD] [--full]   Android: the app's composables that ran, how often, the state that made them
 ddp net cookies | clear-cookies                    the app's cookies by name and domain, never the values
 ddp media                                          video players on screen and now-playing info (Android: the media session, library or not)
@@ -227,11 +227,13 @@ OUTSIDE trapOutside: outside its parent (UIView bounds), no point of it takes a 
 
 ### perf
 
-`perf` measures for `--for` (default 5s) whatever is on screen, from the platform's own clocks, without a recording. Both platforms count the refreshes the main thread missed from their vsync callbacks (Choreographer, CADisplayLink): a gap of two refresh periods is one missed. Android adds the app's work for each frame it drew (FrameMetrics: input, animation, layout, draw, sync and commands; mean, p95, how many took longer than a refresh). It leaves out the wait for the GPU and the buffer queue, so a pipelined frame, or an emulator drawing in software, is not counted as slow. iOS gives an app no such time, so it says not measured. A still screen draws nothing on Android: `no frame drawn` is not a problem. History captures nothing during the measure, so ddp's own cost is not in it. A measurement: it exits 0.
+`perf` measures for `--for` (default 5s) whatever is on screen, from the platform's own clocks, without a recording. Both platforms take the main thread's vsync callbacks (Choreographer, CADisplayLink): `fps` is how many ran a second, the rate the app can draw at, and a gap of two refresh periods is one refresh missed. Then the app's work, mean, p95 and how many took longer than a refresh. Android: for each frame it drew (FrameMetrics: input, animation, layout, draw, sync and commands), leaving out the wait for the GPU and the buffer queue, so a pipelined frame, or an emulator drawing in software, is not counted as slow. iOS does not tell an app which refreshes drew (the render server draws), so it is the main thread's work per refresh: the run loop's busy time from waking to sleeping after Core Animation's commit, which holds input, animations, layout and the commit. A still screen draws nothing on Android: `no frame drawn` is not a problem; on iOS its work per refresh is near zero. An app with a library older than 0.5.0 gives no fps (and on iOS no work). History captures nothing during the measure, so ddp's own cost is not in it. A measurement: it exits 0.
 
 ```
-$ ddp perf --for 3s
-3.0s: the main thread missed 12 of 178 refreshes (16.67 ms each), worst gap 217.07 ms; work per frame not measured (iOS gives an app none)
+$ ddp perf --for 5s                     # iOS, a long list scrolling
+5.0s: 59.8 fps, the main thread missed 1 of 299 refreshes (16.67 ms each), worst gap 37.36 ms; the main thread's work per refresh mean 2.81 ms, p95 10.09 ms, 1 over a refresh
+$ ddp perf --for 5s                     # Android emulator, the same list
+5.0s: 42.8 fps, the main thread missed 86 of 300 refreshes (16.67 ms each), worst gap 50 ms; 178 frames drawn, the app's work per frame mean 17.54 ms, p95 32.54 ms, 87 over a refresh
 ```
 
 ### crash
@@ -345,7 +347,7 @@ A simulator booted with `xcrun simctl boot` and no Simulator.app window still dr
 - The reference is a PNG, or on macOS any image `sips` opens (JPEG, WebP, HEIC).
 - `--ignore <element>...` leaves elements out of the scores, such as a clock or a spinner: on the screen it needs a session to find them, and across two phones each phone's place for it is left out. `--mask x,y,w,h` (whole screen only, repeatable) leaves out a rectangle in screenshot pixels, such as the status bar, whose time never matches a reference. Left-out pixels are dark gray in the picture and count in no score.
 - `difference` is the mean of each pixel's largest channel difference. `pixels that differ` is the share more than 32 of 255 apart, which is the same tolerance the pixel checks use for "the same color". Then the same two numbers per band, top to bottom: 8 bands for the screen, 4 for an element. Resampling a reference to another width moves edges by a pixel, so text and borders show as small red lines even when nothing changed.
-- `compare --on ios,android --structure` compares what the two phones draw by label, not pixels, so platform idiom (a large title, an inset list, a FAB) does not hide a real gap. It prints the labels only one phone has (a missing tab, search field or chip), and a label drawn as another kind on each (`Home (ios button, android tab)`). Labels match case and spaces aside; a label twice on one phone and once on the other leaves one over. Both sessions need the library: iOS gives the host no accessibility tree.
+- `compare --on ios,android --structure` compares what the two phones draw by label, not pixels, so platform idiom (a large title, an inset list, a FAB) does not hide a real gap. It prints the labels only one phone has (a missing tab, search field or chip), and a label drawn as another kind on each (`Home (ios button, android tab)`). Labels match case and spaces aside; a label twice on one phone and once on the other leaves one over. A side is a session or a device id (`--on <udid>,emulator-5554`). When either app has no library, both sides come from the platform's accessibility tree: a label the platform merged (`Row 1, Detail`) counts as its parts, a text field counts its placeholder or text, and the only kind told apart is a text field (a button on one phone can be a tappable row's text on the other, and both are right). A list shows the rows that fit each screen, so compare lists at the same scroll place.
 - `--max 5%` and `--max-band 20%` set a pass bar on `pixels that differ`, overall and in any one band. Over it, ddp prints `over --max: ...` or `over --max-band: band ...` and exits 1; under it, `within the bar` and exits 0. The bar is the caller's, so a run over many screens can count passes.
 
 ```

@@ -618,7 +618,7 @@ class FakeApp:
                               # Out of order, as an NSDictionary hands it over: ddp prints it in a fixed order.
                               "nowPlaying": {"position": 12.5, "title": "Song"}}
                 elif method == "perf.metrics":
-                    result = {"ms": params["ms"], "refreshMs": 16.67, "refreshes": 59, "missed": 3, "worstGapMs": 66.7,
+                    result = {"ms": params["ms"], "refreshMs": 16.67, "refreshes": 59, "missed": 3, "worstGapMs": 66.7, "fps": 57.1,
                               "drawn": 20, "drawMeanMs": 6.1, "drawP95Ms": 12.4, "drawnOverRefresh": 1}
                 elif method in ("events.list", "events.watch"):
                     events = [{"t": 1729700000000, "name": "rule", "fields": {"event": "save:expenses", "spent": 120}},
@@ -967,13 +967,14 @@ with tempfile.TemporaryDirectory() as directory:
     media = ddp_in(directory, "media").stdout
     assert media == "AVPlayerLayer playing at 12.5s of 60s rate 1 [0, 0, 390, 220]\nnow playing: title=Song position=12.5\n", media
     # The same answers as JSON, for a script or an MCP client.
-    assert json.loads(ddp_in(directory, "perf", "--for", "200ms", "--json").stdout)["missed"] == 3
+    perf_json = json.loads(ddp_in(directory, "perf", "--for", "200ms", "--json").stdout)
+    assert perf_json["missed"] == 3 and perf_json["fps"] == 57.1, perf_json
     assert json.loads(ddp_in(directory, "state", "--json").stdout)[0] == {"name": "mode", "writable": True, "value": "demo"}
     assert json.loads(ddp_in(directory, "events", "--json").stdout)[1]["name"] == "sync"
     assert json.loads(ddp_in(directory, "storage", "--json").stdout)["entries"][1]["bytes"] == 22
     assert json.loads(ddp_in(directory, "media", "--json").stdout)["players"][0]["state"] == "playing"
     perf = ddp_in(directory, "perf", "--for", "1s")
-    assert perf.returncode == 0 and perf.stdout == "1.0s: the main thread missed 3 of 59 refreshes (16.67 ms each), worst gap 66.7 ms; " \
+    assert perf.returncode == 0 and perf.stdout == "1.0s: 57.1 fps, the main thread missed 3 of 62 refreshes (16.67 ms each), worst gap 66.7 ms; " \
         "20 frames drawn, the app's work per frame mean 6.1 ms, p95 12.4 ms, 1 over a refresh\n", perf.stdout + perf.stderr
     # App events: the kept ones, a filter, and a follow that ends with --for.
     events = ddp_in(directory, "events").stdout

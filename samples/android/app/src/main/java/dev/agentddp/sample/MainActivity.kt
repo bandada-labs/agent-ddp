@@ -132,6 +132,25 @@ class MediaActivity : ComponentActivity() {
     }
 }
 
+/** A thousand rows to scroll through, for `ddp perf`. */
+class ListActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            MaterialTheme {
+                LazyColumn(Modifier.fillMaxWidth()) {
+                    items(1000) {
+                        Column(Modifier.padding(16.dp)) {
+                            Text("Row $it", style = MaterialTheme.typography.titleMedium)
+                            Text("Detail for row $it", style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /** A still screen with a spinner that redraws every frame without changing anything ddp reads, like a looping Lottie. */
 class SpinnerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {

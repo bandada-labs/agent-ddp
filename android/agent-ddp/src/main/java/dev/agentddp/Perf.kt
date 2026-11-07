@@ -66,6 +66,7 @@ internal object Perf {
         val drawn = synchronized(draws) { draws.sorted() }
         return JSONObject().put("ms", ms).put("refreshMs", round2(periodMs))
             .put("refreshes", gaps.size)
+            .put("fps", if (gaps.isEmpty()) JSONObject.NULL else Math.round(gaps.size * 10_000.0 / gaps.sum()) / 10.0)
             .put("missed", gaps.sumOf { missed(it, periodMs) })
             .put("worstGapMs", round2(gaps.maxOrNull() ?: 0.0))
             .put("drawn", drawn.size)

@@ -216,38 +216,22 @@ fn element_across(key: &str, on: &str, ignore: &[String], out: &Path) -> Result<
     report(&a, &b, ELEMENT_BANDS, [first, second], &mask, out)
 }
 
-/// What two sessions draw, by label: what one phone has and the other does not, and the same label drawn as another
-/// kind. Platform idiom (a large title, a FAB) moves pixels, not labels, so a missing tab or chip stands out here.
-/// A measurement like the rest of compare: it exits 0.
+/// What two phones draw, by label: what one has and the other does not, and the same label drawn as another kind.
+/// Platform idiom (a large title, a FAB) moves pixels, not labels, so a missing tab or chip stands out here. A side is
+/// a session or a device; when either app has no library, both come from the platform's accessibility tree, so the
+/// two answers are of one kind. A measurement like the rest of compare: it exits 0.
 fn structure_across(on: &str) -> Result<i32> {
     let names: Vec<&str> = on.split(',').map(str::trim).collect();
     let [first, second] = names[..] else {
         fail!("--on takes two sessions, e.g. ios,android", "bad_value", "ddp compare --on ios,android --structure");
     };
-    let labeled = |name: &str| -> Result<Vec<(String, String)>> {
-        let session = session_named(name)?;
-        let recording = snapshot_live(&session)?;
-        Ok(recording
-            .frames
-            .last()
-            .unwrap()
-            .elements()
-            .iter()
-            .filter_map(|element| {
-                let label = element.get("label").map(py::str)?;
-                let label = label.split_whitespace().collect::<Vec<_>>().join(" ");
-                (!label.is_empty()).then(|| {
-                    (
-                        label.to_lowercase(),
-                        format!("{label}\u{1}{}", element.get("role").map(py::str).unwrap_or_default()),
-                    )
-                })
-            })
-            .collect())
-    };
-    let (one, other) = (labeled(first)?, labeled(second)?);
+    let sides = [side(first)?, side(second)?];
+    let from_platform = sides.iter().any(|side| side.get("mode").is_some_and(|mode| mode == "device"));
+    let labeled = |side: &Value| if from_platform { platform_labels(side) } else { library_labels(side) };
+    let (one, other) = (labeled(&sides[0])?, labeled(&sides[1])?);
     let Structure { only_one, only_other, kinds, both } = structure_difference(&one, &other);
-    say!("structure: {first} {} labeled elements, {second} {}; {both} on both", one.len(), other.len());
+    let source = if from_platform { " (the platform's accessibility tree)" } else { "" };
+    say!("structure{source}: {first} {} labeled elements, {second} {}; {both} on both", one.len(), other.len());
     let list = |items: &[String]| items.iter().take(20).cloned().collect::<Vec<_>>().join(", ");
     if !only_one.is_empty() {
         say!("only on {first} ({}): {}", only_one.len(), list(&only_one));
@@ -266,6 +250,73 @@ fn structure_across(on: &str) -> Result<i32> {
     Ok(0)
 }
 
+/// A session by name, or a device by its id (`mode: device`, the platform guessed from the id).
+fn side(name: &str) -> Result<Value> {
+    let looks_like_device = (name.len() == 36 && name.matches('-').count() == 4) || name.starts_with("emulator-");
+    if looks_like_device && !Path::new(".ddp").join("sessions").join(name).exists() {
+        let platform = crate::live::platform_of(None, name);
+        return Ok(json!({"mode": "device", "platform": platform, "device": name}));
+    }
+    session_named(name)
+}
+
+/// `(key, "Label\u{1}role")` from the library's last frame.
+fn library_labels(session: &Value) -> Result<Vec<(String, String)>> {
+    let recording = snapshot_live(session)?;
+    Ok(recording
+        .frames
+        .last()
+        .unwrap()
+        .elements()
+        .iter()
+        .filter_map(|element| {
+            let label = element.get("label").map(py::str)?;
+            let label = label.split_whitespace().collect::<Vec<_>>().join(" ");
+            (!label.is_empty()).then(|| {
+                (label.to_lowercase(), format!("{label}\u{1}{}", element.get("role").map(py::str).unwrap_or_default()))
+            })
+        })
+        .collect())
+}
+
+/// `(key, "Label\u{1}kind")` from the accessibility tree. A label the platform merged ("Row 1, Detail") is split
+/// into its parts, since one phone merges what the other lists apart. The only kind told apart is a text field: a
+/// button on one phone can be a tappable row's text on the other, and both are right.
+fn platform_labels(side: &Value) -> Result<Vec<(String, String)>> {
+    let elements = crate::runner::elements_now(&py::str(&side["platform"]), &py::str(&side["device"]))?;
+    Ok(labeled_parts(&elements))
+}
+
+fn labeled_parts(elements: &[Value]) -> Vec<(String, String)> {
+    let fields: Vec<&str> = elements.iter().filter(|e| is_text_field(e)).filter_map(|e| e["key"].as_str()).collect();
+    elements
+        .iter()
+        .filter(|element| element["shown"] != json!(false) && element["window"] != json!("keyboard"))
+        .filter_map(|element| {
+            // Compose draws a field's label as a text inside the EditText: that text is part of the field.
+            let field = is_text_field(element) || element["parent"].as_str().is_some_and(|key| fields.contains(&key));
+            // An empty iOS field gives its placeholder as its value: what a field draws is its value.
+            let text = element["label"].as_str().or_else(|| element["value"].as_str().filter(|_| field))?;
+            Some((text, if field { "text field" } else { "not a text field" }))
+        })
+        .flat_map(|(label, kind)| {
+            label
+                .split([',', '\n'])
+                .map(|part| part.split_whitespace().collect::<Vec<_>>().join(" "))
+                .filter(|part| !part.is_empty())
+                .map(move |part| (part.to_lowercase(), format!("{part}\u{1}{kind}")))
+        })
+        .collect()
+}
+
+fn is_text_field(element: &Value) -> bool {
+    let kind = element["type"].as_str().unwrap_or_default();
+    ["TextField", "TextArea"].contains(&kind)
+        || element["traits"].as_array().is_some_and(|traits| traits.contains(&json!("searchField")))
+        || kind.ends_with("EditText")
+        || kind.ends_with("AutoCompleteTextView")
+}
+
 struct Structure {
     only_one: Vec<String>,
     only_other: Vec<String>,
@@ -275,21 +326,34 @@ struct Structure {
 }
 
 /// `(key, "Label\u{1}role")` lists to: labels only on the first, only on the second, the same label with another
-/// role, and how many match. A label twice on one phone and once on the other leaves one over.
+/// role, and how many match. A label twice on one phone and once on the other leaves one over. Same label and role
+/// pair first, so a title "Search" and a search field "Search" on one phone do not swap partners.
 fn structure_difference(one: &[(String, String)], other: &[(String, String)]) -> Structure {
     let split = |shown: &str| {
         let (label, role) = shown.split_once('\u{1}').unwrap_or((shown, ""));
         (label.to_string(), role.to_string())
     };
     let mut rest: Vec<Option<&(String, String)>> = other.iter().map(Some).collect();
-    let (mut only_one, mut kinds, mut both) = (Vec::new(), Vec::new(), 0);
-    for (key, shown) in one {
+    let mut unmatched = Vec::new();
+    let mut both = 0;
+    for item in one {
+        let role = split(&item.1).1;
+        match rest.iter().position(|theirs| theirs.is_some_and(|(k, shown)| *k == item.0 && split(shown).1 == role)) {
+            Some(index) => {
+                rest[index] = None;
+                both += 1;
+            }
+            None => unmatched.push(item),
+        }
+    }
+    let (mut only_one, mut kinds) = (Vec::new(), Vec::new());
+    for (key, shown) in unmatched {
         match rest.iter().position(|item| item.is_some_and(|(k, _)| k == key)) {
             Some(index) => {
                 let (_, theirs) = rest[index].take().unwrap();
                 both += 1;
                 let ((label, mine), (_, their_role)) = (split(shown), split(theirs));
-                if mine != their_role && !mine.is_empty() && !their_role.is_empty() {
+                if !mine.is_empty() && !their_role.is_empty() {
                     kinds.push((label, mine, their_role));
                 }
             }
@@ -579,6 +643,33 @@ mod tests {
         assert_eq!(found.only_other, vec!["Add"]);
         assert_eq!(found.kinds, vec![("Home".to_string(), "button".to_string(), "tab".to_string())]);
         assert_eq!(found.both, 2);
+    }
+
+    #[test]
+    fn a_title_and_a_search_field_keep_their_partners_and_merged_labels_split() {
+        let ios = labeled_parts(&[
+            json!({"type": "Heading", "label": "Search"}),
+            json!({"type": "TextField", "label": "Search", "traits": ["searchField"]}),
+            json!({"type": "Button", "label": "Row 1, Detail for row 1"}),
+            json!({"type": "StaticText", "label": "Food"}),
+            json!({"type": "Key", "label": "q", "window": "keyboard"}),
+            json!({"type": "TextField", "id": "nameField", "value": "Name", "label": null, "key": "nameField"}),
+        ]);
+        let android = labeled_parts(&[
+            json!({"type": "EditText", "label": "Search"}),
+            json!({"type": "TextView", "label": "Row 1"}),
+            json!({"type": "TextView", "label": "Detail for row 1"}),
+            json!({"type": "TextView", "label": "Gone", "shown": false}),
+            json!({"type": "EditText", "label": "Food"}),
+            json!({"type": "View", "label": "Stats", "tap": true}),
+            json!({"type": "EditText", "label": null, "key": "? [10]"}),
+            json!({"parent": "? [10]", "type": "TextView", "label": "Name", "key": "Name"}),
+        ]);
+        let found = structure_difference(&ios, &android);
+        assert_eq!(found.only_one, vec!["Search"]);
+        assert_eq!(found.only_other, vec!["Stats"]);
+        assert_eq!(found.kinds, vec![("Food".into(), "not a text field".into(), "text field".into())]);
+        assert_eq!(found.both, 5);
     }
 
     #[test]
