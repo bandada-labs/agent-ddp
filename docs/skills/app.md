@@ -50,7 +50,11 @@ ddp state get total_spent
 ddp state set budget 500                          # answers what the getter reads back
 ddp state watch total_spent --until '>100'        # each change, then exit 0; exit 1 if --for (10s) ends first
 ddp state watch mode --until '=done' --for 30s
+ddp state watch total_spent --until '>budget'     # against another app value, read each time
 ```
+
+`<`, `>`, `<=` and `>=` order numbers only. A word on the right that is not an app value's name is refused; a value
+that is not a number (or null) is never more or less than one.
 
 Put the app in a state without the UI (`state set`), then check what it draws with `ddp tree` or `ddp check all`.
 

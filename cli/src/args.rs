@@ -291,7 +291,7 @@ pub fn parser() -> Command {
             .arg(choices("action", &["list", "get", "set", "watch"]).default_value("list"))
             .arg(positional("key", "get, set, watch: the value's name"))
             .arg(positional("value", "set: the new value, as JSON (500, true, \"text\") or plain text"))
-            .arg(opt("until", "watch: stop when true, e.g. '>100' or 'total>100 and mode=done' (fields: the names watched)"))
+            .arg(opt("until", "watch: stop when true, e.g. '>100', '>budget' (another app value) or 'total>100 and mode=done'"))
             .arg(opt("for", "watch: stop after this long (default 10s)").id("duration")))
         .subcommand(sub("run", "live: run a command the app added in Debug; without a name, list them")
             .arg(positional("name", "the command's name"))

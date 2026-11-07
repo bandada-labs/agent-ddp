@@ -963,6 +963,37 @@ pub fn app_state(args: &mut Args) -> Result<i32> {
     Ok(code)
 }
 
+/// The watched value, then every other app value the condition names: 'total>100 and mode=done' reads mode too,
+/// '>budget' reads budget.
+fn state_names_read(control: &mut Control, watched: &str, clauses: &[model::Clause]) -> Result<Vec<String>> {
+    let mut names = vec![watched.to_string()];
+    if clauses.is_empty() {
+        return Ok(names);
+    }
+    let listed = control.call("state.list", json!({}))?;
+    let known: Vec<String> =
+        listed["values"].as_array().into_iter().flatten().map(|entry| py::str(&entry["name"])).collect();
+    for mentioned in clauses.iter().flat_map(|(field, _, expected)| [field, expected]) {
+        if known.contains(mentioned) && !names.contains(mentioned) {
+            names.push(mentioned.clone());
+        }
+    }
+    Ok(names)
+}
+
+/// The clauses with an app value's name on the right ('total>budget') turned into that value as read now. None while
+/// one of them is null: the app does not know it yet, so the condition is not met.
+fn with_values_named(clauses: &[model::Clause], fields: &serde_json::Map<String, Value>) -> Option<Vec<model::Clause>> {
+    clauses
+        .iter()
+        .map(|(field, operator, expected)| match fields.get(expected) {
+            Some(Value::Null) => None,
+            Some(value) if expected.parse::<f64>().is_err() => Some((field.clone(), operator.clone(), py::str(value))),
+            _ => Some((field.clone(), operator.clone(), expected.clone())),
+        })
+        .collect()
+}
+
 /// Reads the value until `--until` holds or `--for` ends, printing each change. 1 when `--until` was never met.
 fn watch_state_values(control: &mut Control, name: &str, args: &Args) -> Result<i32> {
     // '>100' is about the watched value itself.
@@ -975,13 +1006,14 @@ fn watch_state_values(control: &mut Control, name: &str, args: &Args) -> Result<
         }
     });
     let clauses = until.as_deref().map(model::parse_where).transpose()?;
+    let names = state_names_read(control, name, clauses.as_deref().unwrap_or_default())?;
     let duration = parse_ms(args.duration.as_deref().unwrap_or("10s"))?;
     let started = Instant::now();
     let mut previous: Option<Value> = None;
     // A value that changes on every read would print a line every 50 ms: past this many, only the count.
     let (mut changes, mut unprinted) = (0usize, 0usize);
     while (started.elapsed().as_millis() as f64) < duration {
-        let values = control.call("state.get", json!({"names": [name]}))?;
+        let values = control.call("state.get", json!({ "names": names }))?;
         let value = values["values"][name].clone();
         let t = started.elapsed().as_millis();
         match &previous {
@@ -999,7 +1031,11 @@ fn watch_state_values(control: &mut Control, name: &str, args: &Args) -> Result<
         previous = Some(value);
         if let Some(clauses) = &clauses {
             let fields = values["values"].as_object().cloned().unwrap_or_default();
-            if model::matches(&fields, clauses)? {
+            let met = match with_values_named(clauses, &fields) {
+                Some(clauses) => model::matches(&fields, &clauses)?,
+                None => false,
+            };
+            if met {
                 if unprinted > 0 {
                     say!("... {unprinted} more changes, now {}", py::str(previous.as_ref().unwrap_or(&Value::Null)));
                 }

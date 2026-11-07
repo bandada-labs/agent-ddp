@@ -530,14 +530,24 @@ pub fn matches(fields: &serde_json::Map<String, Value>, clauses: &[Clause]) -> R
                 "unknown_field"
             );
         };
-        let ok = if operator == "~" {
-            py::str(actual).to_lowercase().contains(&expected.to_lowercase())
-        } else if let (Some(a), Ok(e)) = (as_float(actual), expected.trim().parse::<f64>()) {
-            compare(operator, a.partial_cmp(&e), a == e)
-        } else {
-            let a = if actual.is_null() { "none".to_string() } else { py::str(actual).to_lowercase() };
-            let e = expected.to_lowercase();
-            compare(operator, Some(a.cmp(&e)), a == e)
+        let ordering = matches!(operator.as_str(), ">" | "<" | ">=" | "<=");
+        let ok = match (as_float(actual), expected.trim().parse::<f64>()) {
+            _ if operator == "~" => py::str(actual).to_lowercase().contains(&expected.to_lowercase()),
+            (Some(a), Ok(e)) => compare(operator, a.partial_cmp(&e), a == e),
+            (Some(a), _) if ordering && a.is_nan() => false,
+            // In text order '123' < 'budget' always holds: a number is only ordered against a number.
+            (Some(_), Err(_)) if ordering => fail!(
+                format!("can't order {field} ({}) and '{expected}': '{expected}' is not a number", py::str(actual)),
+                "bad_where",
+                format!("compare with a number, e.g. {field}{operator}100")
+            ),
+            // Text that is not a number is neither more nor less than one.
+            (None, Ok(_)) if ordering => false,
+            _ => {
+                let a = if actual.is_null() { "none".to_string() } else { py::str(actual).to_lowercase() };
+                let e = expected.to_lowercase();
+                compare(operator, Some(a.cmp(&e)), a == e)
+            }
         };
         if !ok {
             return Ok(false);
@@ -563,5 +573,25 @@ fn compare(operator: &str, order: Option<std::cmp::Ordering>, equal: bool) -> bo
 pub fn warn_if_empty(recording: &Recording) {
     if !recording.frames.is_empty() && recording.frames.iter().all(|f| f.elements().is_empty()) {
         crate::warn!("ddp: warning: no elements in this recording\nnext: ddp doctor");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{matches, parse_where};
+    use serde_json::json;
+
+    fn holds(fields: serde_json::Value, clause: &str) -> crate::state::Result<bool> {
+        matches(fields.as_object().unwrap(), &parse_where(clause)?)
+    }
+
+    #[test]
+    fn a_number_is_ordered_only_against_a_number() {
+        assert!(holds(json!({"spent": 123}), "spent<200").unwrap());
+        assert!(holds(json!({"spent": 123}), "spent<budget").is_err(), "'123' < 'budget' as text would hold");
+        assert!(!holds(json!({"spent": "n/a"}), "spent>100").unwrap(), "'n/a' > '100' as text would hold");
+        assert!(!holds(json!({"spent": null}), "spent<zzz").unwrap());
+        assert!(holds(json!({"day": "2026-11-07"}), "day>2026-11-01").unwrap(), "ISO dates still order as text");
+        assert!(holds(json!({"mode": "done"}), "mode=done").unwrap());
     }
 }

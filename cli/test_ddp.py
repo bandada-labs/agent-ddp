@@ -561,10 +561,10 @@ class FakeApp:
                 elif method == "prefs.remove":
                     self.prefs.pop(params["key"], None)
                 elif method == "state.list":
-                    result = {"values": [{"name": "mode", "writable": True}, {"name": "total", "writable": False}]}
+                    result = {"values": [{"name": "mode", "writable": True}, {"name": "total", "writable": False}, {"name": "budget", "writable": False}]}
                 elif method == "state.get":
                     self.total += 10
-                    values = {"mode": self.mode, "total": self.total}
+                    values = {"budget": 150, "mode": self.mode, "total": self.total}
                     result = {"values": {name: values[name] for name in params.get("names", values)}}
                 elif method == "state.set":
                     if params["name"] != "mode":
@@ -923,6 +923,14 @@ with tempfile.TemporaryDirectory() as directory:
     assert len(printed) == 20 and "more changes, now" in many.stdout and "until met" in many.stdout, many.stdout
     unmet = ddp_in(directory, "state", "watch", "mode", "--until", "=never", "--for", "300ms")
     assert unmet.returncode == 1 and "until not met in 300ms: mode=never" in unmet.stdout, unmet.stdout + unmet.stderr
+    # Against another app value: total is far over budget now, so '<budget' must not hold ('...' < 'budget' as text did).
+    over = ddp_in(directory, "state", "watch", "total", "--until", "<budget", "--for", "300ms")
+    assert over.returncode == 1 and "until not met" in over.stdout, over.stdout + over.stderr
+    assert ddp_in(directory, "state", "watch", "total", "--until", ">budget").returncode == 0
+    both = ddp_in(directory, "state", "watch", "total", "--until", "total>100 and mode=demo")
+    assert both.returncode == 0 and "until met" in both.stdout, both.stdout + both.stderr
+    word = ddp_in(directory, "state", "watch", "total", "--until", "<nothing", "--for", "300ms")
+    assert word.returncode == 1 and "'nothing' is not a number" in word.stderr, word.stdout + word.stderr
     assert ddp_in(directory, "storage").stdout == "Documents/\nnote.txt  22 bytes\n"
     assert ddp_in(directory, "storage", "read", "note.txt").stdout == "hello from the sample\n"
     assert "... 1 lines in all, 22 bytes" in ddp_in(directory, "storage", "read", "note.txt", "--limit", "0").stdout
