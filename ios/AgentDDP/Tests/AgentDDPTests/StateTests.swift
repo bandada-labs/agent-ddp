@@ -49,4 +49,13 @@ final class EventsTests: XCTestCase {
         let fields = (events.list()["events"] as? [[String: Any]])?.last?["fields"] as? [String: Any]
         XCTAssertTrue(fields?["when"] is String)
     }
+
+    func testANumberThatIsNotFiniteIsWrittenAsNullInsteadOfAbortingTheApp() throws {
+        let data = try XCTUnwrap(jsonLine(["x": CGFloat.infinity, "rows": [["y": Double.nan, "z": 1.5]]]))
+        let line = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertTrue(line["x"] is NSNull)
+        let row = try XCTUnwrap((line["rows"] as? [[String: Any]])?.first)
+        XCTAssertTrue(row["y"] is NSNull)
+        XCTAssertEqual(row["z"] as? Double, 1.5)
+    }
 }

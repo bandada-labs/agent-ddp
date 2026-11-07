@@ -76,7 +76,7 @@ const MCP_PROFILES: [(&str, &[&str]); 3] = [
         "core",
         &[
             "doctor", "connect", "launch", "up", "down", "tree", "find", "get", "read", "check", "wait", "tap",
-            "swipe", "type", "press", "walk", "skills",
+            "swipe", "scroll", "type", "press", "walk", "devices", "skills",
         ],
     ),
     (
@@ -106,6 +106,7 @@ const MCP_PROFILES: [(&str, &[&str]); 3] = [
             "long-press",
             "set",
             "biometric",
+            "permission",
             "push",
             "job",
             "stop",

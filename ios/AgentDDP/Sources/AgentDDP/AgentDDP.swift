@@ -277,9 +277,23 @@ enum FrameCapture {
 }
 
 func jsonLine(_ line: [String: Any]) -> Data? {
-    guard var data = try? JSONSerialization.data(withJSONObject: line) else { return nil }
+    // On a NaN or infinite number JSONSerialization raises an NSException, which `try?` does not catch: the app would
+    // abort (a focused text field's layers hold one). Such numbers are written as null.
+    let line = JSONSerialization.isValidJSONObject(line) ? line : finite(line) as? [String: Any] ?? [:]
+    guard JSONSerialization.isValidJSONObject(line), var data = try? JSONSerialization.data(withJSONObject: line) else {
+        return nil
+    }
     data.append(0x0A)
     return data
+}
+
+private func finite(_ value: Any) -> Any {
+    switch value {
+    case let dictionary as [String: Any]: return dictionary.mapValues(finite)
+    case let array as [Any]: return array.map(finite)
+    case let number as NSNumber where !number.doubleValue.isFinite: return NSNull()
+    default: return value
+    }
 }
 
 #endif

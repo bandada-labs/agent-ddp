@@ -84,6 +84,10 @@ pub struct Args {
     pub launch_args: Vec<String>,
     pub set_value: Option<String>,
     pub since_launch: bool,
+    /// `type --clear`: empty the field first.
+    pub clear: bool,
+    /// `wait --gone`: until no element matches.
+    pub gone: bool,
 }
 
 const ABOUT: &str = "ddp: see what a Debug iOS/Android app draws, frame by frame, live or from a recording.
@@ -93,12 +97,12 @@ Start here (for agents): ddp skills get core
 
   connect | launch | disconnect | doctor   attach to a running Debug app, or start it fresh; check the setup
   stop | clear | test                      stop the app; clear its data; run its instrumentation tests (Android)
-  up | down                               a simulator or emulator of ddp's own for a run, removed after
+  up | down | devices                     a simulator or emulator of ddp's own for a run, removed after; what is running
   tree | find | get | read | watch | eval  what is drawn, now or over a take (@refs from tree and find)
   record | wait | tap | type | press       take a recording, wait, touch and type
-  swipe | drag | double-tap | long-press   gestures with a real finger, then what changed
+  swipe | drag | scroll | double-tap | long-press   gestures with a real finger, then what changed
   back | background | open | set          the Back key or edge swipe, leave and come back, deep links, device settings
-  biometric | push | job                   simulated Face ID or fingerprint, a push (iOS), a background job (Android)
+  biometric | push | job | permission      simulated Face ID or fingerprint, a push (iOS), a background job (Android), grant
   check overlap|corners|jank|settle|a11y|timeline|parity|baseline|tappable|all
   history | crash | audits | logs          the last 15 minutes; the last crash; the platform's runtime warnings; app logs
   profile | memory | perf | debug | source   where time goes; memory and leaks; missed frames; stop at FILE:LINE; the line that made it
@@ -267,7 +271,13 @@ pub fn parser() -> Command {
         .subcommand(sub("type", "live: type into the focused field, as the keyboard does")
             .arg(positional("value", "the text").required(true))
             .arg(opt("into", "tap this element first (id, label or @ref)").id("id"))
+            .arg(flag("clear", "without the library: empty the field first (the focused one, or --into's)"))
             .arg(opt("device", "without the library: an iOS simulator or Android device")))
+        .subcommand(sub("scroll", "without the library: move the content, slowly and without a fling, then what changed")
+            .arg(choices("value", &["up", "down", "left", "right"]).required(true))
+            .arg(opt("to", "scroll until an element whose label holds this text (or with this id) is on screen").id("end"))
+            .arg(opt("in", "scroll inside this element (a list, a carousel); default the whole screen").id("within"))
+            .arg(opt("device", "an iOS simulator or Android device")))
         .subcommand(sub("walk", "a task walked step by step and kept as a file; replayed later with no model")
             .arg(choices("action", &["start", "end", "expect", "show", "list", "replay", "parity"]).required(true))
             .arg(positional("value", "start: the task in plain words; end: pass or fail; expect: an element; show, replay, parity: the walk (default the last)"))
@@ -275,7 +285,8 @@ pub fn parser() -> Command {
             .arg(opt("device", "start, replay: an app without the library on this device (default: the session's)"))
             .arg(opt("platform", "with --device: ios or android (default: guessed from the id)").value_parser(["ios", "android"])))
         .subcommand(sub("press", "live: press a key in the focused field")
-            .arg(choices("value", &["Enter", "Tab", "Backspace"]).required(true))
+            .arg(choices("value", &["Enter", "Tab", "Backspace", "Escape", "Up", "Down", "Left", "Right", "Home", "Recents", "Notifications"])
+                .required(true).help("Enter, Tab, Backspace; without the library also Escape and the arrows, and on Android Home, Recents, Notifications"))
             .arg(opt("device", "without the library: an iOS simulator or Android device")))
         .subcommand(sub("prefs", "live: the app's UserDefaults (iOS) or SharedPreferences (Android), secrets redacted")
             .arg(choices("action", &["list", "set", "rm", "clear", "files"]).default_value("list"))
@@ -302,6 +313,7 @@ pub fn parser() -> Command {
             .arg(opt("settled", "until nothing changes for this long (300ms)"))
             .arg(opt("timeout", "give up after this long").default_value("10s"))
             .arg(many("ignore", "--settled: elements that never stop (a spinner, a clock) and should not count"))
+            .arg(flag("gone", "with id or text: until no element matches (a spinner or a toast gone)"))
             .arg(opt("device", "without the library: the accessibility tree of an iOS simulator or Android device")))
         .subcommand(file(device_options(sub("logs", "the app's log lines during the last take, at their time in it")
             .arg(flag("follow", "live: the last 100 lines, then each new one"))
@@ -362,6 +374,12 @@ pub fn parser() -> Command {
         .subcommand(device_options(sub("back", "go back: the Back key on Android, the edge swipe on iOS")))
         .subcommand(device_options(sub("background", "send the app to the background for a while, then bring it back")
             .arg(opt("for", "how long in the background (default 2s)").id("duration"))))
+        .subcommand(device_options(sub("permission", "grant or revoke one of the app's permissions, as the platform's own switch does")
+            .arg(choices("action", &["grant", "revoke"]).required(true))
+            .arg(positional("value", "iOS: simctl privacy's service (camera, photos, location, contacts, microphone...); \
+                                      Android: a runtime permission (CAMERA, POST_NOTIFICATIONS or android.permission.CAMERA)")
+                .required(true))))
+        .subcommand(sub("devices", "the booted simulators and adb devices, and which sessions in this folder use them"))
         .subcommand(device_options(sub("biometric", "simulated Face ID / Touch ID or fingerprint: enroll, then match or fail")
             .arg(choices("action", &["enroll", "match", "fail"]).required(true))))
         .subcommand(device_options(sub("push", "iOS: deliver a push notification to the app, as APNs would")
@@ -549,5 +567,7 @@ pub fn parse(argv: &[String]) -> Result<Args, clap::Error> {
         id_from_ref: false,
         reset: boolean(m, "reset"),
         structure: boolean(m, "structure"),
+        clear: boolean(m, "clear"),
+        gone: boolean(m, "gone"),
     })
 }

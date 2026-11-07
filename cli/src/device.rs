@@ -162,6 +162,13 @@ pub fn type_text(args: &mut Args) -> Result<i32> {
         return crate::runner::type_text(args);
     }
     let session = require_session()?;
+    if args.clear {
+        fail!(
+            "type --clear works without the library only (--device) for now",
+            "not_supported",
+            "ddp press Backspace, once per character"
+        );
+    }
     let text = args.value.clone().unwrap_or_default();
     let mut control = open(&session)?;
     let mut places = Vec::new();
@@ -209,10 +216,30 @@ pub fn press(args: &mut Args) -> Result<i32> {
     }
     let session = require_session()?;
     let key = args.value.clone().unwrap_or_default();
+    // The libraries press these three; any other key name they would take and do nothing with.
+    if !["Enter", "Tab", "Backspace"].contains(&key.as_str()) {
+        fail!(
+            format!("{key} is a key ddp presses without the library only (--device); the library presses Enter, Tab and Backspace"),
+            "not_supported",
+            format!("ddp press {key} --device <device>")
+        );
+    }
     open(&session)?.call("input.key", json!({"key": key}))?;
     crate::hit::note(&py::str(&session["platform"]), Vec::new(), &[], json!({"key": key}));
     say!("pressed {key}");
     Ok(0)
+}
+
+/// `scroll` drives the platform's own touches, as an app without the library gets them.
+pub fn scroll(args: &mut Args) -> Result<i32> {
+    if crate::runner::device_mode(args) {
+        return crate::runner::scroll(args);
+    }
+    fail!(
+        "scroll works without the library only (--device, or a session ddp up made) for now",
+        "not_supported",
+        "ddp swipe 200,600 200,200 moves the content with the library"
+    );
 }
 
 /// Live: until an element is drawn, a label shows, or nothing changes for a while.
@@ -223,6 +250,9 @@ pub fn wait(args: &mut Args) -> Result<i32> {
     let session = require_session()?;
     if args.by.is_none() && args.settled.is_none() {
         fail!("wait needs `id <id>`, `text <label>` or --settled 300ms", "missing_option");
+    }
+    if args.gone && args.by.is_none() {
+        fail!("wait --gone needs `id <id>` or `text <label>`", "missing_option", "ddp wait text Loading --gone");
     }
     let settled_ms = args.settled.as_deref().map(parse_ms).transpose()?;
     let timeout = parse_ms(&args.timeout)?;
@@ -253,10 +283,18 @@ pub fn wait(args: &mut Args) -> Result<i32> {
                 };
                 hit && f(&element_alpha(&frame, &element_key(e))) >= 0.05
             });
-            if let Some(found) = found {
-                say!("{} drawn at t={t:.0}ms, frame {}", element_key(found), py::str(&found["frame"]));
-                done = true;
-                return Ok(false);
+            match (found, args.gone) {
+                (Some(found), false) => {
+                    say!("{} drawn at t={t:.0}ms, frame {}", element_key(found), py::str(&found["frame"]));
+                    done = true;
+                    return Ok(false);
+                }
+                (None, true) => {
+                    say!("no {by} {} drawn at t={t:.0}ms", py::dumps(&json!(value)));
+                    done = true;
+                    return Ok(false);
+                }
+                _ => {}
             }
         } else {
             let elements: Vec<&Value> =
@@ -287,6 +325,7 @@ pub fn wait(args: &mut Args) -> Result<i32> {
         return Ok(0);
     }
     let what = match &args.by {
+        Some(by) if args.gone => format!("{by} {value} to go"),
         Some(by) => format!("{by} {value}"),
         None => format!("{} without change", args.settled.clone().unwrap_or_default()),
     };
@@ -802,6 +841,9 @@ pub fn settings(args: &mut Args) -> Result<i32> {
 /// Back: Android's Back key; on iOS the edge swipe UIKit turns into "back", with the library's real finger.
 pub fn back(args: &mut Args) -> Result<i32> {
     let (platform, device, _) = target(args)?;
+    if platform == "ios" && crate::runner::device_mode(args) {
+        return crate::runner::back(args);
+    }
     if platform == "ios" {
         let session = require_session()?;
         let mut control = open(&session)?;
@@ -983,6 +1025,72 @@ fn lat_lon(text: &str) -> Result<[String; 2]> {
 
 /// Simulated biometrics, the way the simulator's and the emulator's own menus do it. Neither confirms: an action, so
 /// ddp says it sent it and the app's reaction is what to check next.
+/// `permission grant|revoke <name>`: the platform's own switch for one of the app's permissions, before it asks.
+/// iOS: `simctl privacy` and its service names (camera, photos, location, contacts, microphone...); Android: `pm` and
+/// a runtime permission (CAMERA, or android.permission.CAMERA).
+pub fn permission(args: &mut Args) -> Result<i32> {
+    let (platform, device, app) = target(args)?;
+    let Some(app) = app else {
+        fail!("which app?", "missing_app", format!("ddp permission grant <name> --app <id> --device {device}"));
+    };
+    let action = args.action.clone().unwrap_or_default();
+    let name = args.value.clone().unwrap_or_default();
+    let (answer, named) = if platform == "ios" {
+        // simctl privacy takes any bundle id: a grant for an app that is not there would be reported as done.
+        if capture("xcrun", &["simctl", "get_app_container", &device, &app]).code != 0 {
+            fail!(
+                format!("{app} is not installed on {device}"),
+                "not_found",
+                format!("xcrun simctl listapps {device}")
+            );
+        }
+        (capture("xcrun", &["simctl", "privacy", &device, &action, &name, &app]), name.clone())
+    } else {
+        let full =
+            if name.contains('.') { name.clone() } else { format!("android.permission.{}", name.to_uppercase()) };
+        (adb(&device, &["shell", "pm", &action, &app, &full])?, full)
+    };
+    let said = format!("{}{}", answer.stdout, answer.stderr);
+    // pm prints its refusal as an exception and, on older Android, still exits 0.
+    if answer.code != 0 || said.contains("Exception") {
+        let why = said.lines().find(|line| !line.trim().is_empty()).unwrap_or("no answer").trim().to_string();
+        fail!(
+            format!("{action} {named} for {app} on {device} failed: {why}"),
+            "command_failed",
+            if platform == "ios" {
+                "xcrun simctl privacy --help lists the service names".to_string()
+            } else {
+                format!("only a runtime permission the app declares: adb -s {device} shell dumpsys package {app} | grep permission")
+            }
+        );
+    }
+    // Android 16's pm exits 0 and says nothing for a permission the app does not declare: read the state back.
+    if platform == "android" {
+        let listed = adb(&device, &["shell", "dumpsys", "package", &app])?.stdout;
+        let state = listed.lines().find_map(|line| line.trim().strip_prefix(&format!("{named}: granted=")));
+        let wanted = if action == "grant" { "true" } else { "false" };
+        if !state.is_some_and(|state| state.starts_with(wanted)) {
+            let why = match state {
+                Some(_) => format!("{named} is still granted={}", if action == "grant" { "false" } else { "true" }),
+                None => format!("{app} does not ask for {named} (it is not a runtime permission in its manifest)"),
+            };
+            fail!(
+                format!("{action} {named} for {app} on {device} did nothing: {why}"),
+                "command_failed",
+                format!("adb -s {device} shell dumpsys package {app} | grep granted=")
+            );
+        }
+    }
+    let done = if action == "grant" { "granted" } else { "revoked" };
+    let note = if platform == "ios" {
+        "; iOS may end a running app when its permissions change: ddp launch starts it again"
+    } else {
+        ""
+    };
+    say!("{done} {named} for {app} on {device}{note}");
+    Ok(0)
+}
+
 pub fn biometric(args: &mut Args) -> Result<i32> {
     let (platform, device, _) = target(args)?;
     let action = args.action.clone().unwrap_or_default();

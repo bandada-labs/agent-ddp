@@ -1,5 +1,6 @@
 package dev.agentddp.runner
 
+import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.app.Instrumentation
 import android.app.UiAutomation
@@ -29,9 +30,10 @@ import kotlin.concurrent.thread
  * `am instrument dev.agentddp.runner/.Runner`.
  */
 class Runner : Instrumentation() {
-    // Lazy: sessions run on their own threads and must see the same instance.
+    // Lazy: sessions run on their own threads and must see the same instance. Without the flag, holding UiAutomation
+    // turns TalkBack and every other accessibility service off until the runner ends.
     private val automation: UiAutomation by lazy {
-        uiAutomation.also { connected ->
+        getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES).also { connected ->
             // Without these the tree leaves out views marked unimportant, resource ids and other windows.
             connected.serviceInfo = connected.serviceInfo.apply {
                 flags = flags or AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS or
@@ -131,7 +133,7 @@ class Runner : Instrumentation() {
         "input.drag" -> {
             val (fromX, fromY) = point(params.optJSONObject("from") ?: throw RunnerError.missing("from"))
             val (toX, toY) = point(params.optJSONObject("to") ?: throw RunnerError.missing("to"))
-            drag(fromX, fromY, toX, toY, params.optLong("ms", 300), params.optLong("hold", 0))
+            drag(fromX, fromY, toX, toY, params.optLong("ms", 300), params.optLong("hold", 0), params.optLong("still", 0))
             JSONObject()
         }
         "input.type" -> {
@@ -142,8 +144,23 @@ class Runner : Instrumentation() {
             JSONObject()
         }
         "input.key" -> {
-            val code = KEYS[params.optString("key")] ?: throw RunnerError("key must be one of ${KEYS.keys}", -32602)
-            listOf(KeyEvent.ACTION_DOWN, KeyEvent.ACTION_UP).forEach { automation.injectInputEvent(KeyEvent(it, code), true) }
+            val key = params.optString("key")
+            val global = GLOBAL_ACTIONS[key]
+            if (global != null) {
+                if (!automation.performGlobalAction(global)) throw RunnerError("the system refused $key", -32000)
+            } else {
+                val code = KEYS[key] ?: throw RunnerError("key must be one of ${KEYS.keys + GLOBAL_ACTIONS.keys}", -32602)
+                press(code)
+            }
+            JSONObject()
+        }
+        // Select all, then delete: the keys a person with a keyboard presses (iOS does the same). Setting the text needs
+        // the field's node, and just after a tap on a focused Compose field input focus is on a plain View: finding the
+        // field then took over 1 s.
+        "input.clear" -> {
+            automation.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: throw RunnerError("no field has the focus", -32000)
+            press(KeyEvent.KEYCODE_A, KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON)
+            press(KeyEvent.KEYCODE_DEL)
             JSONObject()
         }
         "screen.find" -> {
@@ -178,7 +195,7 @@ class Runner : Instrumentation() {
         touch(MotionEvent.ACTION_UP, x, y, down)
     }
 
-    private fun drag(fromX: Float, fromY: Float, toX: Float, toY: Float, ms: Long, hold: Long) {
+    private fun drag(fromX: Float, fromY: Float, toX: Float, toY: Float, ms: Long, hold: Long, still: Long) {
         val down = SystemClock.uptimeMillis()
         touch(MotionEvent.ACTION_DOWN, fromX, fromY, down)
         // Held still first, the app sees a long press that picks the item up.
@@ -189,6 +206,11 @@ class Runner : Instrumentation() {
             val fraction = step.toFloat() / steps
             SystemClock.sleep(FRAME_MS)
             touch(MotionEvent.ACTION_MOVE, fromX + (toX - fromX) * fraction, fromY + (toY - fromY) * fraction, down)
+        }
+        // Held still before letting go: the velocity the view reads is zero, and a scroll does not fling.
+        repeat((still / FRAME_MS).toInt()) {
+            SystemClock.sleep(FRAME_MS)
+            touch(MotionEvent.ACTION_MOVE, toX, toY, down)
         }
         touch(MotionEvent.ACTION_UP, toX, toY, down)
     }
@@ -205,6 +227,14 @@ class Runner : Instrumentation() {
 
     // Right after the runner starts (its flags just set) or a window change, the active window may not be known yet:
     // an empty answer then would read as an empty screen. Wait for it, as long as a window change takes.
+    /** Down and up, stamped now: the system drops a key event with no time (KeyEvent(action, code)) as stale. */
+    private fun press(code: Int, meta: Int = 0) {
+        val now = SystemClock.uptimeMillis()
+        listOf(KeyEvent.ACTION_DOWN, KeyEvent.ACTION_UP).forEach {
+            automation.injectInputEvent(KeyEvent(now, now, it, code, 0, meta), true)
+        }
+    }
+
     private fun root(): AccessibilityNodeInfo? {
         val deadline = SystemClock.uptimeMillis() + ROOT_WAIT_MS
         while (true) {
@@ -241,16 +271,33 @@ class Runner : Instrumentation() {
                 put("type", node.className?.toString()?.substringAfterLast('.'))
                 label?.let { put("label", it) }
                 id?.let { put("id", it) }
+                typed(node)?.let { put("value", it) }
                 put("frame", frame(node))
                 if (node.isClickable) put("tap", true)
                 if (!node.isEnabled) put("enabled", false)
+                if (node.isCheckable) put("checked", node.isChecked)
+                if (node.isSelected) put("selected", true)
+                if (node.isFocused) put("focused", true)
+                if (node.isPassword) put("password", true)
+                node.error?.toString()?.takeIf { it.isNotBlank() }?.let { put("error", it) }
+                // A node that can collapse is expanded, and the other way round.
+                val actions = node.actionList
+                when {
+                    AccessibilityNodeInfo.AccessibilityAction.ACTION_COLLAPSE in actions -> put("expanded", true)
+                    AccessibilityNodeInfo.AccessibilityAction.ACTION_EXPAND in actions -> put("expanded", false)
+                }
             })
         }
         (0 until node.childCount).forEach { index -> node.getChild(index)?.let { collect(it, elements, aboveChildren) } }
     }
 
+    // A field is named by its hint (an empty field shows it as its text) and holds what was typed as its value.
     private fun label(node: AccessibilityNodeInfo): String? =
-        (node.text ?: node.contentDescription)?.toString()?.takeIf { it.isNotBlank() }
+        (if (node.isEditable) node.hintText ?: node.contentDescription else node.text ?: node.contentDescription)
+            ?.toString()?.takeIf { it.isNotBlank() }
+
+    private fun typed(node: AccessibilityNodeInfo): String? =
+        node.text?.toString()?.takeIf { node.isEditable && !node.isShowingHintText && it.isNotEmpty() }
 
     private fun frame(node: AccessibilityNodeInfo): JSONArray {
         val bounds = Rect().also { node.getBoundsInScreen(it) }
@@ -268,7 +315,7 @@ class Runner : Instrumentation() {
         const val FRAME_MS = 16L
         const val ROOT_WAIT_MS = 2000L
         /** Raised when what the runner answers changes; the CLI replaces a runner with another number. */
-        const val VERSION = 4
+        const val VERSION = 5
         const val IDLE_MS = 5 * 60_000L
         const val IDLE_CHECK_MS = 10_000L
         val ALLOWED_UIDS = setOf(0, 2000)
@@ -277,6 +324,16 @@ class Runner : Instrumentation() {
             "Tab" to KeyEvent.KEYCODE_TAB,
             "Backspace" to KeyEvent.KEYCODE_DEL,
             "Back" to KeyEvent.KEYCODE_BACK,
+            "Escape" to KeyEvent.KEYCODE_ESCAPE,
+            "Up" to KeyEvent.KEYCODE_DPAD_UP,
+            "Down" to KeyEvent.KEYCODE_DPAD_DOWN,
+            "Left" to KeyEvent.KEYCODE_DPAD_LEFT,
+            "Right" to KeyEvent.KEYCODE_DPAD_RIGHT,
+        )
+        val GLOBAL_ACTIONS = mapOf(
+            "Home" to AccessibilityService.GLOBAL_ACTION_HOME,
+            "Recents" to AccessibilityService.GLOBAL_ACTION_RECENTS,
+            "Notifications" to AccessibilityService.GLOBAL_ACTION_NOTIFICATIONS,
         )
     }
 }

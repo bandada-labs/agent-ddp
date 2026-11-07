@@ -429,6 +429,7 @@ class FakeApp:
         self.typed, self.prefs, self.interceptor, self.answers = "", {}, None, {}
         # App values: total grows by 10 on every read; mode is writable.
         self.total, self.mode = 0, "idle"
+        self.toggles, self.wifi, self.scrolled = False, False, False
         self.touches, self.runner, self.saved, self.hide_save, self.rows = [], [], False, False, False
         self.scrolls, self.save_late, self.late_id = False, 0, False
         self.server = socket.socket()
@@ -511,7 +512,7 @@ class FakeApp:
                 result = {}
                 if method == "app.info":
                     result = {"protocol": 2, "platform": "ios", "app": "fake", "name": "Fake", "unit": "pt", "scale": 3, "screen": [390, 844],
-                              "runner": 4}
+                              "runner": 5}
                 elif method == "screen.frame":
                     result = self.frame(0)
                     if self.tapped_clock is not None and clock.monotonic() - self.tapped_clock > 0.05:
@@ -527,11 +528,16 @@ class FakeApp:
                     pixels = base64.b64encode(bytes([0, 0, 255, 255] * 4 + [255, 255, 255, 255] * 4)).decode()
                     result = {"scale": 3, "regions": [{"x": 0, "y": 0, "width": 4, "height": 2, "rgba": pixels}
                                                       for _ in params["rects"]]}
-                elif method in ("input.tap", "input.doubleTap", "input.longPress", "input.drag"):
-                    # The Android runner, for an app without the library: a tap on Save shows "Saved".
+                elif method in ("input.tap", "input.doubleTap", "input.longPress", "input.drag", "input.clear"):
+                    # The Android runner, for an app without the library: a tap on Save shows "Saved", on Wi-Fi turns
+                    # it on; a scroll shows what is below the fold.
                     self.runner.append((method, params))
                     if method == "input.tap" and params.get("x") == 110:
                         self.saved = True
+                    if method == "input.tap" and params.get("y") == 520:
+                        self.wifi = True
+                    if method == "input.drag" and params.get("still"):
+                        self.scrolled = True
                     result = {"ms": 30.4}
                 elif method == "screen.elements":
                     shown = [{"type": "TextView", "label": "Off", "frame": [0, 0, 50, 10], "enabled": False}]
@@ -541,7 +547,8 @@ class FakeApp:
                     if self.scrolls:
                         # Below the fold: the app holds it, the user can't see it. After Save the screen scrolls: Off
                         # goes out of view the same way, which is a move, not "gone".
-                        shown.append({"type": "TextView", "label": "Below", "frame": [0, 900, 50, 10], "shown": False})
+                        shown.append({"type": "TextView", "label": "Below", "frame": [0, 600, 50, 10]} if self.scrolled else
+                                     {"type": "TextView", "label": "Below", "frame": [0, 900, 50, 10], "shown": False})
                         if self.saved:
                             shown[0] = {**shown[0], "frame": [0, -40, 50, 10], "shown": False}
                     # Missing for a few looks, as in a context menu still opening.
@@ -550,6 +557,8 @@ class FakeApp:
                         shown.insert(0, {"type": "Button", "label": "Save", "id": "save", "frame": [10, 20, 200, 80], "tap": True})
                     if self.saved:
                         shown.append({"type": "TextView", "label": "Saved", "frame": [10, 120, 100, 30]})
+                    if self.toggles:
+                        shown.append({"type": "Switch", "label": "Wi-Fi", "frame": [0, 500, 100, 40], "tap": True, "checked": self.wifi})
                     if self.rows:
                         shown += [{"type": "Button", "label": "Delete", "frame": [0, 300 + 100 * i, 100, 50], "parent": 0} for i in range(2)]
                     result = {"elements": shown}
@@ -774,6 +783,10 @@ with tempfile.TemporaryDirectory() as directory:
     # Typing, preferences, app commands, and a mock that answers the request its own --then is waiting on.
     assert "typed 3 characters into button" in ddp_in(directory, "type", "Ana", "--into", "@e1").stdout
     assert "pressed Enter" in ddp_in(directory, "press", "Enter").stdout and app.typed == "Ana<Enter>", app.typed
+    # The libraries press three keys and do not empty a field: refused, never sent to do nothing.
+    escape = ddp_in(directory, "press", "Escape")
+    assert escape.returncode == 1 and "the library presses Enter, Tab and Backspace" in escape.stderr and app.typed == "Ana<Enter>", escape.stderr
+    assert ddp_in(directory, "type", "x", "--clear").returncode == 1 and app.typed == "Ana<Enter>", app.typed
     ddp_in(directory, "prefs", "set", "flag", "on")
     assert ddp_in(directory, "prefs").stdout == "flag = on\n"
     ddp_in(directory, "prefs", "rm", "flag")
@@ -807,7 +820,10 @@ with tempfile.TemporaryDirectory() as directory:
     fake_adb = Path(directory, "bin", "adb")
     fake_adb.parent.mkdir()
     adb_log = Path(directory, "adb.log")
-    fake_adb.write_text(f"#!/bin/sh\necho \"$*\" >> {adb_log}\necho 'runner-fake tcp:{app.port} localabstract:agentddp.runner.control'\n")
+    fake_adb.write_text(f"#!/bin/sh\necho \"$*\" >> {adb_log}\n"
+                        "if [ \"$1\" = devices ]; then printf 'List of devices attached\\nrunner-fake\\tdevice\\n'; exit 0; fi\n"
+                        "if [ \"$4\" = dumpsys ]; then echo '        android.permission.CAMERA: granted=true, flags=[ ]'; exit 0; fi\n"
+                        f"echo 'runner-fake tcp:{app.port} localabstract:agentddp.runner.control'\n")
     fake_adb.chmod(0o755)
     host = {"PATH": f"{fake_adb.parent}:{os.environ['PATH']}"}
     double = ddp_in(directory, "double-tap", "10,10", "--device", "runner-fake", env=host)
@@ -826,7 +842,7 @@ with tempfile.TemporaryDirectory() as directory:
     saved = ddp_in(directory, "tap", "Save", "--device", "runner-fake", env=host)
     assert re.search(r'tap Save on runner-fake in \d+ms; new: @e\d+ "Saved"; no checks', saved.stdout), saved.stdout + saved.stderr
     gone = ddp_in(directory, "tap", "Nope", "--device", "runner-fake", env=host)
-    assert gone.returncode == 1 and "no element 'Nope'" in gone.stderr and "next: ddp tree --device runner-fake" in gone.stderr, gone.stderr
+    assert gone.returncode == 1 and "no element 'Nope'" in gone.stderr and "next: ddp scroll down --to 'Nope' --device runner-fake (or up), or ddp tree --device runner-fake" in gone.stderr, gone.stderr
     # An element missing from the tree for a few looks is waited for, as `tap` with the library waits.
     app.saved, app.save_late = False, 3
     late_save = ddp_in(directory, "tap", "Save", "--device", "runner-fake", env=host)
@@ -888,10 +904,53 @@ with tempfile.TemporaryDirectory() as directory:
     listed = ddp_in(directory, "tree", "--device", "runner-fake", env=host).stdout
     assert "Below" not in listed and "2 elements on runner-fake" in listed, listed
     below = ddp_in(directory, "tap", "Below", "--device", "runner-fake", env=host)
-    assert below.returncode == 1 and "'Below' is off screen at [0,900 50x10]: swipe it into view first" in below.stderr, below.stderr
+    assert below.returncode == 1 and "'Below' is off screen at [0,900 50x10]: scroll it into view first" in below.stderr and \
+        "next: ddp scroll down --to 'Below' --device runner-fake" in below.stderr, below.stderr
     scrolled = ddp_in(directory, "tap", "Save", "--device", "runner-fake", env=host)
     assert re.search(r'new: @e\d+ "Saved"; 1 moved; no checks', scrolled.stdout), scrolled.stdout + scrolled.stderr
-    app.scrolls, app.saved = False, False
+    # scroll: slow, held still before letting go; --to scrolls until the element is on screen, and stops at the end.
+    app.runner = []
+    down = ddp_in(directory, "scroll", "down", "--device", "runner-fake", env=host)
+    assert re.fullmatch(r'scroll down on runner-fake in \d+ms; 1 moved; no checks \(no SDK\)\n', down.stdout), down.stdout + down.stderr
+    assert app.runner == [("input.drag", {"from": {"x": 195, "y": 590.8}, "to": {"x": 195, "y": 253.2}, "ms": 500, "hold": 0, "still": 100})], app.runner
+    app.scrolled = False
+    to = ddp_in(directory, "scroll", "down", "--to", "below", "--device", "runner-fake", env=host)
+    assert re.fullmatch(r'scroll down --to below on runner-fake: @e\d+ TextView "Below" \[0,600 50x10\] on screen after 1 scroll in \d+ms; '
+                        r'no checks \(no SDK\)\n', to.stdout), to.stdout + to.stderr
+    end = ddp_in(directory, "scroll", "down", "--to", "Nowhere", "--device", "runner-fake", env=host)
+    assert end.returncode == 1 and "no 'Nowhere' after 1 scroll down: the last one moved nothing" in end.stderr and \
+        "next: ddp scroll up --to 'Nowhere'" in end.stderr, end.stderr
+    app.scrolls, app.saved, app.scrolled = False, False, False
+    # The state the platform gives: checked, and a tap that turns it on is a change.
+    app.toggles = True
+    assert re.search(r'@e\d+ Switch "Wi-Fi" \[0,500 100x40\] tap unchecked\n', ddp_in(directory, "tree", "--device", "runner-fake", env=host).stdout)
+    toggled = ddp_in(directory, "tap", "Wi-Fi", "--device", "runner-fake", env=host)
+    assert re.search(r'changed: @e\d+ "Wi-Fi" checked; no checks', toggled.stdout), toggled.stdout + toggled.stderr
+    app.toggles = app.wifi = False
+    # wait --gone; type --clear empties the field the platform's way; keys only the runner presses.
+    gone = ddp_in(directory, "wait", "text", "Saved", "--gone", "--device", "runner-fake", env=host)
+    assert re.fullmatch(r'no text "Saved" on screen after \d+ms; no checks \(no SDK\)\n', gone.stdout), gone.stdout + gone.stderr
+    app.saved = True
+    stays = ddp_in(directory, "wait", "text", "Saved", "--gone", "--timeout", "300ms", "--device", "runner-fake", env=host)
+    assert stays.returncode == 1 and "waiting for text Saved to go" in stays.stderr, stays.stderr
+    app.saved, app.runner = False, []
+    cleared = ddp_in(directory, "type", "Ana", "--into", "Save", "--clear", "--device", "runner-fake", env=host)
+    assert re.search(r"typed 3 characters into Save after emptying it on runner-fake", cleared.stdout) and \
+        [m for m, _ in app.runner][-2:] == ["input.tap", "input.clear"], cleared.stdout + cleared.stderr + str(app.runner)
+    assert "pressed Home on runner-fake" in ddp_in(directory, "press", "Home", "--device", "runner-fake", env=host).stdout
+    # Another app over the session's app (a permission dialog, the launcher) is named.
+    front = Path(directory, ".ddp", "sessions", "front")
+    front.mkdir(parents=True)
+    (front / "session.json").write_text(json.dumps({"mode": "device", "platform": "android", "device": "runner-fake", "app": "other"}))
+    over = ddp_in(directory, "tree", "--session", "front", env=host)
+    assert over.stdout.endswith("elements on runner-fake; in front: fake, not other; no checks (no SDK)\n"), over.stdout + over.stderr
+    listed = ddp_in(directory, "devices", env=host)
+    assert "android runner-fake: device; session front: other (without the library)" in listed.stdout, listed.stdout + listed.stderr
+    # pm exits 0 for a permission the app does not declare: what the package says afterwards decides.
+    granted = ddp_in(directory, "permission", "grant", "camera", "--session", "front", env=host)
+    assert granted.stdout == "granted android.permission.CAMERA for other on runner-fake\n", granted.stdout + granted.stderr
+    silent = ddp_in(directory, "permission", "grant", "post_notifications", "--session", "front", env=host)
+    assert silent.returncode == 1 and "did nothing: other does not ask for android.permission.POST_NOTIFICATIONS" in silent.stderr, silent.stderr
     # Parity compares the labels that appeared after each step, not elements: iOS keys a button by id, Android by label.
     walks = Path(directory, ".ddp", "walks")
     (walks / "save-the-form.ios.replay.json").write_text(json.dumps({"ok": True, "steps": [

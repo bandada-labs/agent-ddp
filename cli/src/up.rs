@@ -395,3 +395,88 @@ pub fn start_app(platform: &str, device: &str, app: &str) -> Result<()> {
     }
     Ok(())
 }
+
+/// `ddp devices`: the booted simulators and the adb devices there are to drive, each with what this folder knows of
+/// it: that `ddp up` made it, and the sessions that point at it.
+pub fn devices(args: &mut Args) -> Result<i32> {
+    let mut found: Vec<(String, String, String)> = Vec::new();
+    if cfg!(target_os = "macos") && crate::state::which("xcrun").is_some() {
+        let listing = capture("xcrun", &["simctl", "list", "devices", "booted", "-j"]).stdout;
+        let listing: Value = serde_json::from_str(&listing).unwrap_or(json!({}));
+        for group in listing["devices"].as_object().into_iter().flat_map(|groups| groups.values()) {
+            for simulator in group.as_array().into_iter().flatten() {
+                found.push(("ios".into(), py::str(&simulator["udid"]), py::str(&simulator["name"])));
+            }
+        }
+    }
+    let adb = adb_path().ok();
+    if let Some(adb) = &adb {
+        for line in capture(adb, &["devices"]).stdout.lines().skip(1) {
+            if let Some((serial, state)) = line.split_once('\t') {
+                found.push(("android".into(), serial.into(), state.into()));
+            }
+        }
+    }
+    // The next emulator on a port gets the same serial: a session saved before the device booted named the one before.
+    // Asked only of a device a session names, so ddp devices does not reach into every device on the machine.
+    let saved_since_boot = |file: &Path, id: &str| {
+        let Some(adb) = adb.as_deref().filter(|_| found.iter().any(|(p, d, _)| p == "android" && d == id)) else {
+            return true;
+        };
+        let uptime = capture(adb, &["-s", id, "shell", "cat", "/proc/uptime"]).stdout;
+        let Some(up_s) = uptime.split_whitespace().next().and_then(|s| s.parse::<f64>().ok()) else { return true };
+        let saved = std::fs::metadata(file).and_then(|m| m.modified()).ok();
+        let saved_ms =
+            saved.and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|t| t.as_secs_f64() * 1000.0);
+        saved_ms.is_some_and(|saved_ms| saved_ms >= now_ms() - up_s * 1000.0)
+    };
+    let mut folders = vec![(None, PathBuf::from(".ddp"))];
+    if let Ok(sessions) = std::fs::read_dir(".ddp/sessions") {
+        folders.extend(
+            sessions.flatten().map(|entry| (Some(entry.file_name().to_string_lossy().into_owned()), entry.path())),
+        );
+    }
+    let made = |id: &str| {
+        folders.iter().any(|(_, dir)| {
+            read_json(&dir.join("devices.json"))
+                .and_then(|v| v.as_array().cloned())
+                .is_some_and(|owned| owned.iter().any(|d| d["device"] == id))
+        })
+    };
+    let sessions = |id: &str| -> Vec<String> {
+        folders
+            .iter()
+            .filter_map(|(name, dir)| {
+                let file = dir.join("session.json");
+                let session = read_json(&file).filter(|s| s["device"] == id && saved_since_boot(&file, id))?;
+                let how = if session["mode"] == "device" { "without the library" } else { "library" };
+                let app = session["app"].as_str().map(|app| format!(" {app}")).unwrap_or_default();
+                Some(format!("session {}:{app} ({how})", name.as_deref().unwrap_or("default")))
+            })
+            .collect()
+    };
+    if args.json {
+        let rows: Vec<Value> = found
+            .iter()
+            .map(|(platform, id, what)| {
+                json!({"platform": platform, "device": id, "name": what, "up": made(id), "sessions": sessions(id)})
+            })
+            .collect();
+        say!("{}", py::dumps(&json!({"devices": rows})));
+        return Ok(0);
+    }
+    for (platform, id, what) in &found {
+        let mut notes = vec![what.clone()];
+        if made(id) {
+            notes.push("ddp up made it".into());
+        }
+        notes.extend(sessions(id));
+        say!("{platform} {id}: {}", notes.join("; "));
+    }
+    let plural = if found.len() == 1 { "" } else { "s" };
+    say!(
+        "{} device{plural}; next: ddp connect <device> --app <id>, or any command with --device <device> without the library",
+        found.len()
+    );
+    Ok(0)
+}

@@ -9,7 +9,7 @@ use crate::py;
 use crate::state::{adb_path, capture, ctx, failure, read_json, Result};
 use crate::{fail, say};
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 #[cfg(target_os = "macos")]
@@ -20,10 +20,10 @@ use mac_only::{Simulator, BACKSPACE, END, ENTER, MOVE, START, TAB};
 const SOCKET: &str = "localabstract:agentddp.runner.control";
 const PACKAGE: &str = "dev.agentddp.runner";
 const APK: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/runner.apk"));
-/// `am instrument` to the socket open took 2 s on an emulator; a cold device can take longer.
-const START_PATIENCE: Duration = Duration::from_secs(10);
+/// `am instrument` to the socket open took 2 s on a warm emulator, 21 s on one booted a minute before.
+const START_PATIENCE: Duration = Duration::from_secs(40);
 /// The runner's `VERSION` (Runner.kt) this ddp speaks.
-const RUNNER_VERSION: u64 = 4;
+const RUNNER_VERSION: u64 = 5;
 const POLL: Duration = Duration::from_millis(100);
 
 /// What every runner answer ends with: the runner did it, nothing was checked.
@@ -46,7 +46,11 @@ pub fn open(device: &str) -> Result<Control> {
     loop {
         match Control::open(&session) {
             Ok(control) => return Ok(control),
-            Err(error) if Instant::now() >= deadline => return Err(error),
+            Err(_) if Instant::now() >= deadline => fail!(
+                format!("ddp's runner did not start on {device} in {}s", START_PATIENCE.as_secs()),
+                "unreachable",
+                format!("adb -s {device} logcat -d | grep -i agentddp.runner, then the command again")
+            ),
             Err(_) => std::thread::sleep(POLL),
         }
     }
@@ -168,7 +172,9 @@ impl Screen {
         };
         let mut frame = json!({"elements": elements});
         crate::model::name_elements(&mut frame);
-        Ok(frame["elements"].as_array().cloned().unwrap_or_default())
+        let mut elements = frame["elements"].as_array().cloned().unwrap_or_default();
+        key_unnamed(&mut elements);
+        Ok(elements)
     }
 
     /// Where a touch on a named element lands. On iOS the app answers it (the visible point VoiceOver touches): a bar
@@ -198,6 +204,34 @@ impl Screen {
         Ok(place)
     }
 
+    /// What the screen shows, for a scroll with no `--in`: Android's display; on iOS the elements, which the
+    /// simulator already cuts to the screen.
+    fn area(&mut self, elements: &[Value]) -> Result<[f64; 4]> {
+        if let Screen::Android(control) = self {
+            let size = crate::model::rect(&control.call("app.info", json!({}))?["screen"]);
+            return Ok([0.0, 0.0, size[0], size[1]]);
+        }
+        let rects: Vec<[f64; 4]> = on_screen(elements).iter().map(|e| crate::model::rect(&e["frame"])).collect();
+        let (left, top) = rects.iter().fold((f64::MAX, f64::MAX), |(l, t), [x, y, _, _]| (l.min(*x), t.min(*y)));
+        let (right, bottom) =
+            rects.iter().fold((0.0_f64, 0.0_f64), |(r, b), [x, y, w, h]| (r.max(x + w), b.max(y + h)));
+        if rects.is_empty() {
+            fail!("nothing on screen to scroll", "unknown_element", "ddp tree --device <device>");
+        }
+        Ok([left, top, right - left, bottom - top])
+    }
+
+    /// `; in front: com.google.android.permissioncontroller, not dev.example`: another app over the one this session
+    /// drives (a permission dialog, the launcher, the notification shade). Android only: the runner reads the
+    /// package of the window that takes input; iOS says nothing.
+    fn front_note(&mut self, app: Option<&str>) -> String {
+        let (Screen::Android(control), Some(app)) = (self, app) else { return String::new() };
+        match control.call("app.info", json!({})).ok().and_then(|info| info["app"].as_str().map(String::from)) {
+            Some(front) if front != app => format!("; in front: {front}, not {app}"),
+            _ => String::new(),
+        }
+    }
+
     fn android(&mut self, method: &str, params: Value) -> Result<()> {
         if let Screen::Android(control) = self {
             control.call(method, params)?;
@@ -218,10 +252,22 @@ impl Screen {
                 params["ms"] = json!(ms);
                 self.android("input.longPress", params)
             }
-            Action::Drag { from, to, ms, hold } => {
-                self.android("input.drag", json!({"from": point(*from), "to": point(*to), "ms": ms, "hold": hold}))
+            Action::Drag { from, to, ms, hold, still } => {
+                let mut params = json!({"from": point(*from), "to": point(*to), "ms": ms, "hold": hold});
+                if *still > 0 {
+                    params["still"] = json!(still);
+                }
+                self.android("input.drag", params)
             }
-            Action::Type(text) => self.android("input.type", json!({"text": text})),
+            Action::Type { text, clear } => {
+                if *clear {
+                    self.android("input.clear", json!({}))?;
+                }
+                if text.is_empty() {
+                    return Ok(());
+                }
+                self.android("input.type", json!({"text": text}))
+            }
             Action::Key(key) => self.android("input.key", json!({"key": key})),
         }
     }
@@ -248,7 +294,7 @@ fn ios_act(simulator: &mut Simulator, action: &Action) -> Result<()> {
             pause(Duration::from_millis(*ms as u64));
             simulator.finger(END, *at)?;
         }
-        Action::Drag { from, to, ms, hold } => {
+        Action::Drag { from, to, ms, hold, still } => {
             simulator.finger(START, *from)?;
             pause(Duration::from_millis(*hold));
             let steps = (*ms / FRAME.as_millis() as f64).round().max(1.0) as u32;
@@ -257,30 +303,78 @@ fn ios_act(simulator: &mut Simulator, action: &Action) -> Result<()> {
                 let share = step as f64 / steps as f64;
                 simulator.finger(MOVE, (from.0 + (to.0 - from.0) * share, from.1 + (to.1 - from.1) * share))?;
             }
+            for _ in 0..*still / FRAME.as_millis() as u64 {
+                pause(FRAME);
+                simulator.finger(MOVE, *to)?;
+            }
             simulator.finger(END, *to)?;
         }
-        Action::Type(text) => return simulator.type_text(text),
+        Action::Type { text, clear } => {
+            if *clear {
+                // Select all, then delete: the keys a person with a keyboard presses.
+                simulator.key(LEFT_COMMAND, true)?;
+                press_key(simulator, KEY_A)?;
+                simulator.key(LEFT_COMMAND, false)?;
+                press_key(simulator, BACKSPACE)?;
+            }
+            if text.is_empty() {
+                return simulator.delivered();
+            }
+            return simulator.type_text(text);
+        }
         Action::Key(key) => {
             let usage = match key.as_str() {
                 "Enter" => ENTER,
                 "Tab" => TAB,
                 "Backspace" => BACKSPACE,
-                _ => fail!(format!("no key {key} on iOS"), "bad_value"),
+                "Escape" => ESCAPE,
+                "Right" => RIGHT,
+                "Left" => LEFT,
+                "Down" => DOWN,
+                "Up" => UP,
+                _ => fail!(
+                    format!("no key {key} on iOS: Home, Recents and Notifications are Android's"),
+                    "bad_value",
+                    "ddp background --for 2s leaves the app and comes back"
+                ),
             };
-            simulator.key(usage, true)?;
-            simulator.key(usage, false)?;
+            press_key(simulator, usage)?;
         }
     }
     simulator.delivered()
 }
+
+fn press_key(simulator: &mut Simulator, usage: u64) -> Result<()> {
+    simulator.key(usage, true)?;
+    simulator.key(usage, false)
+}
+
+/// USB HID keyboard usages (page 7), as the simulator's keyboard takes them.
+const KEY_A: u64 = 4;
+const ESCAPE: u64 = 41;
+const RIGHT: u64 = 79;
+const LEFT: u64 = 80;
+const DOWN: u64 = 81;
+const UP: u64 = 82;
+const LEFT_COMMAND: u64 = 227;
 
 /// What one command does to the app, in the platform's unit (points on iOS, pixels on Android).
 enum Action {
     Tap((f64, f64)),
     DoubleTap((f64, f64)),
     LongPress((f64, f64), f64),
-    Drag { from: (f64, f64), to: (f64, f64), ms: f64, hold: u64 },
-    Type(String),
+    /// `still`: ms held at the end before letting go, so a scroll view sees no speed and does not fling.
+    Drag {
+        from: (f64, f64),
+        to: (f64, f64),
+        ms: f64,
+        hold: u64,
+        still: u64,
+    },
+    Type {
+        text: String,
+        clear: bool,
+    },
     Key(String),
 }
 
@@ -329,15 +423,24 @@ fn place(elements: &[Value], text: &str, from_ref: bool, device: &str) -> Result
     let (candidates, off): (Vec<&Value>, Vec<&Value>) = candidates.into_iter().partition(|e| !off_screen(e));
     match candidates[..] {
         [element] => Ok(Place { given: text.to_string(), at: center(element), seen: Some(element.clone()) }),
-        [] if !off.is_empty() => fail!(
-            format!("'{text}' is off screen at {}: swipe it into view first", bracket(&frame_of(off[0]))),
-            "off_screen",
-            format!("ddp swipe <from> <to> --device {device}, then ddp tree --device {device}")
-        ),
-        [] => fail!(
-            format!("no element '{text}' in the accessibility tree (not in it: what the iOS keyboard covers, an Android Compose testTag without testTagsAsResourceId)"),
+        [] if !off.is_empty() => {
+            let frame = frame_of(off[0]);
+            let direction = if frame[1] < 0 { "up" } else { "down" };
+            fail!(
+                format!("'{text}' is off screen at {}: scroll it into view first", bracket(&frame)),
+                "off_screen",
+                format!("ddp scroll {direction} --to '{text}' --device {device}")
+            )
+        }
+        [] if from_ref => fail!(
+            format!("no element '{text}' on screen now: it went away, or it has no label or id and moved (such an element is known by its place)"),
             "unknown_element",
             format!("ddp tree --device {device}")
+        ),
+        [] => fail!(
+            format!("no element '{text}' in the accessibility tree (not in it: a list's rows scrolled out of view, what the iOS keyboard covers, an Android Compose testTag without testTagsAsResourceId)"),
+            "unknown_element",
+            format!("ddp scroll down --to '{text}' --device {device} (or up), or ddp tree --device {device}")
         ),
         _ => {
             let refs = refs_for(&candidates.iter().map(|e| element_key(e)).collect::<Vec<_>>())?;
@@ -356,21 +459,84 @@ fn area(element: &Value) -> f64 {
     w * h
 }
 
-/// Element key (id, else label) to what the screen shows of it; elements with neither are left out.
+/// Element key (id, else label, else type and place) to what the screen shows of it.
 fn keyed(elements: &[Value]) -> BTreeMap<String, &Value> {
     let mut keyed = BTreeMap::new();
     for element in elements {
-        let key = element_key(element);
-        if key != "?" {
-            keyed.entry(key).or_insert(element);
-        }
+        keyed.entry(element_key(element)).or_insert(element);
     }
     keyed
 }
 
-/// What the agent reads about an element: label, value, enabled. Its place is compared apart (a scroll moves all).
-fn state(element: &Value) -> (String, String, bool) {
-    (py::str(&element["label"]), py::str(&element["value"]), element["enabled"] != false)
+fn unnamed(element: &Value) -> bool {
+    ["label", "id"].iter().all(|field| element[field].as_str().is_none_or(str::is_empty))
+}
+
+/// An element with no label and no id is known by its type and place (`ImageButton [24,96 48x48]`): its ref fails
+/// once it moves, instead of following a `? [2]` numbering onto another unnamed element.
+fn key_unnamed(elements: &mut [Value]) {
+    let mut renamed: HashMap<String, String> = HashMap::new();
+    let mut seen: HashMap<String, usize> = HashMap::new();
+    for element in elements.iter_mut().filter(|e| unnamed(e)) {
+        let place = format!("{} {}", element["type"].as_str().unwrap_or("element"), bracket(&frame_of(element)));
+        let count = seen.entry(place.clone()).or_insert(0);
+        *count += 1;
+        let key = if *count == 1 { place } else { format!("{place} [{count}]") };
+        renamed.insert(element_key(element), key.clone());
+        element["key"] = key.into();
+    }
+    for element in elements.iter_mut() {
+        if let Some(key) = element["parent"].as_str().and_then(|parent| renamed.get(parent)) {
+            element["parent"] = key.clone().into();
+        }
+    }
+}
+
+/// An unnamed element is known by its place, so one that moved has a new key: matched to a lost one of the same type
+/// and size, it moved (or changed, when what it shows did). Only what has no match is new or gone.
+fn pair_unnamed(change: &mut Change, mut lost: Vec<&Value>, found: Vec<&Value>) {
+    let size = |element: &Value| frame_of(element)[2..].to_vec();
+    for element in found {
+        let twin = lost.iter().position(|old| old["type"] == element["type"] && size(old) == size(element));
+        match twin.map(|at| lost.remove(at)) {
+            Some(old) if off_screen(old) && off_screen(element) => {}
+            Some(old) if !off_screen(element) && state(old) != state(element) => change.changed.push(element.clone()),
+            Some(_) => change.moved += 1,
+            None if off_screen(element) => {}
+            None => change.new.push(element.clone()),
+        }
+    }
+    change.gone.extend(lost.into_iter().filter(|e| !off_screen(e)).cloned());
+}
+
+/// What the agent reads about an element: label, value, enabled, its marks. Its place is compared apart (a scroll
+/// moves all).
+fn state(element: &Value) -> (String, String, bool, String) {
+    (py::str(&element["label"]), py::str(&element["value"]), element["enabled"] != false, marks(element, false))
+}
+
+/// The state the platform gives an element, as `tree` prints it after the frame: ` checked`, ` selected`,
+/// ` collapsed`, ` error "Required"`. The focus only where asked: it moves with every tap and would fill change lines.
+fn marks(element: &Value, with_focus: bool) -> String {
+    let mut marks = String::new();
+    let mut mark = |on: bool, name: &str| {
+        if on {
+            marks += " ";
+            marks += name;
+        }
+    };
+    let selected = element["traits"].as_array().is_some_and(|traits| traits.contains(&json!("selected")));
+    mark(element["checked"] == true, "checked");
+    mark(element["checked"] == false, "unchecked");
+    mark(element["selected"] == true || selected, "selected");
+    mark(element["expanded"] == true, "expanded");
+    mark(element["expanded"] == false, "collapsed");
+    mark(with_focus && element["focused"] == true, "focused");
+    mark(element["password"] == true, "password");
+    if let Some(error) = element["error"].as_str() {
+        marks += &format!(" error {}", py::dumps(&json!(error)));
+    }
+    marks
 }
 
 fn frame_of(element: &Value) -> Vec<i64> {
@@ -411,11 +577,13 @@ fn on_screen(elements: &[Value]) -> Vec<Value> {
 fn change(before: &[Value], after: &[Value], busy: &HashSet<String>) -> Change {
     let (was, is) = (keyed(before), keyed(after));
     let mut change = Change::default();
+    let mut found = Vec::new();
     for (key, element) in &is {
         if busy.contains(key) {
             continue;
         }
         match was.get(key) {
+            None if unnamed(element) => found.push(*element),
             // Off screen, after and maybe before: nothing a person sees.
             None if off_screen(element) => {}
             Some(old) if off_screen(old) && off_screen(element) => {}
@@ -427,11 +595,12 @@ fn change(before: &[Value], after: &[Value], busy: &HashSet<String>) -> Change {
             Some(_) => {}
         }
     }
-    change.gone = was
+    let (lost, gone): (Vec<&Value>, Vec<&Value>) = was
         .iter()
-        .filter(|(key, element)| !busy.contains(*key) && !is.contains_key(*key) && !off_screen(element))
-        .map(|(_, e)| (*e).clone())
-        .collect();
+        .filter(|(key, _)| !busy.contains(*key) && !is.contains_key(*key))
+        .map(|(_, element)| *element)
+        .partition(|element| unnamed(element));
+    change.gone = gone.into_iter().filter(|e| !off_screen(e)).cloned().collect();
     // An id that shows up or goes away between looks (SwiftUI names tab buttons a moment after launch) changes the
     // key, not what a person sees: the same label, type and place on both sides is one element.
     let same_place = |element: &Value, others: &[Value]| {
@@ -442,6 +611,7 @@ fn change(before: &[Value], after: &[Value], busy: &HashSet<String>) -> Change {
     let (new, gone) = (change.new.clone(), change.gone.clone());
     change.new.retain(|element| !same_place(element, &gone));
     change.gone.retain(|element| !same_place(element, &new));
+    pair_unnamed(&mut change, lost, found);
     change
 }
 
@@ -495,11 +665,12 @@ pub fn refs_for(keys: &[String]) -> Result<BTreeMap<String, String>> {
     Ok(by_key)
 }
 
-/// `@e7 "Saved"` or `@e7 #save`: the ref to act on and what a person sees.
+/// `@e7 "Saved"`, `@e7 #save` or `@e7 ImageButton [24,96 48x48]`: the ref to act on and what a person sees.
 fn named(element: &Value, refs: &BTreeMap<String, String>) -> String {
     let key = element_key(element);
     let shown = match element["label"].as_str() {
         Some(label) => py::dumps(&json!(label)),
+        None if unnamed(element) => key.clone(),
         None => format!("#{key}"),
     };
     match refs.get(&key) {
@@ -518,7 +689,8 @@ pub fn describe(change: &Change, refs: &BTreeMap<String, String>) -> String {
                 .map(|e| {
                     let value =
                         e["value"].as_str().filter(|_| with_value).map(|v| format!(" = {}", py::dumps(&json!(v))));
-                    format!("{}{}", named(e, refs), value.unwrap_or_default())
+                    let marks = if with_value { marks(e, false) } else { String::new() };
+                    format!("{}{}{marks}", named(e, refs), value.unwrap_or_default())
                 })
                 .collect();
             if elements.len() > SHOWN {
@@ -548,6 +720,7 @@ pub fn describe(change: &Change, refs: &BTreeMap<String, String>) -> String {
 pub fn display(element: &Value) -> String {
     match element["label"].as_str() {
         Some(label) => label.to_string(),
+        None if unnamed(element) => element_key(element),
         None => format!("#{}", element_key(element)),
     }
 }
@@ -597,7 +770,7 @@ fn perform(
     given: Value,
     build: impl Fn(&[Value], &str, &mut Screen) -> Result<(Action, Vec<Place>)>,
 ) -> Result<i32> {
-    let (platform, device, _) = crate::device::target(args)?;
+    let (platform, device, app) = crate::device::target(args)?;
     let mut screen = Screen::open(&platform, &device)?;
     let looking = Instant::now();
     let mut before = screen.look()?;
@@ -614,7 +787,7 @@ fn perform(
     let settled = screen.look()?;
     let busy = differing(&before, &settled);
     let started = Instant::now();
-    if let (Action::Type(_), Some(field)) = (&action, places.first()) {
+    if let (Action::Type { .. }, Some(field)) = (&action, places.first()) {
         screen.act(&Action::Tap(field.at))?;
         pause(FOCUS_WAIT);
     }
@@ -625,7 +798,8 @@ fn perform(
     change.still_changing = still_changing;
     let refs = refs_for(&named_keys(&change))?;
     let outcome = describe(&change, &refs);
-    say!("{verb} on {device} in {}ms; {outcome}; {NO_CHECKS}", took.round() as i64);
+    let front = screen.front_note(app.as_deref());
+    say!("{verb} on {device} in {}ms; {outcome}{front}; {NO_CHECKS}", took.round() as i64);
     let mut note = json!({
         "mode": "device",
         "platform": platform,
@@ -684,8 +858,8 @@ pub fn gesture(args: &Args) -> Result<i32> {
             ("tap", _) => Action::Tap(from.at),
             ("double-tap", _) => Action::DoubleTap(from.at),
             ("long-press", _) => Action::LongPress(from.at, ms),
-            ("swipe", Some(to)) => Action::Drag { from: from.at, to: to.at, ms, hold: 0 },
-            (_, Some(to)) => Action::Drag { from: from.at, to: to.at, ms, hold: crate::hit::DRAG_HOLD_MS },
+            ("swipe", Some(to)) => Action::Drag { from: from.at, to: to.at, ms, hold: 0, still: 0 },
+            (_, Some(to)) => Action::Drag { from: from.at, to: to.at, ms, hold: crate::hit::DRAG_HOLD_MS, still: 0 },
             _ => unreachable!("swipe and drag have a place to go"),
         };
         Ok((action, [Some(from), to].into_iter().flatten().collect()))
@@ -696,19 +870,31 @@ pub fn gesture(args: &Args) -> Result<i32> {
 pub fn type_text(args: &Args) -> Result<i32> {
     let text = args.value.clone().unwrap_or_default();
     let into = args.id.as_ref().map(|id| format!(" into {id}")).unwrap_or_default();
+    let emptied = if args.clear { " after emptying it" } else { "" };
+    let given = if args.clear { json!({"text": text, "clear": true}) } else { json!({"text": text}) };
     perform(
         args,
-        &format!("typed {} characters{into}", text.chars().count()),
-        json!({"text": text}),
+        &format!("typed {} characters{into}{emptied}", text.chars().count()),
+        given,
         |elements, device, screen| {
             let field = args
                 .id
                 .as_deref()
                 .map(|id| screen.reach(elements, place(elements, id, args.id_from_ref, device)?, device))
                 .transpose()?;
-            Ok((Action::Type(text.clone()), field.into_iter().collect()))
+            Ok((Action::Type { text: text.clone(), clear: args.clear }, field.into_iter().collect()))
         },
     )
+}
+
+/// iOS without the library: the edge swipe a thumb makes, from the very edge (UIKit's screen-edge recognizer starts
+/// only there) to most of the way across.
+pub fn back(args: &Args) -> Result<i32> {
+    perform(args, "back (edge swipe)", json!({}), |elements, _, screen| {
+        let [_, y, w, h] = screen.area(elements)?;
+        let from = (1.0, y + h / 2.0);
+        Ok((Action::Drag { from, to: (w * 0.7, from.1), ms: 250.0, hold: 0, still: 0 }, Vec::new()))
+    })
 }
 
 pub fn press(args: &Args) -> Result<i32> {
@@ -716,11 +902,128 @@ pub fn press(args: &Args) -> Result<i32> {
     perform(args, &format!("pressed {key}"), json!({"key": key}), |_, _, _| Ok((Action::Key(key.clone()), Vec::new())))
 }
 
+/// One scroll moves the content by this share of its area, slowly, and holds still before letting go: nothing flings,
+/// so each scroll moves about as far and `--to` does not fly past what it looks for.
+const SCROLL_SHARE: f64 = 0.4;
+const SCROLL_MS: f64 = 500.0;
+const SCROLL_STILL_MS: u64 = 100;
+/// `scroll --to` gives up after this many scrolls.
+const MAX_SCROLLS: usize = 15;
+
+/// The finger's way for one scroll across the middle of `area`: `down` shows what is below, so the finger goes up.
+fn stroke(direction: &str, [x, y, w, h]: [f64; 4]) -> Action {
+    let (cx, cy) = (x + w / 2.0, y + h / 2.0);
+    let (dx, dy) = (w * SCROLL_SHARE / 2.0, h * SCROLL_SHARE / 2.0);
+    let (from, to) = match direction {
+        "down" => ((cx, cy + dy), (cx, cy - dy)),
+        "up" => ((cx, cy - dy), (cx, cy + dy)),
+        "right" => ((cx + dx, cy), (cx - dx, cy)),
+        _ => ((cx - dx, cy), (cx + dx, cy)),
+    };
+    Action::Drag { from, to, ms: SCROLL_MS, hold: 0, still: SCROLL_STILL_MS }
+}
+
+/// `scroll up|down|left|right [--in <element>] [--to <text>]` without the library. `--to` scrolls until an element
+/// whose label holds the text (or with that id) is on screen, and stops when a scroll moves nothing (the end).
+pub fn scroll(args: &Args) -> Result<i32> {
+    let direction = args.value.clone().unwrap_or_default();
+    let within = args.within.as_deref().map(crate::queries::resolve_ref).transpose()?;
+    let within_from_ref = args.within.as_deref().is_some_and(|text| text.starts_with("@e"));
+    let target = args.end.as_deref().map(crate::queries::resolve_ref).transpose()?;
+    let area = |screen: &mut Screen, elements: &[Value], device: &str| -> Result<[f64; 4]> {
+        match &within {
+            Some(within) => {
+                let place = place(elements, within, within_from_ref, device)?;
+                Ok(crate::model::rect(&place.seen.map(|seen| seen["frame"].clone()).unwrap_or_default()))
+            }
+            None => screen.area(elements),
+        }
+    };
+    let mut given = json!({"direction": direction});
+    for (field, text) in [("to", &target), ("in", &within)] {
+        if let Some(text) = text {
+            given[field] = json!(text);
+        }
+    }
+    let Some(target) = target else {
+        return perform(args, &format!("scroll {direction}"), given, |elements, device, screen| {
+            Ok((stroke(&direction, area(screen, elements, device)?), Vec::new()))
+        });
+    };
+    let (platform, device, _) = crate::device::target(args)?;
+    let mut screen = Screen::open(&platform, &device)?;
+    let started = Instant::now();
+    // A screen still moving (the last command's transition) would give a place that is gone a moment later.
+    let first = screen.look()?;
+    pause(BUSY_SAMPLE);
+    let mut elements = screen.look()?;
+    if !differing(&first, &elements).is_empty() {
+        elements = settle(&mut screen, &elements, &HashSet::new())?.0;
+    }
+    for scrolls in 0..=MAX_SCROLLS {
+        let shown = on_screen(&elements);
+        let found: Vec<&Value> =
+            shown.iter().filter(|e| matches(e, "id", &target) || matches(e, "text", &target)).collect();
+        if let Some(first) = found.first() {
+            let refs = refs_for(&[element_key(first)])?;
+            let more = if found.len() > 1 { format!(" (+{} more)", found.len() - 1) } else { String::new() };
+            let ms = started.elapsed().as_millis();
+            say!(
+                "scroll {direction} --to {target} on {device}: {}{more} on screen after {} in {ms}ms; {NO_CHECKS}",
+                tree_line(first, &refs),
+                count(scrolls, "scroll")
+            );
+            let mut note = json!({"mode": "device", "platform": platform, "places": [], "new": [], "appeared": [],
+                                  "gone": [], "changed": [], "ms": ms});
+            if let (Some(note), Some(given)) = (note.as_object_mut(), given.as_object()) {
+                note.extend(given.clone());
+            }
+            crate::walk::note(note);
+            return Ok(0);
+        }
+        if scrolls == MAX_SCROLLS {
+            break;
+        }
+        let swipe = stroke(&direction, area(&mut screen, &elements, &device)?);
+        screen.act(&swipe)?;
+        let (after, _) = settle(&mut screen, &elements, &HashSet::new())?;
+        if differing(&elements, &after).is_empty() {
+            fail!(
+                format!(
+                    "no '{target}' after {} {direction}: the last one moved nothing (the end, or nothing scrolls there)",
+                    count(scrolls + 1, "scroll")
+                ),
+                "not_found",
+                format!("ddp scroll {} --to '{target}' --device {device}, or ddp tree --device {device}", opposite(&direction))
+            );
+        }
+        elements = after;
+    }
+    fail!(
+        format!("no '{target}' after {MAX_SCROLLS} scrolls {direction}"),
+        "not_found",
+        format!("ddp tree --device {device}")
+    )
+}
+
+fn count(n: usize, what: &str) -> String {
+    format!("{n} {what}{}", if n == 1 { "" } else { "s" })
+}
+
+fn opposite(direction: &str) -> &'static str {
+    match direction {
+        "down" => "up",
+        "up" => "down",
+        "left" => "right",
+        _ => "left",
+    }
+}
+
 /// `tree` without the library: one line per element of the platform's accessibility tree,
 /// `@eN type "label" #id = "value" [x,y wxh]` in the platform's unit (pixels on Android, points on iOS); `tap` marks
 /// what Android says takes a click. The ref, label or id is what `tap` takes.
 pub fn tree(args: &Args) -> Result<i32> {
-    let (platform, device, _) = crate::device::target(args)?;
+    let (platform, device, app) = crate::device::target(args)?;
     let mut screen = Screen::open(&platform, &device)?;
     if let Screen::Ios(simulator) = &mut screen {
         simulator.list_containers();
@@ -730,11 +1033,12 @@ pub fn tree(args: &Args) -> Result<i32> {
         say!("{}", py::dumps(&json!({"elements": elements, "checks": false})));
         return Ok(0);
     }
-    let refs = refs_for(&elements.iter().map(element_key).filter(|k| k != "?").collect::<Vec<_>>())?;
+    let refs = refs_for(&elements.iter().map(element_key).collect::<Vec<_>>())?;
     for element in &elements {
         say!("{}", tree_line(element, &refs));
     }
-    say!("{} elements on {device}; {NO_CHECKS}", elements.len());
+    let front = screen.front_note(app.as_deref());
+    say!("{} elements on {device}{front}; {NO_CHECKS}", elements.len());
     Ok(0)
 }
 
@@ -755,6 +1059,9 @@ pub fn wait(args: &Args) -> Result<i32> {
     if args.by.is_none() && settled_ms.is_none() {
         fail!("wait needs `id <id>`, `text <label>` or --settled 300ms", "missing_option");
     }
+    if args.gone && args.by.is_none() {
+        fail!("wait --gone needs `id <id>` or `text <label>`", "missing_option", "ddp wait text Loading --gone");
+    }
     let timeout = crate::state::parse_ms(&args.timeout)?;
     let value = args.value.clone().unwrap_or_default();
     let ignored: HashSet<String> = args.ignore.iter().cloned().collect();
@@ -765,10 +1072,17 @@ pub fn wait(args: &Args) -> Result<i32> {
         let elements = screen.elements()?;
         let ms = started.elapsed().as_millis();
         if let Some(by) = &args.by {
-            if let Some(found) = elements.iter().find(|e| matches(e, by, &value)) {
-                let refs = refs_for(&[element_key(found)])?;
-                say!("{} on screen after {ms}ms; {NO_CHECKS}", tree_line(found, &refs));
-                return Ok(0);
+            match (elements.iter().find(|e| matches(e, by, &value)), args.gone) {
+                (Some(found), false) => {
+                    let refs = refs_for(&[element_key(found)])?;
+                    say!("{} on screen after {ms}ms; {NO_CHECKS}", tree_line(found, &refs));
+                    return Ok(0);
+                }
+                (None, true) => {
+                    say!("no {by} {} on screen after {ms}ms; {NO_CHECKS}", py::dumps(&json!(value)));
+                    return Ok(0);
+                }
+                _ => {}
             }
         } else {
             let changed = previous
@@ -787,6 +1101,7 @@ pub fn wait(args: &Args) -> Result<i32> {
         }
         if ms as f64 >= timeout {
             let what = match &args.by {
+                Some(by) if args.gone => format!("{by} {value} to go"),
                 Some(by) => format!("{by} {value}"),
                 None => format!("{} without change", args.settled.clone().unwrap_or_default()),
             };
@@ -850,7 +1165,7 @@ fn tree_line(element: &Value, refs: &BTreeMap<String, String>) -> String {
     if element["enabled"] == false {
         line += " disabled";
     }
-    line
+    line + &marks(element, true)
 }
 
 /// `ddp doctor`: the Mac-side hooks for iOS apps without the library, each asked once (an empty key release, the
@@ -929,5 +1244,45 @@ mod mac_only {
         pub fn visible_point(&mut self, _: usize) -> Result<Option<Option<(f64, f64)>>> {
             unreachable!()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn looked(elements: Value) -> Vec<Value> {
+        let mut frame = json!({ "elements": elements });
+        crate::model::name_elements(&mut frame);
+        let mut elements = frame["elements"].as_array().cloned().unwrap();
+        key_unnamed(&mut elements);
+        elements
+    }
+
+    #[test]
+    fn an_unnamed_element_is_known_by_its_place_and_its_move_is_not_new() {
+        let before = looked(json!([
+            {"type": "Button", "label": "Save", "frame": [0, 0, 100, 40]},
+            {"type": "ImageButton", "frame": [0, 100, 48, 48]},
+            {"type": "ImageButton", "frame": [0, 200, 48, 48], "parent": 1},
+        ]));
+        assert_eq!(element_key(&before[1]), "ImageButton [0,100 48x48]");
+        assert_eq!(before[2]["parent"], "ImageButton [0,100 48x48]");
+        let scrolled = looked(json!([
+            {"type": "Button", "label": "Save", "frame": [0, 0, 100, 40]},
+            {"type": "ImageButton", "frame": [0, 50, 48, 48]},
+            {"type": "ImageButton", "frame": [0, 150, 48, 48]},
+            {"type": "ImageView", "frame": [0, 300, 20, 20]},
+        ]));
+        let change = change(&before, &scrolled, &HashSet::new());
+        assert_eq!((change.moved, change.gone.len()), (2, 0));
+        assert_eq!(describe(&change, &BTreeMap::new()), "new: ImageView [0,300 20x20]; 2 moved");
+        // The keyboard pans a field up while it takes the text, and pushes a button out of view.
+        let field = |y: i64, value: Option<&str>| json!({"type": "EditText", "frame": [0, y, 300, 60], "value": value});
+        let before = looked(json!([field(900, None), {"type": "View", "frame": [0, 0, 50, 50]}]));
+        let typed =
+            looked(json!([field(500, Some("milk")), {"type": "View", "frame": [0, -400, 50, 50], "shown": false}]));
+        let typing = super::change(&before, &typed, &HashSet::new());
+        assert_eq!(describe(&typing, &BTreeMap::new()), "changed: EditText [0,500 300x60] = \"milk\"; 1 moved");
     }
 }

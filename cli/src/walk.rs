@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 /// The commands that are steps.
-const ACTIONS: [&str; 7] = ["tap", "double-tap", "long-press", "swipe", "drag", "type", "press"];
+const ACTIONS: [&str; 8] = ["tap", "double-tap", "long-press", "swipe", "drag", "type", "press", "scroll"];
 /// How long a replay waits for a target or an expected element to show: the step before may still be moving, or
 /// waiting on the network.
 const FIND_WAIT: Duration = Duration::from_millis(5000);
@@ -521,6 +521,17 @@ fn replay(args: &Args) -> Result<i32> {
                 argv.push(py::str(&step["text"]));
                 if let Some(field) = points.first() {
                     argv.extend(["--into".into(), field.clone()]);
+                }
+                if step["clear"] == true {
+                    argv.push("--clear".into());
+                }
+            }
+            "scroll" => {
+                argv.push(py::str(&step["direction"]));
+                for (field, option) in [("to", "--to"), ("in", "--in")] {
+                    if let Some(text) = step[field].as_str() {
+                        argv.extend([option.into(), text.into()]);
+                    }
                 }
             }
             "press" => argv.push(py::str(&step["key"])),
