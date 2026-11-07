@@ -20,6 +20,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 
 ### Fixed
 
+- `ddp down` run in another folder or session than `ddp up` said `next: ddp up --platform ios`, so the device kept running. It now names the folder it read and points at the session that holds the device (`next: ddp down --session run1`), or says to run it where `up` ran.
 - `--until` and `query --where` with `<`, `>`, `<=` or `>=` compared a number with a word as text, so `ddp state watch spent --until '<budget'` was met at once ('123' < 'budget'), and text that is not a number could be "more" than one. A number is now ordered only against a number: a word is refused, a value that is not a number never holds. `state watch` reads another app value named on the right (`--until '>budget'`) and every value the condition names (`'total>100 and mode=done'`).
 - Android: `doctor` said "agent-ddp library in the build" for an app without it on a phone that also had ddp's sample: the check matched any package named in the dump. It now looks for the library's starter in the app's own manifest, and `launch`/`up` do not wait 15 s for an app without it.
 - iOS: `tap` refused SwiftUI's `VideoPlayer` ("taking no touch") although a tap shows its controls. AVKit puts an empty SwiftUI view over the video and takes the tap with UIKit recognizers on a view around it; the hit test now counts those for what is inside that view and shown. A hidden control in there (the volume while the controls are hidden) is still refused.

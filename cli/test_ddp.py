@@ -106,6 +106,15 @@ def parity_recording(platform, unit, scale, start, fill, corner):
     return "\n".join(json.dumps(line) for line in lines)
 
 
+# `down` in the wrong session or folder must point at where `up` left its device, never at `up` again.
+with tempfile.TemporaryDirectory() as directory:
+    nothing = ddp_in(directory, "down")
+    assert nothing.returncode == 1 and "next: run ddp down in the folder where ddp up ran" in nothing.stderr, nothing.stderr
+    Path(directory, ".ddp", "sessions", "run1").mkdir(parents=True)
+    Path(directory, ".ddp", "sessions", "run1", "devices.json").write_text('[{"platform": "android", "device": "emulator-5560"}]')
+    other = ddp_in(directory, "down")
+    assert other.returncode == 1 and "next: ddp down --session run1" in other.stderr, other.stderr
+
 with tempfile.TemporaryDirectory() as directory:
     ios, android = Path(directory, "ios.jsonl"), Path(directory, "android.jsonl")
     ios.write_text(parity_recording("ios", "pt", 3, 0, "#0000FFFF", 12))

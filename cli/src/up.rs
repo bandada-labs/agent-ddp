@@ -75,12 +75,14 @@ pub fn down(args: &mut Args) -> Result<i32> {
             None => None,
         };
         let Some(chosen) = chosen else {
-            let listed: Vec<String> = owned.iter().map(|d| py::str(&d["device"])).collect();
-            fail!(
-                "no device of ddp's own to shut down",
-                "not_owned",
-                if listed.is_empty() { "ddp up --platform ios".to_string() } else { format!("ddp down {}", listed[0]) }
-            );
+            let next = match (owned.first(), session_holding_devices()) {
+                (Some(device), _) => format!("ddp down {}", py::str(&device["device"])),
+                (None, Some(Some(name))) => format!("ddp down --session {name}"),
+                (None, Some(None)) => "ddp down".to_string(),
+                // ddp keeps what up made per folder: `up` in another folder left nothing here to read.
+                (None, None) => "run ddp down in the folder where ddp up ran".to_string(),
+            };
+            fail!(format!("no device of ddp's own to shut down in {}", ctx().dir.display()), "not_owned", next);
         };
         vec![chosen]
     };
@@ -108,6 +110,23 @@ pub fn down(args: &mut Args) -> Result<i32> {
         let _ = std::fs::remove_file(ctx().session_file);
     }
     Ok(0)
+}
+
+/// Another session in this folder that has devices `up` made: Some(None) is the one without --session.
+fn session_holding_devices() -> Option<Option<String>> {
+    let holds = |dir: &Path| {
+        read_json(&dir.join("devices.json")).and_then(|v| v.as_array().map(|a| !a.is_empty())) == Some(true)
+    };
+    let here = ctx().dir;
+    if here != Path::new(".ddp") && holds(Path::new(".ddp")) {
+        return Some(None);
+    }
+    let sessions = std::fs::read_dir(".ddp/sessions").ok()?;
+    sessions
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|dir| *dir != here && holds(dir))
+        .find_map(|dir| dir.file_name().map(|name| Some(name.to_string_lossy().into_owned())))
 }
 
 fn seconds(since: Instant) -> String {
