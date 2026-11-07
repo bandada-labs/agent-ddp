@@ -317,6 +317,9 @@ pub struct Simulator {
     handles: Vec<Id>,
     /// `tree` asks for the containers VoiceOver's flat tree leaves out.
     with_containers: bool,
+    /// What the pasteboard held before ddp pasted into the app: it goes back when ddp lets go of the simulator, after
+    /// the action settled.
+    held_pasteboard: Option<String>,
 }
 
 impl Drop for Simulator {
@@ -328,6 +331,9 @@ impl Drop for Simulator {
         }
         self.hid = None;
         self.accessibility = None;
+        if let Some(held) = self.held_pasteboard.take() {
+            let _ = write_pasteboard(&self.udid, &held);
+        }
         unsafe { objc_autoreleasePoolPop(self.pool) };
     }
 }
@@ -350,6 +356,7 @@ impl Simulator {
             accessibility: None,
             handles: Vec::new(),
             with_containers: false,
+            held_pasteboard: None,
         };
         let context = class(
             HID_HOOK,
@@ -519,6 +526,30 @@ impl Simulator {
         Ok(())
     }
 
+    /// Whether a US keyboard has a key for every character (else `type_text` pastes).
+    pub fn has_keys(&self, text: &str) -> bool {
+        text.chars().all(|character| key_usage(character).is_some())
+    }
+
+    /// Command and a key, as a person holding Command presses it.
+    pub fn shortcut(&mut self, usage: u64) -> Result<()> {
+        self.key(LEFT_COMMAND, true)?;
+        self.key(usage, true)?;
+        self.key(usage, false)?;
+        self.key(LEFT_COMMAND, false)
+    }
+
+    /// Command-V from the simulator's pasteboard, the paste a person with a keyboard makes.
+    fn paste(&mut self, text: &str) -> Result<()> {
+        let held = capture("xcrun", &["simctl", "pbpaste", &self.udid]);
+        write_pasteboard(&self.udid, text)?;
+        if held.code == 0 && self.held_pasteboard.is_none() {
+            self.held_pasteboard = Some(held.stdout);
+        }
+        self.shortcut(KEY_V)?;
+        self.delivered()
+    }
+
     /// Waits until dtuhidd took everything sent so far.
     pub fn delivered(&mut self) -> Result<()> {
         if !Self::acknowledge(self.hid()?) {
@@ -531,20 +562,11 @@ impl Simulator {
         Ok(())
     }
 
-    /// Text as key presses on a US keyboard. Anything else is refused before a key is pressed.
+    /// Text as key presses on a US keyboard; text with a character it has no key for (ñ, é, an emoji) as a paste.
     pub fn type_text(&mut self, text: &str) -> Result<()> {
-        let keys: Vec<(u64, bool)> = text
-            .chars()
-            .map(|character| {
-                key_usage(character).ok_or_else(|| {
-                    failure(
-                        format!("'{character}' has no key on a US keyboard; without the library ddp types ASCII only"),
-                        "bad_value",
-                        None,
-                    )
-                })
-            })
-            .collect::<Result<_>>()?;
+        let Some(keys) = text.chars().map(key_usage).collect::<Option<Vec<_>>>() else {
+            return self.paste(text);
+        };
         for (usage, shift) in keys {
             if shift {
                 self.key(LEFT_SHIFT, true)?;
@@ -1035,7 +1057,23 @@ fn role_name(role: i64) -> &'static str {
     usize::try_from(role).ok().and_then(|index| ROLES.get(index)).copied().unwrap_or("Element")
 }
 
+fn write_pasteboard(udid: &str, text: &str) -> Result<()> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let written =
+        Command::new("xcrun").args(["simctl", "pbcopy", udid]).stdin(Stdio::piped()).spawn().and_then(|mut child| {
+            child.stdin.take().expect("piped").write_all(text.as_bytes())?;
+            child.wait()
+        });
+    match written {
+        Ok(status) if status.success() => Ok(()),
+        _ => fail!(format!("could not put the text on {udid}'s pasteboard (xcrun simctl pbcopy)"), "command_failed"),
+    }
+}
+
+const KEY_V: u64 = 25;
 const LEFT_SHIFT: u64 = 225;
+const LEFT_COMMAND: u64 = 227;
 pub const ENTER: u64 = 40;
 pub const BACKSPACE: u64 = 42;
 pub const TAB: u64 = 43;

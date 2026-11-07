@@ -98,6 +98,7 @@ fn handler(command: &str) -> fn(&mut Args) -> Result<i32> {
         "clear" => device::clear,
         "test" => device::test,
         "annotate" => device::annotate,
+        "screenshot" => device::screenshot,
         "compare" => compare::compare,
         "explore" => device::explore,
         "mcp" => tools::mcp,

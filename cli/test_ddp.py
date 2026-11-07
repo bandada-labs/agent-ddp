@@ -822,6 +822,7 @@ with tempfile.TemporaryDirectory() as directory:
     adb_log = Path(directory, "adb.log")
     fake_adb.write_text(f"#!/bin/sh\necho \"$*\" >> {adb_log}\n"
                         "if [ \"$1\" = devices ]; then printf 'List of devices attached\\nrunner-fake\\tdevice\\n'; exit 0; fi\n"
+                        "if [ \"$3\" = exec-out ]; then printf 'PNG bytes'; exit 0; fi\n"
                         "if [ \"$4\" = dumpsys ]; then echo '        android.permission.CAMERA: granted=true, flags=[ ]'; exit 0; fi\n"
                         f"echo 'runner-fake tcp:{app.port} localabstract:agentddp.runner.control'\n")
     fake_adb.chmod(0o755)
@@ -897,6 +898,11 @@ with tempfile.TemporaryDirectory() as directory:
     found = ddp_in(directory, "find", "id", "save", "--device", "runner-fake", env=host)
     assert re.fullmatch(r'@e\d+ Button "Save" #save \[10,20 200x80\] tap\n1 of 3 elements on runner-fake; no checks \(no SDK\)\n',
                         found.stdout), found.stdout + found.stderr
+    by_role = ddp_in(directory, "find", "role", "button", "--device", "runner-fake", env=host)
+    assert by_role.stdout == found.stdout, by_role.stdout + by_role.stderr
+    shot = ddp_in(directory, "screenshot", Path(directory, "s.png"), "--device", "runner-fake", env=host)
+    assert shot.stdout.endswith("s.png: the screen of runner-fake\n") and Path(directory, "s.png").read_bytes() == b"PNG bytes", \
+        shot.stdout + shot.stderr
     late = ddp_in(directory, "wait", "id", "nope", "--timeout", "300ms", "--device", "runner-fake", env=host)
     assert late.returncode == 1 and "timed out after 300ms waiting for id nope" in late.stderr, late.stderr
     # Off screen: not in tree, and an element that scrolls out of view moved, it did not go.

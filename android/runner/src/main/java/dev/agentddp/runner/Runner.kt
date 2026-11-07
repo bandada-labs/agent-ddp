@@ -139,8 +139,10 @@ class Runner : Instrumentation() {
         "input.type" -> {
             val text = params.optString("text").ifEmpty { throw RunnerError.missing("text") }
             val events = KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD).getEvents(text.toCharArray())
-                ?: throw RunnerError("the keyboard map has no keys for this text", -32602)
-            events.forEach { automation.injectInputEvent(it, true) }
+            // Waiting for each key took about 240 ms a character in a Compose field; the input queue keeps their
+            // order, so only the last one waits.
+            if (events != null) events.forEachIndexed { index, event -> automation.injectInputEvent(event, index == events.lastIndex) }
+            else insert(text)
             JSONObject()
         }
         "input.key" -> {
@@ -244,15 +246,54 @@ class Runner : Instrumentation() {
         }
     }
 
-    private fun find(label: String): AccessibilityNodeInfo? {
+    private fun find(label: String): AccessibilityNodeInfo? =
+        firstNode { label(it) == label || it.viewIdResourceName?.substringAfter(":id/") == label }
+
+    private fun focusedField(): AccessibilityNodeInfo? =
+        automation.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.takeIf { it.isEditable }
+            ?: firstNode { it.isFocused && it.isEditable }
+
+    private fun firstNode(wanted: (AccessibilityNodeInfo) -> Boolean): AccessibilityNodeInfo? {
         val root = root() ?: return null
         val queue = ArrayDeque(listOf(root))
         while (queue.isNotEmpty()) {
             val node = queue.removeFirst()
-            if (label(node) == label || node.viewIdResourceName?.substringAfter(":id/") == label) return node
+            if (wanted(node)) return node
             (0 until node.childCount).mapNotNullTo(queue) { node.getChild(it) }
         }
         return null
+    }
+
+    // Text the keyboard map has no keys for (ñ, é, an emoji) goes into the focused field at its cursor, set as an
+    // accessibility service sets it (UiAutomator's setText): the app gets one change, not key presses. Just after a
+    // tap a Compose field's input focus is on a plain View, so the focused editable node is looked for in the tree.
+    private fun insert(text: String) {
+        // A field tapped just before takes the focus a moment later.
+        val deadline = SystemClock.uptimeMillis() + FOCUS_WAIT_MS
+        var field = focusedField()
+        while (field == null && SystemClock.uptimeMillis() < deadline) {
+            SystemClock.sleep(50)
+            field = focusedField()
+        }
+        field ?: throw RunnerError("no field has the focus", -32000)
+        val current = if (field.isShowingHintText) "" else field.text?.toString().orEmpty()
+        if (field.isPassword && current.isNotEmpty()) {
+            throw RunnerError("a password field's text is hidden, so only keys can add to it: empty it first", -32000)
+        }
+        val start = field.textSelectionStart.takeIf { it in 0..current.length } ?: current.length
+        val end = field.textSelectionEnd.takeIf { it in start..current.length } ?: start
+        val replaced = Bundle().apply {
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, current.replaceRange(start, end, text))
+        }
+        if (!field.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, replaced)) {
+            throw RunnerError("the field refused the text", -32000)
+        }
+        val cursor = start + text.length
+        field.refresh()
+        field.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, Bundle().apply {
+            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, cursor)
+            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, cursor)
+        })
     }
 
     // Only what an agent can act on or read: nodes with a label, an id, or that take a tap. A node the app still
@@ -315,7 +356,8 @@ class Runner : Instrumentation() {
         const val FRAME_MS = 16L
         const val ROOT_WAIT_MS = 2000L
         /** Raised when what the runner answers changes; the CLI replaces a runner with another number. */
-        const val VERSION = 5
+        const val VERSION = 6
+        const val FOCUS_WAIT_MS = 1000L
         const val IDLE_MS = 5 * 60_000L
         const val IDLE_CHECK_MS = 10_000L
         val ALLOWED_UIDS = setOf(0, 2000)

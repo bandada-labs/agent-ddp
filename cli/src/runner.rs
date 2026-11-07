@@ -23,7 +23,7 @@ const APK: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/runner.apk"));
 /// `am instrument` to the socket open took 2 s on a warm emulator, 21 s on one booted a minute before.
 const START_PATIENCE: Duration = Duration::from_secs(40);
 /// The runner's `VERSION` (Runner.kt) this ddp speaks.
-const RUNNER_VERSION: u64 = 5;
+const RUNNER_VERSION: u64 = 6;
 const POLL: Duration = Duration::from_millis(100);
 
 /// What every runner answer ends with: the runner did it, nothing was checked.
@@ -232,6 +232,31 @@ impl Screen {
         }
     }
 
+    /// iOS types ñ, é or an emoji as a paste, and iOS asks the person first unless the app may paste from other
+    /// apps. Refused before anything is touched, so a line never says typed what iOS held back.
+    fn ready_to_type(&mut self, text: &str, device: &str) -> Result<()> {
+        let Screen::Ios(simulator) = self else { return Ok(()) };
+        if simulator.has_keys(text) {
+            return Ok(());
+        }
+        let pid = simulator.front_pid()?;
+        let Some(app) = crate::device::ios_bundle_of(device, pid) else {
+            fail!(
+                "no app in front on the simulator to paste into",
+                "not_running",
+                format!("ddp tree --device {device}")
+            );
+        };
+        if !crate::device::paste_allowed(device, &app)? {
+            fail!(
+                format!("iOS asks the person before {app} pastes from another app, and ddp types ñ, é or an emoji as a paste"),
+                "not_allowed",
+                format!("ddp permission grant paste --device {device} --app {app}")
+            );
+        }
+        Ok(())
+    }
+
     fn android(&mut self, method: &str, params: Value) -> Result<()> {
         if let Screen::Android(control) = self {
             control.call(method, params)?;
@@ -312,9 +337,7 @@ fn ios_act(simulator: &mut Simulator, action: &Action) -> Result<()> {
         Action::Type { text, clear } => {
             if *clear {
                 // Select all, then delete: the keys a person with a keyboard presses.
-                simulator.key(LEFT_COMMAND, true)?;
-                press_key(simulator, KEY_A)?;
-                simulator.key(LEFT_COMMAND, false)?;
+                simulator.shortcut(KEY_A)?;
                 press_key(simulator, BACKSPACE)?;
             }
             if text.is_empty() {
@@ -356,7 +379,6 @@ const RIGHT: u64 = 79;
 const LEFT: u64 = 80;
 const DOWN: u64 = 81;
 const UP: u64 = 82;
-const LEFT_COMMAND: u64 = 227;
 
 /// What one command does to the app, in the platform's unit (points on iOS, pixels on Android).
 enum Action {
@@ -877,6 +899,7 @@ pub fn type_text(args: &Args) -> Result<i32> {
         &format!("typed {} characters{into}{emptied}", text.chars().count()),
         given,
         |elements, device, screen| {
+            screen.ready_to_type(&text, device)?;
             let field = args
                 .id
                 .as_deref()
@@ -1046,6 +1069,8 @@ pub fn tree(args: &Args) -> Result<i32> {
 fn matches(element: &Value, by: &str, value: &str) -> bool {
     if by == "id" {
         element_key(element) == value || element["id"] == value
+    } else if by == "role" {
+        element["type"].as_str().is_some_and(|role| role.eq_ignore_ascii_case(value))
     } else {
         let wanted = crate::model::normalize_label(value).to_lowercase();
         element["label"].as_str().is_some_and(|label| label.to_lowercase().contains(&wanted))
@@ -1115,11 +1140,12 @@ pub fn wait(args: &Args) -> Result<i32> {
     }
 }
 
-/// `find text|id` without the library: the matching elements of the accessibility tree, as `tree` lists them.
+/// `find text|id|role` without the library: the matching elements of the accessibility tree, as `tree` lists them.
 pub fn find(args: &Args) -> Result<i32> {
     let (platform, device, _) = crate::device::target(args)?;
-    let (Some(by), Some(value)) = (args.by.as_deref().filter(|by| *by == "text" || *by == "id"), &args.value) else {
-        fail!("find without the library takes `text <part of a label>` or `id <id>`", "bad_find");
+    let (Some(by), Some(value)) = (args.by.as_deref().filter(|by| ["text", "id", "role"].contains(by)), &args.value)
+    else {
+        fail!("find without the library takes `text <part of a label>`, `id <id>` or `role <type>`", "bad_find");
     };
     let elements = Screen::open(&platform, &device)?.elements()?;
     let found: Vec<&Value> = elements.iter().filter(|e| matches(e, by, value)).collect();
@@ -1186,6 +1212,11 @@ pub fn ios_hook_steps(device: &str) -> Vec<(bool, String, String)> {
         Ok(mut simulator) => vec![
             step("simulator.hid", simulator.hid_answers(), "tap, type and press without the library"),
             step("simulator.accessibility", simulator.front_app().map(|_| ()), "tree and places without the library"),
+            step(
+                crate::device::TCC_HOOK,
+                crate::device::tcc_answers(device),
+                "typing ñ, é or an emoji, and permission grant paste,",
+            ),
         ],
         Err(failure) => vec![step("simulator.hid", Err(failure), "everything without the library")],
     }
@@ -1229,6 +1260,12 @@ mod mac_only {
             unreachable!()
         }
         pub fn type_text(&mut self, _: &str) -> Result<()> {
+            unreachable!()
+        }
+        pub fn shortcut(&mut self, _: u64) -> Result<()> {
+            unreachable!()
+        }
+        pub fn has_keys(&self, _: &str) -> bool {
             unreachable!()
         }
         pub fn hid_answers(&mut self) -> Result<()> {

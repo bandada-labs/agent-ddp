@@ -1044,6 +1044,12 @@ pub fn permission(args: &mut Args) -> Result<i32> {
                 format!("xcrun simctl listapps {device}")
             );
         }
+        if name == "paste" {
+            set_paste(&device, &app, action == "grant")?;
+            let done = if action == "grant" { "allowed" } else { "denied" };
+            say!("{done} {app} to paste from other apps on {device} (Settings: Paste from Other Apps)");
+            return Ok(0);
+        }
         (capture("xcrun", &["simctl", "privacy", &device, &action, &name, &app]), name.clone())
     } else {
         let full =
@@ -1089,6 +1095,73 @@ pub fn permission(args: &mut Args) -> Result<i32> {
     };
     say!("{done} {named} for {app} on {device}{note}");
     Ok(0)
+}
+
+pub const TCC_HOOK: &str = "simulator.tcc";
+const PASTE_SERVICE: &str = "kTCCServicePasteboard";
+
+/// The simulator's privacy store: iOS keeps an app's "Paste from Other Apps" there (simctl privacy has no service for
+/// it). `auth_value` 2 is Allow, 0 Deny, 3 Ask.
+fn tcc_db(udid: &str) -> Result<PathBuf> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let db =
+        PathBuf::from(home).join(format!("Library/Developer/CoreSimulator/Devices/{udid}/data/Library/TCC/TCC.db"));
+    if !db.exists() {
+        fail!(format!("{TCC_HOOK}: no privacy store at {}", db.display()), "hook_failed", format!("ddp doctor {udid}"));
+    }
+    Ok(db)
+}
+
+fn tcc_sql(udid: &str, sql: &str) -> Result<String> {
+    let db = tcc_db(udid)?;
+    let answer = capture("sqlite3", &[&db.display().to_string(), sql]);
+    if answer.code != 0 {
+        fail!(format!("{TCC_HOOK}: {}", answer.stderr.trim()), "hook_failed", format!("ddp doctor {udid}"));
+    }
+    Ok(answer.stdout.trim().to_string())
+}
+
+/// Whether iOS lets the app paste what another app copied without asking the person.
+pub fn paste_allowed(udid: &str, app: &str) -> Result<bool> {
+    let app = app.replace('\'', "");
+    let sql = format!("select auth_value from access where service = '{PASTE_SERVICE}' and client = '{app}'");
+    Ok(tcc_sql(udid, &sql)? == "2")
+}
+
+/// For `ddp doctor`: the store answers and holds the table iOS reads.
+pub fn tcc_answers(udid: &str) -> Result<()> {
+    tcc_sql(udid, "select count(*) from access").map(|_| ())
+}
+
+/// `permission grant|revoke paste` on iOS: the app's "Paste from Other Apps" set to Allow or Deny, as Settings sets it.
+fn set_paste(udid: &str, app: &str, allow: bool) -> Result<()> {
+    let app = app.replace('\'', "");
+    let value = if allow { 2 } else { 0 };
+    tcc_sql(
+        udid,
+        &format!(
+            "insert or replace into access (service, client, client_type, auth_value, auth_reason, auth_version, flags) \
+             values ('{PASTE_SERVICE}', '{app}', 0, {value}, 4, 2, 0)"
+        ),
+    )?;
+    if paste_allowed(udid, &app)? != allow {
+        fail!(
+            format!("{TCC_HOOK}: the paste setting for {app} did not change"),
+            "hook_failed",
+            format!("ddp doctor {udid}")
+        );
+    }
+    Ok(())
+}
+
+/// The bundle id of the app with this process on a simulator, from its launchd job.
+pub fn ios_bundle_of(udid: &str, pid: i32) -> Option<String> {
+    let listed = capture("xcrun", &["simctl", "spawn", udid, "launchctl", "list"]).stdout;
+    listed.lines().find_map(|line| {
+        let mut columns = line.split_whitespace();
+        (columns.next()? == pid.to_string()).then_some(())?;
+        columns.nth(1)?.strip_prefix("UIKitApplication:")?.split('[').next().map(String::from)
+    })
 }
 
 pub fn biometric(args: &mut Args) -> Result<i32> {
@@ -1396,6 +1469,15 @@ pub fn screenshot_png(session: &Value) -> Result<Vec<u8>> {
         return Err(failure("screencap failed", "command_failed", None));
     }
     Ok(output.stdout)
+}
+
+/// `screenshot [out.png]`: what the screen shows, as the device takes it. With or without the library.
+pub fn screenshot(args: &mut Args) -> Result<i32> {
+    let (platform, device, _) = target(args)?;
+    let out = PathBuf::from(&args.out);
+    write_file(&out, screenshot_png(&json!({"platform": platform, "device": device}))?)?;
+    say!("{}: the screen of {device}", out.display());
+    Ok(0)
 }
 
 pub fn annotate(args: &mut Args) -> Result<i32> {

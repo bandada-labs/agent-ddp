@@ -97,7 +97,7 @@ Every result has `ms`, the time spent on the device.
 | `input.tap`, `input.doubleTap` | a place | |
 | `input.longPress` | a place, `ms` (600) | |
 | `input.drag` | `from`, `to` places, `ms` (300), `hold` (0), `still` (0: ms held at the end before letting go, so nothing flings) | |
-| `input.type` | `text` (ASCII) | |
+| `input.type` | `text` | key presses; text the keyboard map has no keys for is set into the focused field at its cursor (`ACTION_SET_TEXT`) |
 | `input.clear` | | empties the focused field: Ctrl+A, then Delete (fails when nothing has input focus) |
 | `input.key` | `key`: `Enter`, `Tab`, `Backspace`, `Back`, `Escape`, `Up`, `Down`, `Left`, `Right`; `Home`, `Recents`, `Notifications` as global actions | |
 | `screen.find` | `label` | `found`, `frame` |

@@ -407,6 +407,8 @@ pub fn parser() -> Command {
             .arg(opt("max", "exit 1 when more than this share of pixels differ overall (5 or 5%)"))
             .arg(opt("max-band", "exit 1 when more than this share of pixels differ in any band (20 or 20%)"))
             .arg(opt("out", "where to write the side-by-side PNG").default_value("ddp-compare.png")))
+        .subcommand(device_options(sub("screenshot", "the screen as the device takes it, as a PNG (pixels)")
+            .arg(positional("out", "where to write the PNG").default_value("ddp-screen.png"))))
         .subcommand(sub("annotate", "live: a screenshot with numbered boxes, label N is @eN")
             .arg(positional("out", "where to write the PNG").default_value("ddp-annotated.png")))
         .subcommand(sub("explore", "live: tap each control once, record it, run check all on each")
@@ -438,7 +440,7 @@ pub fn parser() -> Command {
             .arg(opt("to", "time (1.5s, 1500ms)").id("end"))
             .arg(flag("curve", "each move as from -> to, duration, delay and easing (or spring overshoot)")))))
         .subcommand(file(window(sub("find", "elements by text or id, or drawn nodes matching --where")
-            .arg(positional("by", "text | id"))
+            .arg(positional("by", "text | id | role (without the library: the type tree prints)"))
             .arg(positional("value", "part of a label (text) or an element id (id)"))
             .arg(opt("where", "e.g. 'kind=draw and alpha>0'; fields: t z kind op owner source fill border \
                                borderColor corner opacity alpha x y w h; operators = != > < >= <= ~(contains)"))

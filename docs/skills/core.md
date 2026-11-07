@@ -87,6 +87,8 @@ ddp tree -i                  # elements only (about half the output)
 ddp tree -c --file rec       # only elements that change in the take, plus their parents
 ddp tree --within @e4 -d 1   # one part of the screen, one level deep
 ddp find text "Picked"       # elements by part of a label, no tree needed
+ddp find role Switch         # without the library: elements of a type, as tree prints it
+ddp screenshot shot.png      # the screen in pixels, with or without the library
 ddp find id flashBox
 ddp get @e3 --from 1s --to 1.5s
 ddp get @e3 --curve          # each move: 0 -> 4 over 400ms from 550ms, easeInOut
@@ -148,8 +150,8 @@ ddp tree                         # the platform's accessibility tree with refs; 
 ddp tap "Add"                    # by label, id or ref; prints what changed, with refs; no checks (no SDK)
 ddp wait text "Saved"            # wait id|text [--gone], wait --settled 300ms and find text|id read the same tree
 ddp scroll down --to "Privacy"   # slow, no fling; scroll up|down|left|right [--in <list>] alone moves once
-ddp type "ana@x.io" --into "Email" --clear   # empties the field first; press Escape|Up|Down|Left|Right, Android Home|Recents|Notifications
-ddp permission grant camera      # iOS simctl privacy service, Android runtime permission the app declares (CAMERA); ddp devices lists what runs
+ddp type "mañana" --into "Email" --clear   # empties the field first; non-ASCII goes in as a paste (iOS, after permission grant paste) or set text (Android); press Escape|Up|Down|Left|Right, Android Home|Recents|Notifications
+ddp permission grant camera      # iOS simctl privacy service or paste, Android runtime permission the app declares (CAMERA); ddp devices lists what runs
 ddp walk start "add a note, then delete it"   # every action from here is a step with a screenshot
 ddp walk expect "Note deleted"   # a check the replay repeats
 ddp walk end pass                # one line per step, the file, the screenshots
