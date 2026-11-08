@@ -146,7 +146,7 @@ fn screen_against(args: &Args, reference_path: &Path, out: &Path) -> Result<Diff
 
 /// Where the elements are on the device's screenshot: points times the scale on iOS, pixels from the activity
 /// window's place on the screen on Android.
-fn on_screen(keys: &[String]) -> Result<Vec<[f64; 4]>> {
+pub fn on_screen(keys: &[String]) -> Result<Vec<[f64; 4]>> {
     let session = crate::live::require_session()?;
     let recording = snapshot_live(&session)?;
     let frame = recording.frames.last().unwrap();

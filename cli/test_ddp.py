@@ -826,7 +826,7 @@ with tempfile.TemporaryDirectory() as directory:
     adb_log = Path(directory, "adb.log")
     fake_adb.write_text(f"#!/bin/sh\necho \"$*\" >> {adb_log}\n"
                         "if [ \"$1\" = devices ]; then printf 'List of devices attached\\nrunner-fake\\tdevice\\n'; exit 0; fi\n"
-                        "if [ \"$3\" = exec-out ]; then printf 'PNG bytes'; exit 0; fi\n"
+                        f"if [ \"$3\" = exec-out ]; then cat {Path(directory, 'screen.png')} 2>/dev/null || printf 'PNG bytes'; exit 0; fi\n"
                         "if [ \"$4\" = dumpsys ]; then echo '        android.permission.CAMERA: granted=true, flags=[ ]'; exit 0; fi\n"
                         f"echo 'runner-fake tcp:{app.port} localabstract:agentddp.runner.control'\n")
     fake_adb.chmod(0o755)
@@ -934,6 +934,18 @@ with tempfile.TemporaryDirectory() as directory:
     shot = ddp_in(directory, "screenshot", Path(directory, "s.png"), "--device", "runner-fake", env=host)
     assert shot.stdout.endswith("s.png: the screen of runner-fake\n") and Path(directory, "s.png").read_bytes() == b"PNG bytes", \
         shot.stdout + shot.stderr
+    # One element cut from the screen: pixel x,y of this screen is (x, y, 7), so the cut shows where it came from.
+    raw = b"".join(b"\x00" + b"".join(bytes([x, y, 7]) for x in range(240)) for y in range(160))
+    chunk = lambda kind, body: struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body))
+    Path(directory, "screen.png").write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 240, 160, 8, 2, 0, 0, 0))
+                                             + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+    cut = ddp_in(directory, "screenshot", Path(directory, "save.png"), "--of", "Save", "--device", "runner-fake", env=host)
+    assert cut.stdout.endswith("save.png: Save on runner-fake, 200x80 pixels at 10,20\n"), cut.stdout + cut.stderr
+    written = Path(directory, "save.png").read_bytes()
+    assert struct.unpack(">II", written[16:24]) == (200, 80), written[:32]
+    first = zlib.decompress(written[written.index(b"IDAT") + 4:written.index(b"IEND") - 8])
+    assert first[1:4] == bytes([10, 20, 7]) and first[1 + 199 * 4:1 + 199 * 4 + 3] == bytes([209, 20, 7]), first[:8]
+    Path(directory, "screen.png").unlink()
     late = ddp_in(directory, "wait", "id", "nope", "--timeout", "300ms", "--device", "runner-fake", env=host)
     assert late.returncode == 1 and "timed out after 300ms waiting for id nope" in late.stderr, late.stderr
     # Off screen: not in tree, and an element that scrolls out of view moved, it did not go.

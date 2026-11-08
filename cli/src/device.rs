@@ -1471,12 +1471,34 @@ pub fn screenshot_png(session: &Value) -> Result<Vec<u8>> {
     Ok(output.stdout)
 }
 
-/// `screenshot [out.png]`: what the screen shows, as the device takes it. With or without the library.
+/// `screenshot [out.png] [--of <element>]`: what the screen shows, as the device takes it, or the part one element
+/// covers. With or without the library.
 pub fn screenshot(args: &mut Args) -> Result<i32> {
     let (platform, device, _) = target(args)?;
     let out = PathBuf::from(&args.out);
-    write_file(&out, screenshot_png(&json!({"platform": platform, "device": device}))?)?;
-    say!("{}: the screen of {device}", out.display());
+    let Some(element) = args.id.clone() else {
+        write_file(&out, screenshot_png(&json!({"platform": platform, "device": device}))?)?;
+        say!("{}: the screen of {device}", out.display());
+        return Ok(0);
+    };
+    let [x, y, w, h] = match crate::runner::device_mode(args) {
+        true => crate::runner::element_pixels(args, &element)?,
+        false => crate::compare::on_screen(std::slice::from_ref(&element))?[0],
+    };
+    let (width, height, rows) = png_read(&screenshot_png(&json!({"platform": platform, "device": device}))?)?;
+    let (left, top) = (x.max(0.0).round() as usize, y.max(0.0).round() as usize);
+    let (right, bottom) =
+        (((x + w).round().max(0.0) as usize).min(width), ((y + h).round().max(0.0) as usize).min(height));
+    if right <= left || bottom <= top {
+        fail!(
+            format!("'{element}' has no part on screen"),
+            "off_screen",
+            format!("ddp scroll down --to '{element}', then the screenshot again")
+        );
+    }
+    let cut: Vec<Vec<u8>> = rows[top..bottom].iter().map(|row| row[left * 4..right * 4].to_vec()).collect();
+    write_file(&out, png_write(right - left, bottom - top, &cut))?;
+    say!("{}: {element} on {device}, {}x{} pixels at {left},{top}", out.display(), right - left, bottom - top);
     Ok(0)
 }
 

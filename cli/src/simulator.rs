@@ -339,6 +339,11 @@ impl Drop for Simulator {
 }
 
 impl Simulator {
+    /// Pixels per point of the simulator's screen.
+    pub fn scale(&self) -> f64 {
+        self.scale
+    }
+
     /// A booted simulator, by UDID, through CoreSimulator in this process.
     pub fn open(udid: &str) -> Result<Simulator> {
         let core_simulator = c"/Library/Developer/PrivateFrameworks/CoreSimulator.framework/CoreSimulator";

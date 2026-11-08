@@ -808,6 +808,20 @@ fn confirmed(screen: &mut Screen, appeared: Vec<String>) -> Result<Vec<String>> 
     Ok(appeared.into_iter().filter(|label| later.contains(label)).collect())
 }
 
+/// Where an element is on the device's screenshot, in its pixels: Android's tree is in pixels, iOS's in points.
+pub fn element_pixels(args: &Args, text: &str) -> Result<[f64; 4]> {
+    let (platform, device, _) = crate::device::target(args)?;
+    let mut screen = Screen::open(&platform, &device)?;
+    let scale = match &screen {
+        Screen::Ios(simulator) => simulator.scale(),
+        Screen::Android(_) => 1.0,
+    };
+    let Some(element) = place(&screen.elements()?, text, args.id_from_ref, &device)?.seen else {
+        fail!(format!("no element at {text}"), "unknown_element", format!("ddp tree --device {device}"));
+    };
+    Ok(crate::model::rect(&element["frame"]).map(|v| v * scale))
+}
+
 /// The elements on screen now, for walks: the platform's accessibility tree.
 pub fn elements_now(platform: &str, device: &str) -> Result<Vec<Value>> {
     Screen::open(platform, device)?.elements()
@@ -1302,6 +1316,9 @@ mod mac_only {
             unreachable!()
         }
         pub fn has_keys(&self, _: &str) -> bool {
+            unreachable!()
+        }
+        pub fn scale(&self) -> f64 {
             unreachable!()
         }
         pub fn hid_answers(&mut self) -> Result<()> {

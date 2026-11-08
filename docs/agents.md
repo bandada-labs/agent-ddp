@@ -70,7 +70,7 @@ ddp debug <FILE:LINE> [--for 30s] [--then CMD]     stop once at a line: the stac
 ddp inspect [--for 30s]                            a person taps an element on the phone; ddp says which
 ddp highlight <element> [--for 3s]                 a box over the element in the live app, for a person watching
 ddp open <deep link or URL>
-ddp screenshot [out.png] [--device <d>]            the screen as the device takes it (pixels), with or without the library
+ddp screenshot [out.png] [--of <element>] [--device <d>]   the screen as the device takes it (pixels), or one element cut from it
 ddp annotate [out.png]                             screenshot with numbered boxes, label N is @eN
 ddp compare --reference <image> [--out ddp-compare.png]   the screen against a reference screenshot
 ddp compare <element> --reference <image>          one element against a reference image of it

@@ -88,7 +88,7 @@ ddp tree -c --file rec       # only elements that change in the take, plus their
 ddp tree --within @e4 -d 1   # one part of the screen, one level deep
 ddp find text "Picked"       # elements by part of a label, no tree needed
 ddp find role Switch         # without the library: elements of a type, as tree prints it
-ddp screenshot shot.png      # the screen in pixels, with or without the library
+ddp screenshot shot.png      # the screen in pixels, with or without the library; --of @e7: only that element
 ddp find id flashBox
 ddp get @e3 --from 1s --to 1.5s
 ddp get @e3 --curve          # each move: 0 -> 4 over 400ms from 550ms, easeInOut
