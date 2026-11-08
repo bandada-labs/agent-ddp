@@ -41,6 +41,19 @@ impl Frame {
         self.by_key.get(key).map(|&i| &self.elements()[i])
     }
 
+    /// The element a person named: by its key, else by its label (an element with an id is keyed by it). A label
+    /// more than one element has names none of them.
+    pub fn named(&self, text: &str) -> Option<&Value> {
+        if let Some(element) = self.element(text) {
+            return Some(element);
+        }
+        let mut labeled = self.elements().iter().filter(|e| e["label"] == text);
+        match (labeled.next(), labeled.next()) {
+            (Some(element), None) => Some(element),
+            _ => None,
+        }
+    }
+
     pub fn owned(&self, key: Option<&str>) -> Vec<&Value> {
         let nodes = self.nodes();
         self.by_owner

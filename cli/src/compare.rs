@@ -8,7 +8,7 @@ use crate::args::Args;
 use crate::device::{png_read, png_write, screenshot_png, target};
 use crate::inspect::{base64, SAME};
 use crate::live::{open, snapshot_live};
-use crate::model::rect;
+use crate::model::{element_key, rect};
 use crate::py;
 use crate::state::{self, failure, read_json, write_file, Result};
 use crate::{fail, say};
@@ -150,23 +150,28 @@ pub fn on_screen(keys: &[String]) -> Result<Vec<[f64; 4]>> {
     let session = crate::live::require_session()?;
     let recording = snapshot_live(&session)?;
     let frame = recording.frames.last().unwrap();
+    let elements = keys
+        .iter()
+        .map(|key| match frame.named(key) {
+            Some(element) => Ok(element),
+            None => Err(failure(format!("no element '{key}' on screen"), "unknown_element", Some("ddp tree -i"))),
+        })
+        .collect::<Result<Vec<_>>>()?;
     let (scale, origin) = if session["platform"] == "ios" {
         (recording.header.get("scale").map(py::f).unwrap_or(1.0), [0.0, 0.0])
     } else {
         let mut control = open(&session)?;
-        let answer = control.call("screen.hit", json!({"id": keys[0]}))?;
+        let answer = control.call("screen.hit", json!({"id": element_key(elements[0])}))?;
         control.close();
         (1.0, [py::f(&answer["origin"][0]), py::f(&answer["origin"][1])])
     };
-    keys.iter()
-        .map(|key| {
-            let Some(element) = frame.element(key) else {
-                fail!(format!("no element '{key}' on screen"), "unknown_element", "ddp tree -i");
-            };
+    Ok(elements
+        .iter()
+        .map(|element| {
             let [x, y, w, h] = rect(&element["frame"]);
-            Ok([(x + origin[0]) * scale, (y + origin[1]) * scale, w * scale, h * scale])
+            [(x + origin[0]) * scale, (y + origin[1]) * scale, w * scale, h * scale]
         })
-        .collect()
+        .collect())
 }
 
 /// `x,y,w,h` in the screenshot's pixels.
@@ -394,7 +399,7 @@ impl Piece {
 fn element_pixels(session: &Value, key: &str, ignore: &[String]) -> Result<Piece> {
     let recording = snapshot_live(session)?;
     let frame = recording.frames.last().unwrap();
-    let place = |key: &str| match frame.element(key) {
+    let place = |key: &str| match frame.named(key) {
         Some(element) => Ok(rect(&element["frame"])),
         None => Err(failure(format!("no element '{key}' on screen"), "unknown_element", Some("ddp tree -i"))),
     };

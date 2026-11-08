@@ -438,6 +438,16 @@ fn miui_input_step(adb: &str, device: &str) -> Option<Step> {
     ))
 }
 
+/// Whether `dumpsys activity activities` has the app's activity resumed in front: Android 12 and later name it
+/// `topResumedActivity`, Android 11 `mResumedActivity` and `ResumedActivity:`.
+fn resumed_in_front(activities: &str, app: &str) -> bool {
+    let top = format!(" {app}/");
+    activities.lines().map(str::trim_start).any(|line| {
+        ["topResumedActivity", "mResumedActivity", "ResumedActivity:"].iter().any(|name| line.starts_with(name))
+            && line.contains(&top)
+    })
+}
+
 /// When the app is not in front, starts it or brings it there (never a restart), since the checks after read its
 /// screen, and waits for its library's endpoint. Nothing when it already is in front.
 fn front_step(platform: &str, device: &str, app: &str) -> Option<Step> {
@@ -449,8 +459,7 @@ fn front_step(platform: &str, device: &str, app: &str) -> Option<Step> {
         let adb = adb_path().ok()?;
         let running = !capture(&adb, &["-s", device, "shell", "pidof", app]).stdout.trim().is_empty();
         let activities = capture(&adb, &["-s", device, "shell", "dumpsys", "activity", "activities"]).stdout;
-        let top = format!(" {app}/");
-        (running, activities.lines().any(|line| line.contains("topResumedActivity") && line.contains(&top)))
+        (running, resumed_in_front(&activities, app))
     };
     if in_front {
         return None;
@@ -588,4 +597,18 @@ pub fn batch(args: &mut Args) -> Result<i32> {
         }
     }
     Ok(worst)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn resumed_in_front_reads_android_11_and_later() {
+        let android_11 = "    mResumedActivity: ActivityRecord{e1cbaf4 u0 dev.agentddp.sample/.MainActivity t227}\n";
+        let android_16 = "  topResumedActivity=ActivityRecord{9b2 u0 dev.agentddp.sample/.MainActivity t12}\n";
+        let behind = "    mLastPausedActivity: ActivityRecord{1 u0 dev.agentddp.sample/.MainActivity t3}\n";
+        assert!(super::resumed_in_front(android_11, "dev.agentddp.sample"));
+        assert!(super::resumed_in_front(android_16, "dev.agentddp.sample"));
+        assert!(!super::resumed_in_front(behind, "dev.agentddp.sample"));
+        assert!(!super::resumed_in_front(android_11, "dev.agentddp"));
+    }
 }

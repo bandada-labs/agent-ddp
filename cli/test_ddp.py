@@ -695,6 +695,8 @@ with tempfile.TemporaryDirectory() as directory:
     refused = ddp_in(directory, "tap", "locked")
     assert refused.returncode == 1 and "locked is covered by scrim" in refused.stderr, refused.stderr
     assert "tapped locked at (50, 75)" in ddp_in(directory, "tap", "locked", "--force").stdout
+    # An element with an id is named by its label too, when no other element has that label.
+    assert "tapped Locked at (50, 75)" in ddp_in(directory, "tap", "Locked", "--force").stdout
     intercepted = ddp_in(directory, "tap", "row")
     assert intercepted.returncode == 1 and \
         "row is taken first by a parent's BlockingLayout (onInterceptTouchEvent)" in intercepted.stderr, intercepted.stderr
@@ -827,6 +829,7 @@ with tempfile.TemporaryDirectory() as directory:
     fake_adb.write_text(f"#!/bin/sh\necho \"$*\" >> {adb_log}\n"
                         "if [ \"$1\" = devices ]; then printf 'List of devices attached\\nrunner-fake\\tdevice\\n'; exit 0; fi\n"
                         f"if [ \"$3\" = exec-out ]; then cat {Path(directory, 'screen.png')} 2>/dev/null || printf 'PNG bytes'; exit 0; fi\n"
+                        "if [ \"$7\" = android.permission.NOPE ]; then printf \"Exception occurred while executing 'grant':\\njava.lang.SecurityException: Package other has not requested permission android.permission.NOPE\\n\\tat com.android.server.pm\\n\" >&2; exit 255; fi\n"
                         "if [ \"$4\" = dumpsys ]; then echo '        android.permission.CAMERA: granted=true, flags=[ ]'; exit 0; fi\n"
                         f"echo 'runner-fake tcp:{app.port} localabstract:agentddp.runner.control'\n")
     fake_adb.chmod(0o755)
@@ -1000,6 +1003,9 @@ with tempfile.TemporaryDirectory() as directory:
     assert granted.stdout == "granted android.permission.CAMERA for other on runner-fake\n", granted.stdout + granted.stderr
     silent = ddp_in(directory, "permission", "grant", "post_notifications", "--session", "front", env=host)
     assert silent.returncode == 1 and "did nothing: other does not ask for android.permission.POST_NOTIFICATIONS" in silent.stderr, silent.stderr
+    # Older Android refuses with an exception: its reason is said, not pm's "Exception occurred" line.
+    refused = ddp_in(directory, "permission", "grant", "nope", "--session", "front", env=host)
+    assert refused.returncode == 1 and "grant android.permission.NOPE for other on runner-fake failed: Package other has not requested permission android.permission.NOPE\n" in refused.stderr, refused.stderr
     # Parity compares the labels that appeared after each step, not elements: iOS keys a button by id, Android by label.
     walks = Path(directory, ".ddp", "walks")
     (walks / "save-the-form.ios.replay.json").write_text(json.dumps({"ok": True, "steps": [

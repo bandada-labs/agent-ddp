@@ -30,6 +30,9 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 
 ### Fixed
 
+- With the library, an element that has an id could not be named by its label (`tap Busy` said "no element", `tap busyButton` worked), though `tap` takes an id, a label or a ref. A label now names the one element that has it; a label more than one element has names none.
+- `ddp doctor` on Android 11 said the app was not in front and brought it there when it already was: Android 11 names the resumed activity `mResumedActivity`, not `topResumedActivity`.
+- Android `permission grant|revoke` refused by an older Android said only "Exception occurred while executing 'grant'"; it now says why (`has not requested permission`, `Unknown permission`).
 - Android without the library: a key the system refused still read as pressed; the runner now checks each key it sends, as it did for touches.
 - Android without the library: `type` waited for each key event before the next, about 240 ms a character in a Compose field. Only the last one waits now: 10 characters went from 2.4 s to 0.8 s.
 - Android without the library: `press Enter`, `Tab` and `Backspace` did nothing. The runner's key events carried no time, and the system dropped them as stale. They now carry the time they are sent.

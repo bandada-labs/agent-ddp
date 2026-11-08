@@ -138,7 +138,7 @@ fn adb(device: &str, command: &[&str]) -> Result<state::Output> {
 fn element_center(session: &Value, id: &str) -> Result<(f64, f64)> {
     let recording = snapshot_live(session)?;
     let frame = recording.frames.last().unwrap();
-    let Some(element) = frame.elements().iter().find(|e| element_key(e) == id) else {
+    let Some(element) = frame.named(id) else {
         fail!(format!("no element '{id}' on screen"), "unknown_element", "ddp tree -i");
     };
     let [x, y, w, h] = rect(&element["frame"]);
@@ -174,7 +174,7 @@ pub fn type_text(args: &mut Args) -> Result<i32> {
     let mut places = Vec::new();
     if let Some(id) = &args.id {
         let at = element_center(&session, id)?;
-        let field = crate::hit::frame_now(&session)?.element(id).map(crate::hit::seen);
+        let field = crate::hit::frame_now(&session)?.named(id).map(crate::hit::seen);
         places.push((id.clone(), at, field));
         touch(&mut control, at)?;
         // The field takes the focus on a later turn of the main loop; typed text before that goes nowhere.
@@ -1059,7 +1059,13 @@ pub fn permission(args: &mut Args) -> Result<i32> {
     let said = format!("{}{}", answer.stdout, answer.stderr);
     // pm prints its refusal as an exception and, on older Android, still exits 0.
     if answer.code != 0 || said.contains("Exception") {
-        let why = said.lines().find(|line| !line.trim().is_empty()).unwrap_or("no answer").trim().to_string();
+        // pm says "Exception occurred while executing 'grant':", then the exception with the reason.
+        let lines: Vec<&str> = said.lines().map(str::trim).filter(|line| !line.is_empty()).collect();
+        let why = lines
+            .iter()
+            .find_map(|line| line.split_once("Exception: ").map(|(_, reason)| reason))
+            .or(lines.first().copied())
+            .unwrap_or("no answer");
         fail!(
             format!("{action} {named} for {app} on {device} failed: {why}"),
             "command_failed",

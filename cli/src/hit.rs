@@ -36,7 +36,7 @@ pub fn tap(args: &mut Args) -> Result<i32> {
     }
     let started = Instant::now();
     let before = snapshot_live(&session)?;
-    let Some(element) = before.frames.last().unwrap().element(&key).cloned() else {
+    let Some(element) = before.frames.last().unwrap().named(&key).cloned() else {
         fail!(format!("no element '{key}' on screen"), "unknown_element", "ddp tree -i");
     };
     let mut control = open(&session)?;
@@ -381,7 +381,7 @@ pub fn gesture(args: &mut Args) -> Result<i32> {
     let started = Instant::now();
     let mut control = open(&session)?;
     // A press on an element waits, like tap, until the app's hit test says a touch reaches it, and goes where it does.
-    let from = match (&gesture[..], frame.element(&from_text)) {
+    let from = match (&gesture[..], frame.named(&from_text)) {
         ("double-tap" | "long-press", Some(element)) if !args.force => {
             let (hit, _) = wait_until_tappable(&mut control, &gesture, &from_text, element)?;
             (f(&hit["point"][0]), f(&hit["point"][1]))
@@ -453,7 +453,7 @@ pub fn highlight(args: &mut Args) -> Result<i32> {
     let session = require_session()?;
     let key = args.id.clone().unwrap_or_default();
     let recording = snapshot_live(&session)?;
-    let Some(element) = recording.frames.last().unwrap().element(&key).cloned() else {
+    let Some(element) = recording.frames.last().unwrap().named(&key).cloned() else {
         fail!(format!("no element '{key}' on screen"), "unknown_element", "ddp tree -i");
     };
     let ms = args.duration.as_deref().map(crate::state::parse_ms).transpose()?.unwrap_or(3000.0);
@@ -466,7 +466,7 @@ pub fn highlight(args: &mut Args) -> Result<i32> {
 fn place_seen(frame: &Frame, text: &str, at: (f64, f64)) -> Option<Value> {
     match point(text) {
         Some(_) => under(frame, at),
-        None => frame.element(text).map(seen),
+        None => frame.named(text).map(seen),
     }
 }
 
@@ -475,7 +475,7 @@ fn place(frame: &Frame, text: &str) -> Result<(f64, f64)> {
     if let Some(point) = point(text) {
         return Ok(point);
     }
-    let Some(element) = frame.element(text) else {
+    let Some(element) = frame.named(text) else {
         fail!(format!("no element '{text}' on screen"), "unknown_element", "ddp tree -i, or give x,y");
     };
     let [x, y, w, h] = rect(&element["frame"]);
