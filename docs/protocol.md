@@ -94,6 +94,7 @@ Every result has `ms`, the time spent on the device.
 | Method | Params | Result |
 | --- | --- | --- |
 | `app.info` | | `platform`, `unit` (`px`), `scale`, `screen`, `app` (package in front) |
+| `input.ready` | | nothing: fails as every `input.*` method does while the screen is off or locked (version 8) |
 | `input.tap`, `input.doubleTap` | a place | |
 | `input.longPress` | a place, `ms` (600) | |
 | `input.drag` | `from`, `to` places, `ms` (300), `hold` (0), `still` (0: ms held at the end before letting go, so nothing flings) | |
@@ -104,8 +105,10 @@ Every result has `ms`, the time spent on the device.
 | `screen.elements` | | `elements`: `type`, `label`, `id`, `frame` [x,y,w,h], `tap`, `enabled`; `shown: false` for one the app holds off screen (scrolled away, under the keyboard's pan); `parent`, the place in `elements` of the nearest listed node above it (version 4); `value` (a field's typed text; its `label` is the hint), `checked`, `selected`, `focused`, `password`, `error`, `expanded` (version 5) |
 | `runner.stop` | | |
 
-`app.info` answers `runner`, the runner's version (5). It takes UiAutomation with
-`FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES`, so TalkBack and other services keep running while it does. A ddp that finds a runner with another version running stops it
+`app.info` answers `runner`, the runner's version (8). It takes UiAutomation with
+`FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES`, so TalkBack and other services keep running while it does, and holds a
+screen wake lock while it runs. Every `input.*` method fails while the screen is off or locked
+(`the screen is locked: unlock the device`), and a key or touch the system refuses fails it. A ddp that finds a runner with another version running stops it
 and installs its own. The runner ends itself after 5 minutes without a request: it holds UiAutomation, which one process
 at a time may have, and the app's own UI tests need it.
 

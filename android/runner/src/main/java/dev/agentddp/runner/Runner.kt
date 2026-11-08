@@ -125,6 +125,8 @@ class Runner : Instrumentation() {
                 .put("app", automation.rootInActiveWindow?.packageName?.toString())
                 .put("runner", VERSION)
         }
+        // Nothing to do: the lock check every input method gets is the answer.
+        "input.ready" -> JSONObject()
         "input.tap" -> point(params).let { (x, y) -> tap(x, y); JSONObject() }
         "input.doubleTap" -> point(params).let { (x, y) ->
             tap(x, y)
@@ -378,7 +380,7 @@ class Runner : Instrumentation() {
         const val FRAME_MS = 16L
         const val ROOT_WAIT_MS = 2000L
         /** Raised when what the runner answers changes; the CLI replaces a runner with another number. */
-        const val VERSION = 7
+        const val VERSION = 8
         const val FOCUS_WAIT_MS = 1000L
         const val IDLE_MS = 5 * 60_000L
         const val IDLE_CHECK_MS = 10_000L

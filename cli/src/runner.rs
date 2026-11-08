@@ -23,7 +23,7 @@ const APK: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/runner.apk"));
 /// `am instrument` to the socket open took 2 s on a warm emulator, 21 s on one booted a minute before.
 const START_PATIENCE: Duration = Duration::from_secs(40);
 /// The runner's `VERSION` (Runner.kt) this ddp speaks.
-const RUNNER_VERSION: u64 = 7;
+const RUNNER_VERSION: u64 = 8;
 const POLL: Duration = Duration::from_millis(100);
 
 /// What every runner answer ends with: the runner did it, nothing was checked.
@@ -159,6 +159,15 @@ impl Screen {
     /// What is on screen: `type`, `label`, `id`, `value`, `frame`, and `tap`/`enabled` where the platform says.
     /// Named as the library names them: elements that share a label are `Delete`, `Delete [2]` in reading order, so
     /// a ref or a name points at one element, never at the first of several.
+    /// Android refuses a touch on a dark or locked screen: asked before a target is looked for, since the tree of a
+    /// lock screen would read as "no element" and point at a scroll.
+    fn ready(&mut self) -> Result<()> {
+        if let Screen::Android(control) = self {
+            control.call("input.ready", json!({}))?;
+        }
+        Ok(())
+    }
+
     /// What a person sees: the elements on screen.
     fn elements(&mut self) -> Result<Vec<Value>> {
         Ok(on_screen(&self.look()?))
@@ -797,6 +806,7 @@ fn perform(
 ) -> Result<i32> {
     let (platform, device, app) = crate::device::target(args)?;
     let mut screen = Screen::open(&platform, &device)?;
+    screen.ready()?;
     let looking = Instant::now();
     let mut before = screen.look()?;
     let (action, places) = loop {
@@ -978,6 +988,7 @@ pub fn scroll(args: &Args) -> Result<i32> {
     };
     let (platform, device, _) = crate::device::target(args)?;
     let mut screen = Screen::open(&platform, &device)?;
+    screen.ready()?;
     let started = Instant::now();
     // A screen still moving (the last command's transition) would give a place that is gone a moment later.
     let first = screen.look()?;

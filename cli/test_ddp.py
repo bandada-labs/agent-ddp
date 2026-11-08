@@ -431,6 +431,7 @@ class FakeApp:
         self.total, self.mode = 0, "idle"
         self.toggles, self.wifi, self.scrolled = False, False, False
         self.touches, self.runner, self.saved, self.hide_save, self.rows = [], [], False, False, False
+        self.locked = False
         self.scrolls, self.save_late, self.late_id = False, 0, False
         self.server = socket.socket()
         self.server.bind(("127.0.0.1", 0))
@@ -528,6 +529,9 @@ class FakeApp:
                     pixels = base64.b64encode(bytes([0, 0, 255, 255] * 4 + [255, 255, 255, 255] * 4)).decode()
                     result = {"scale": 3, "regions": [{"x": 0, "y": 0, "width": 4, "height": 2, "rgba": pixels}
                                                       for _ in params["rects"]]}
+                elif method == "input.ready" and self.locked:
+                    send({"id": message["id"], "error": {"code": -32000, "message": "the screen is locked: unlock the device"}})
+                    continue
                 elif method in ("input.tap", "input.doubleTap", "input.longPress", "input.drag", "input.clear"):
                     # The Android runner, for an app without the library: a tap on Save shows "Saved", on Wi-Fi turns
                     # it on; a scroll shows what is below the fold.
@@ -860,6 +864,11 @@ with tempfile.TemporaryDirectory() as directory:
     # An action says what changed, with the ref to act on next, once the screen settles.
     saved = ddp_in(directory, "tap", "Save", "--device", "runner-fake", env=host)
     assert re.search(r'tap Save on runner-fake in \d+ms; new: @e\d+ "Saved"; no checks', saved.stdout), saved.stdout + saved.stderr
+    # A locked screen is said before the target is looked for: its tree would read as "no element".
+    app.locked, sent = True, len(app.runner)
+    locked = ddp_in(directory, "tap", "Nope", "--device", "runner-fake", env=host)
+    assert locked.returncode == 1 and "the screen is locked: unlock the device" in locked.stderr and len(app.runner) == sent, locked.stderr
+    app.locked = False
     gone = ddp_in(directory, "tap", "Nope", "--device", "runner-fake", env=host)
     assert gone.returncode == 1 and "no element 'Nope'" in gone.stderr and "next: ddp scroll down --to 'Nope' --device runner-fake (or up), or ddp tree --device runner-fake" in gone.stderr, gone.stderr
     # An element missing from the tree for a few looks is waited for, as `tap` with the library waits.
