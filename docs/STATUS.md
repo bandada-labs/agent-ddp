@@ -1,12 +1,14 @@
 # Status
 
-Last update: 2026-11-06. Read this after a break, then [DECISIONS.md](DECISIONS.md).
+Last update: 2026-11-08. Read this after a break, then [DECISIONS.md](DECISIONS.md).
 
 ## In one paragraph
 
 A small library inside a Debug build of an iOS or Android app serves what the app draws, frame by frame (ADR 0001). The `ddp` CLI, one Rust binary on npm (ADR 0002, 0003), reads it live or from recordings and prints short text for coding agents (ADR 0006). The protocol between them is versioned (ADR 0004). A flight recorder keeps the last 15 minutes on both platforms (ADR 0005).
 
 ## Released
+
+0.5.0 on 2026-11-08 (CLI and both libraries; npm, GitHub release with 5 binaries, JitPack `v0.5.0`, SwiftPM from the repo URL): apps without the library on both platforms (Android through ddp's runner instrumentation, a tap in about 35 ms; iOS from the Mac through the simulator's HID and accessibility services, about 200 ms a command, no XCTest), `ddp up` / `ddp down` for a device of ddp's own, every action printing what changed with refs, `ddp walk` with replay and parity and no model, `scroll`, `screenshot`, `permission`, `devices`, element state marks, and Android phones (MIUI). Checked before the tag: an app team's beta use from 2026-11-06 to 2026-11-08 (24 betas, every report fixed), live runs on the iOS 27.0 simulator, API 35 and 36 emulators (the sample on Compose 1.7.6 and 1.9.0) and a Redmi Note 8 (MIUI, Android 11), each against the library as truth where the app had it. What is in it: [CHANGELOG.md](../CHANGELOG.md).
 
 0.4.0 on 2026-11-03 (CLI and both libraries; npm, GitHub release with 5 binaries, JitPack `v0.4.0`, SwiftPM from the repo URL): `ddp source`, which names the line of the app's code that made an element (Android: the composable calls and modifiers, from the compiler's source information; iOS: the SwiftUI view that wrote it, with its modifiers, or where a UIKit view was created), `ddp recompositions` on Android, Compose `Icon` and `Image` as bitmap nodes, `connect --wait`, and fixes from both device passes. Checked before the tag: CI's three jobs, and the new commands live on the Android emulator and on the iOS 27.0 simulator with the sample apps. What is in it: [CHANGELOG.md](../CHANGELOG.md).
 
@@ -18,15 +20,9 @@ A small library inside a Debug build of an iOS or Android app serves what the ap
 
 0.1.5 on 2026-10-23.
 
-## In progress: 0.5.0 (not released)
-
-An app team uses an unofficial beta (0.5.0-beta.N, not on npm) as its only device tool and reports gaps; beta.4 (2026-11-06) fixed its first 12 findings, checked live on both platforms (19 iOS and 16 Android no-SDK taps against the library: 0 false positives, 0 misses).
-
-Done and checked live on the iOS 27.0 simulator and the API 36 emulator with the sample apps: `ddp up` / `ddp down` (own device from a warm base, boot under 10 s); apps without the library on both platforms (`--device`, or a session `up` keeps): Android through ddp's runner instrumentation (a tap in about 35 ms), iOS from the Mac through the simulator's HID and accessibility services (about 200 ms per command, no XCTest); every action prints what changed with refs; `ddp walk` start, expect, end, replay with no model, and parity between iOS and Android (a walk made on iOS replayed on Android, parity 0 differences). beta.16 (2026-11-07) adds, without the library, `scroll` (and `--to`), `type --clear`, more keys, `wait --gone`, element state marks, the Android "in front" note, `permission`, `devices` and iOS `back`, and fixes Android `press` (key events dropped as stale) and TalkBack being off while the runner ran: 28 live checks on both platforms, 7 failed first and were fixed. beta.17 (2026-11-07): without the library `type` takes ñ, é and emoji (Android sets the text at the cursor; iOS pastes once `permission grant paste` allows it, new hook `simulator.tcc`), `screenshot`, `find role`, Android typing about 3x faster: 13 live checks, 2 failed first and were fixed. beta.18 (2026-11-07), Android phones: the runner keeps the screen on while it runs and refuses touches and keys on a dark or locked screen; an install the phone turns down by itself (MIUI) says so; on MIUI `doctor` reads "USB debugging (Security settings)" (hook `miui.adbInput`): 14 live checks on the API 36 emulator, 1 failed first and was fixed. beta.19 to beta.22 (2026-11-08): the runner is installed only when the device lacks the same APK (MIUI asks once per ddp version); `screenshot --of <element>`; a run on a Redmi Note 8 (MIUI, Android 11): 32 checks, 28 passed, the 4 bugs fixed (a label naming an element with an id, with the library; doctor's front check on Android 11; permission refusal reasons; a menu or dialog window read as every element gone, runner version 9). Before the tag: the version bump, the release workflow building the runner APK first (changed, untested until a tag), and the hook matrix for the two new Mac-side hooks.
-
 ## Next
 
-0. After 0.4.0: the hook matrix on older versions (API 26 to 28, iOS 17 and 18) once the images can be downloaded, and a physical iPhone when there is a test device.
+0. After 0.5.0: the hook matrix on older versions (API 26 to 28, iOS 17 and 18) once the images can be downloaded, and a physical iPhone when there is a test device.
 1. The control endpoint in the library (ADR 0008, which replaced the CDP plan of ADR 0007). Seven phases, in order:
    1. Transport. Done.
    2. Reading: `app.info`, `screen.*`, `net.list`/`net.get`/`net.watch`, `log.watch`. Done.

@@ -2,7 +2,7 @@
 
 Changes that users or agents will notice. Before 1.0, a minor version may change the protocol or the output; those changes are marked.
 
-## Unreleased
+## 0.5.0 (2026-11-08)
 
 ### Added
 
@@ -27,9 +27,18 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 - `ddp up` with an app that has no library keeps a session for it: actions and `tree` work without `--device`, and commands that need the library say so.
 - `ddp up --platform ios|android [--install <build>] [--app <id>]`: a simulator or emulator of ddp's own for a run. iOS clones a base simulator (`ddp-base`, made and booted once on first use); Android starts the base AVD (`ddp_base`) read-only from its quickboot snapshot on the first free even port from 5560, never 5554-5558. Then it installs and starts the app and connects. `ddp down [<device>] [--all]` shuts down and removes only devices `ddp up` made, listed in `.ddp/devices.json`.
 - Android apps without the library: `tap`, `double-tap`, `long-press`, `swipe`, `drag`, `type`, `press` and `tree` with `--device` go through ddp's runner, an instrumentation inside the ddp binary that it installs and starts when needed. Touches are the system's own input (a tap in about 35 ms, `adb shell input` took 70-115 ms), and a place can be a label or resource id from the platform's accessibility tree, not only `x,y`. iOS simulators work the same way, from the Mac, with nothing installed in the simulator and no XCTest: touches and keys go into the simulator's own HID service and `tree --device` reads its accessibility service (two private hooks, `simulator.hid` and `simulator.accessibility`, asked by `ddp doctor`). Before, iOS refused `--device`. Nothing is checked without the library: the output says `no checks (no SDK)`. Double tap now works too.
+- `tree --device --json`: each element's `parent` (the key of the nearest listed element above it) on iOS and Android, and on iOS its UIAccessibility `traits` (`keyboardKey`, `selected`, `header`, ...), so a checker can tell the keyboard and the bars from the app's own elements. Android runner version 4.
+- Android library: each element has its `parent` from the semantics and View trees and, when a clip or the window cuts it, `visible` (null when none of it shows). `tree` nests by that parent, and `tree --json` gives both, so a message scrolled half out of its list still has the list as parent. Before, the parent came from frame containment and was null there. iOS sends neither (its elements are VoiceOver's leaves).
+- `wait id|text`, `wait --settled` and `find text|id` take `--device`: they read the platform's accessibility tree for an app without the library.
+- `tree --json` with the library has the screen size and the scale (`screen`, `scale`), so a dp or pt check needs no `wm size`.
 
 ### Fixed
 
+- Android library: an app on Compose 1.9 closed as soon as ddp connected (`NoClassDefFoundError: RecomposeScopeObserver`). Compose 1.9 replaced the composition observer `ddp recompositions` reads, and the library loaded it when a connection opened. It now loads only for `recompositions`; on Compose 1.9 the runs are counted and the line says the causes were not read (new hook `compose.compositionObserver`). An error inside the library now ends only that connection, never the app.
+- Android: when the app ended while ddp connected to it, `launch`, `up` and `doctor` said it had no library and went on through the platform. They now say it ended and point at `ddp crash`.
+- Without the library: a tap right after an app started could land on another element. Settings put a row above General while ddp was about to touch it, and the tap opened that row. ddp now looks twice before it touches, finds a target that moved again, and refuses one that keeps moving for 2 s.
+- Android without the library: `back` and `press` went to whatever was in front, so Back on a USB install or a permission dialog said no for the person. While another app is in front they are now refused with its package. `back` goes through ddp's runner like the other keys and says what changed. ddp says on stderr when it installs its runner.
+- Android `launch` said it launched the app while another app's activity (a USB install dialog) stayed over it. The line now ends `in front: <package>, not <app>`.
 - Android without the library: a menu, a dialog or a sheet (a window of its own that takes every touch, which Android lists alone) read as every element of the app gone, and a touch on one of them said "scroll down". The line now says the window opened over the app and lists its elements as new; `tree` says it is open; a touch under it is refused; when it closes the line says what changed under it. Runner version 9.
 - With the library, an element that has an id could not be named by its label (`tap Busy` said "no element", `tap busyButton` worked), though `tap` takes an id, a label or a ref. A label now names the one element that has it; a label more than one element has names none.
 - `ddp doctor` on Android 11 said the app was not in front and brought it there when it already was: Android 11 names the resumed activity `mResumedActivity`, not `topResumedActivity`.
@@ -69,14 +78,6 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 - iOS without the library: the keyboard's prediction bar came as plain buttons. Every element in the keyboard's window is now `window: "keyboard"` in `tree --json`.
 - iOS without the library: in a full screen cover over a sheet, VoiceOver's flat tree has no navigation bar, so Back and the title had no `parent`. `tree` now lists named containers the flat tree leaves out from the full tree, as their elements' parent (also the keyboard's `Typing Predictions`).
 - `--help` said `--device` was Android only on `tap`, `type`, `long-press` and others; it works on iOS simulators too.
-
-### Added (beta.2)
-
-- `tree --device --json`: each element's `parent` (the key of the nearest listed element above it) on iOS and Android, and on iOS its UIAccessibility `traits` (`keyboardKey`, `selected`, `header`, ...), so a checker can tell the keyboard and the bars from the app's own elements. Android runner version 4.
-
-- Android library: each element has its `parent` from the semantics and View trees and, when a clip or the window cuts it, `visible` (null when none of it shows). `tree` nests by that parent, and `tree --json` gives both, so a message scrolled half out of its list still has the list as parent. Before, the parent came from frame containment and was null there. iOS sends neither (its elements are VoiceOver's leaves).
-- `wait id|text`, `wait --settled` and `find text|id` take `--device`: they read the platform's accessibility tree for an app without the library.
-- `tree --json` with the library has the screen size and the scale (`screen`, `scale`), so a dp or pt check needs no `wm size`.
 
 ## 0.4.0 (2026-11-03)
 
