@@ -10,6 +10,7 @@ use crate::state::{adb_path, capture, ctx, failure, read_json, Result};
 use crate::{fail, say};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 #[cfg(target_os = "macos")]
@@ -90,8 +91,8 @@ fn forward(device: &str) -> Result<u16> {
     }
 }
 
-/// Installs the runner this ddp carries (so an old one from another ddp is replaced) and starts it in the background:
-/// `-w` keeps `am` alive, and UiAutomation's connection lives in `am`.
+/// Installs the runner this ddp carries, unless the device has it byte for byte (an old one from another ddp is
+/// replaced), and starts it in the background: `-w` keeps `am` alive, and UiAutomation's connection lives in `am`.
 fn start(device: &str) -> Result<()> {
     if APK.is_empty() {
         fail!(
@@ -102,20 +103,41 @@ fn start(device: &str) -> Result<()> {
     }
     let path = std::env::temp_dir().join(format!("ddp-runner-{}.apk", std::process::id()));
     std::fs::write(&path, APK).map_err(|e| failure(format!("can't write the runner APK: {e}"), "io_error", None))?;
-    let installed = adb(device, &["install", "-r", "-t", &path.to_string_lossy()]);
+    let installed = has_runner(device, &path).and_then(|has| match has {
+        true => Ok(None),
+        false => adb(device, &["install", "-r", "-t", &path.to_string_lossy()]).map(Some),
+    });
     let _ = std::fs::remove_file(&path);
-    let installed = installed?;
-    if let Some(refused) = crate::state::install_refused_by_phone(&installed, "ddp's runner") {
-        return Err(refused);
-    }
-    if installed.code != 0 {
-        fail!(format!("installing the runner failed: {}", installed.stderr.trim()), "command_failed", "adb devices");
+    if let Some(installed) = installed? {
+        if let Some(refused) = crate::state::install_refused_by_phone(&installed, "ddp's runner") {
+            return Err(refused);
+        }
+        if installed.code != 0 {
+            fail!(
+                format!("installing the runner failed: {}", installed.stderr.trim()),
+                "command_failed",
+                "adb devices"
+            );
+        }
     }
     let started = adb(device, &["shell", &format!("nohup am instrument -w {PACKAGE}/.Runner >/dev/null 2>&1 &")])?;
     if started.code != 0 {
         fail!(format!("starting the runner failed: {}", started.stderr.trim()), "command_failed", "adb devices");
     }
     Ok(())
+}
+
+/// Whether the device has this ddp's runner installed, byte for byte. The runner starts again after 5 minutes without
+/// a command, and a MIUI phone asks its owner on screen before every install. Unsure (no `cmp`, a failed push) means
+/// no, so the runner is installed as before.
+fn has_runner(device: &str, apk: &Path) -> Result<bool> {
+    const PUSHED: &str = "/data/local/tmp/ddp-runner.apk";
+    if adb(device, &["push", &apk.to_string_lossy(), PUSHED])?.code != 0 {
+        return Ok(false);
+    }
+    let compare =
+        format!("cmp -s {PUSHED} \"$(pm path {PACKAGE} | sed s/^package://)\"; same=$?; rm -f {PUSHED}; exit $same");
+    Ok(adb(device, &["shell", &compare])?.code == 0)
 }
 
 /// Between two looks at the screen while it settles. A look costs 16 ms (Android) to 40 ms (iOS).

@@ -839,6 +839,7 @@ with tempfile.TemporaryDirectory() as directory:
                         "if [ \"$1\" = devices ]; then printf 'List of devices attached\\nmiui-fake\\tdevice\\n'; exit 0; fi\n"
                         "if [ \"$3\" = get-state ]; then echo device; exit 0; fi\n"
                         "if [ \"$3\" = forward ]; then echo 'miui-fake tcp:1 localabstract:agentddp.runner.control'; exit 0; fi\n"
+                        "case \"$4\" in cmp*) [ -n \"$SAME_RUNNER\" ]; exit $?;; nohup*) echo 'no runner here' >&2; exit 1;; esac\n"
                         "if [ \"$3\" = install ]; then echo 'adb: failed to install r.apk: Failure [INSTALL_FAILED_USER_RESTRICTED: Install canceled by user]' >&2; exit 1; fi\n"
                         "if [ \"$5\" = ro.miui.ui.version.name ]; then echo V125; exit 0; fi\n"
                         "if [ \"$5\" = persist.security.adbinput ]; then echo 0; exit 0; fi\n")
@@ -847,6 +848,9 @@ with tempfile.TemporaryDirectory() as directory:
     refused = ddp_in(directory, "tap", "10,10", "--device", "miui-fake", env=miui)
     assert refused.returncode == 1 and "the phone turned down the install of ddp's runner (INSTALL_FAILED_USER_RESTRICTED)" in refused.stderr \
         and "next: tap Install on the phone when it asks" in refused.stderr, refused.stderr
+    # The runner it has already, byte for byte, is started without an install, so the phone does not ask again.
+    kept = ddp_in(directory, "tap", "10,10", "--device", "miui-fake", env={**miui, "SAME_RUNNER": "1"})
+    assert kept.returncode == 1 and "starting the runner failed: no runner here" in kept.stderr, kept.stderr
     miui_doctor = ddp_in(directory, "doctor", "miui-fake", "--app", "dev.example", "--platform", "android", env=miui)
     assert "FAIL hook miui.adbInput (private): MIUI's USB debugging (Security settings) off\n     fix: on the phone: Developer options" in miui_doctor.stdout, miui_doctor.stdout + miui_doctor.stderr
     double = ddp_in(directory, "double-tap", "10,10", "--device", "runner-fake", env=host)
