@@ -438,14 +438,33 @@ fn miui_input_step(adb: &str, device: &str) -> Option<Step> {
     ))
 }
 
-/// Whether `dumpsys activity activities` has the app's activity resumed in front: Android 12 and later name it
+/// The packages whose activity `dumpsys activity activities` has resumed in front: Android 12 and later name it
 /// `topResumedActivity`, Android 11 `mResumedActivity` and `ResumedActivity:`.
+fn resumed_apps(activities: &str) -> Vec<&str> {
+    activities
+        .lines()
+        .map(str::trim_start)
+        .filter(|line| {
+            ["topResumedActivity", "mResumedActivity", "ResumedActivity:"].iter().any(|n| line.starts_with(n))
+        })
+        .filter_map(|line| line.split_whitespace().find_map(|word| word.split_once('/').map(|(package, _)| package)))
+        .collect()
+}
+
 fn resumed_in_front(activities: &str, app: &str) -> bool {
-    let top = format!(" {app}/");
-    activities.lines().map(str::trim_start).any(|line| {
-        ["topResumedActivity", "mResumedActivity", "ResumedActivity:"].iter().any(|name| line.starts_with(name))
-            && line.contains(&top)
-    })
+    resumed_apps(activities).contains(&app)
+}
+
+/// `; in front: <package>, not <app>` when another app's activity is resumed over the app (a USB install or a
+/// permission dialog); empty when the app is in front or the device does not say.
+pub fn android_front_note(device: &str, app: &str) -> String {
+    let Ok(adb) = adb_path() else { return String::new() };
+    let activities = capture(&adb, &["-s", device, "shell", "dumpsys", "activity", "activities"]).stdout;
+    let resumed = resumed_apps(&activities);
+    match resumed.first() {
+        Some(front) if !resumed.contains(&app) => format!("; in front: {front}, not {app}"),
+        _ => String::new(),
+    }
 }
 
 /// When the app is not in front, starts it or brings it there (never a restart), since the checks after read its
@@ -610,5 +629,7 @@ mod tests {
         assert!(super::resumed_in_front(android_16, "dev.agentddp.sample"));
         assert!(!super::resumed_in_front(behind, "dev.agentddp.sample"));
         assert!(!super::resumed_in_front(android_11, "dev.agentddp"));
+        let dialog = "  topResumedActivity=ActivityRecord{4 u0 com.miui.securitycenter/com.miui.permcenter.install.AdbInstallActivity t8}\n";
+        assert_eq!(super::resumed_apps(dialog), ["com.miui.securitycenter"]);
     }
 }

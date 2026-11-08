@@ -119,6 +119,7 @@ fn start(device: &str) -> Result<()> {
                 "adb devices"
             );
         }
+        crate::warn!("ddp: installed ddp's runner ({PACKAGE}) on {device}, its own package; again only when ddp's runner changes");
     }
     let started = adb(device, &["shell", &format!("nohup am instrument -w {PACKAGE}/.Runner >/dev/null 2>&1 &")])?;
     if started.code != 0 {
@@ -275,11 +276,16 @@ impl Screen {
     /// drives (a permission dialog, the launcher, the notification shade). Android only: the runner reads the
     /// package of the window that takes input; iOS says nothing.
     fn front_note(&mut self, app: Option<&str>) -> String {
-        let (Screen::Android(control), Some(app)) = (self, app) else { return String::new() };
-        match control.call("app.info", json!({})).ok().and_then(|info| info["app"].as_str().map(String::from)) {
-            Some(front) if front != app => format!("; in front: {front}, not {app}"),
+        match (self.front_app(), app) {
+            (Some(front), Some(app)) if front != app => format!("; in front: {front}, not {app}"),
             _ => String::new(),
         }
+    }
+
+    /// The package of the window that takes input, as the runner reads it. Android only.
+    fn front_app(&mut self) -> Option<String> {
+        let Screen::Android(control) = self else { return None };
+        control.call("app.info", json!({})).ok().and_then(|info| info["app"].as_str().map(String::from))
     }
 
     /// iOS types ñ, é or an emoji as a paste, and iOS asks the person first unless the app may paste from other
@@ -973,6 +979,17 @@ fn perform(
             built => break built?,
         }
     };
+    // A key has no target: with another app in front (a USB install or a permission dialog) it would go to that app,
+    // and Back there says no for the person.
+    if let (Action::Key(key), Some(app)) = (&action, app.as_deref()) {
+        if let Some(front) = screen.front_app().filter(|front| front != app) {
+            fail!(
+                format!("{front} is in front, not {app}: {key} would go to it"),
+                "not_in_front",
+                format!("act on what is in front by its label (ddp tree --device {device}), or wait until it closes")
+            );
+        }
+    }
     pause(BUSY_SAMPLE);
     let settled = screen.look()?;
     let busy = differing(&before, &settled);
@@ -1085,7 +1102,11 @@ pub fn type_text(args: &Args) -> Result<i32> {
 
 /// iOS without the library: the edge swipe a thumb makes, from the very edge (UIKit's screen-edge recognizer starts
 /// only there) to most of the way across.
+/// Android: the Back key, through the runner like any key.
 pub fn back(args: &Args) -> Result<i32> {
+    if crate::device::target(args)?.0 != "ios" {
+        return perform(args, "back", json!({}), |_, _, _| Ok((Action::Key("Back".into()), Vec::new())));
+    }
     perform(args, "back (edge swipe)", json!({}), |elements, _, screen| {
         let [_, y, w, h] = screen.area(elements)?;
         let from = (1.0, y + h / 2.0);

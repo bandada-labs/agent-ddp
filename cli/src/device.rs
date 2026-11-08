@@ -841,7 +841,7 @@ pub fn settings(args: &mut Args) -> Result<i32> {
 /// Back: Android's Back key; on iOS the edge swipe UIKit turns into "back", with the library's real finger.
 pub fn back(args: &mut Args) -> Result<i32> {
     let (platform, device, _) = target(args)?;
-    if platform == "ios" && crate::runner::device_mode(args) {
+    if crate::runner::device_mode(args) {
         return crate::runner::back(args);
     }
     if platform == "ios" {

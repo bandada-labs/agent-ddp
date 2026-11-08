@@ -284,7 +284,8 @@ pub fn launch(args: &mut Args) -> Result<i32> {
             format!("ddp doctor {device} --app {app}")
         );
     }
-    say!("launched {app} on {platform} {device}");
+    let front = if platform == "ios" { String::new() } else { crate::tools::android_front_note(&device, &app) };
+    say!("launched {app} on {platform} {device}{front}");
     // The old run's endpoint may still be on disk: wait until the new run's answers.
     let Some((session, snapshot)) = session_after_start(&platform, &device, &app, Duration::from_secs(15))? else {
         return Ok(0);

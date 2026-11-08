@@ -844,6 +844,8 @@ with tempfile.TemporaryDirectory() as directory:
                         "if [ \"$1\" = devices ]; then printf 'List of devices attached\\nrunner-fake\\tdevice\\n'; exit 0; fi\n"
                         f"if [ \"$3\" = exec-out ]; then cat {Path(directory, 'screen.png')} 2>/dev/null || printf 'PNG bytes'; exit 0; fi\n"
                         "if [ \"$7\" = android.permission.NOPE ]; then printf \"Exception occurred while executing 'grant':\\njava.lang.SecurityException: Package other has not requested permission android.permission.NOPE\\n\\tat com.android.server.pm\\n\" >&2; exit 255; fi\n"
+                        "if [ \"$4\" = cmd ]; then echo 'other/.Main'; exit 0; fi\n"
+                        "if [ \"$5\" = activity ]; then echo '  topResumedActivity=ActivityRecord{9 u0 com.android.permissioncontroller/.GrantPermissionsActivity t4}'; exit 0; fi\n"
                         "if [ \"$4\" = dumpsys ]; then echo '        android.permission.CAMERA: granted=true, flags=[ ]'; exit 0; fi\n"
                         f"echo 'runner-fake tcp:{app.port} localabstract:agentddp.runner.control'\n")
     fake_adb.chmod(0o755)
@@ -1029,8 +1031,17 @@ with tempfile.TemporaryDirectory() as directory:
     (front / "session.json").write_text(json.dumps({"mode": "device", "platform": "android", "device": "runner-fake", "app": "other"}))
     over = ddp_in(directory, "tree", "--session", "front", env=host)
     assert over.stdout.endswith("elements on runner-fake; in front: fake, not other; no checks (no SDK)\n"), over.stdout + over.stderr
+    # A key has no target: with another app in front (a USB install dialog) it would go to that app, so it is refused.
+    app.typed = ""
+    keyed = ddp_in(directory, "back", "--session", "front", env=host)
+    assert keyed.returncode == 1 and "fake is in front, not other: Back would go to it" in keyed.stderr and app.typed == "", keyed.stdout + keyed.stderr + app.typed
+    backed = ddp_in(directory, "back", "--device", "runner-fake", env=host)
+    assert re.match(r"back on runner-fake in \d+ms; ", backed.stdout) and app.typed == "<Back>", backed.stdout + backed.stderr + app.typed
+    # launch says when another app's activity is resumed over the app it started.
+    launched = ddp_in(directory, "launch", "runner-fake", "--app", "other", "--platform", "android", "--session", "launched", env=host)
+    assert launched.stdout.startswith("launched other on android runner-fake; in front: com.android.permissioncontroller, not other\n"), launched.stdout + launched.stderr
     listed = ddp_in(directory, "devices", env=host)
-    assert "android runner-fake: device; session front: other (without the library)" in listed.stdout, listed.stdout + listed.stderr
+    assert "android runner-fake: device; session " in listed.stdout and "session front: other (without the library)" in listed.stdout, listed.stdout + listed.stderr
     # pm exits 0 for a permission the app does not declare: what the package says afterwards decides.
     granted = ddp_in(directory, "permission", "grant", "camera", "--session", "front", env=host)
     assert granted.stdout == "granted android.permission.CAMERA for other on runner-fake\n", granted.stdout + granted.stderr
