@@ -245,6 +245,19 @@ pub struct Output {
     pub stderr: String,
 }
 
+/// An `adb install` the phone itself turned down: MIUI and some other phones ask on their screen before each install
+/// over USB, and say no by themselves after a few seconds.
+pub fn install_refused_by_phone(output: &Output, what: &str) -> Option<Failure> {
+    let said = format!("{}{}", output.stderr, output.stdout);
+    said.contains("INSTALL_FAILED_USER_RESTRICTED").then(|| {
+        failure(
+            format!("the phone turned down the install of {what} (INSTALL_FAILED_USER_RESTRICTED): it asks on its screen before each install over USB, and says no by itself after a few seconds"),
+            "install_failed",
+            Some("tap Install on the phone when it asks, then run the command again (MIUI: Developer options > Install via USB on)"),
+        )
+    })
+}
+
 /// A command's output whatever its exit code.
 pub fn capture(program: &str, args: &[&str]) -> Output {
     match Command::new(program).args(args).output() {

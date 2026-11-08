@@ -345,6 +345,7 @@ fn doctor_checks(platform: &str, device: &str, app: &str) -> Result<Vec<Step>> {
         if state != "device" {
             return Ok(steps);
         }
+        steps.extend(miui_input_step(&adb, device));
         let installed = capture(&adb, &["-s", device, "shell", "pm", "path", app]);
         let is_installed = installed.stdout.starts_with("package:");
         steps.push((
@@ -415,6 +416,26 @@ fn doctor_checks(platform: &str, device: &str, app: &str) -> Result<Vec<Step>> {
     }
     steps.extend(hooks);
     Ok(steps)
+}
+
+/// MIUI drops the touches and keys adb sends, and its `pm grant`, while "USB debugging (Security settings)" is off. Its
+/// property is MIUI's own: anything but "0" is no problem, since ddp is not sure then.
+fn miui_input_step(adb: &str, device: &str) -> Option<Step> {
+    let property = |name: &str| capture(adb, &["-s", device, "shell", "getprop", name]).stdout.trim().to_string();
+    if property("ro.miui.ui.version.name").is_empty() {
+        return None;
+    }
+    let input = property("persist.security.adbinput");
+    let said = match input.as_str() {
+        "1" => "on",
+        "0" => "off",
+        _ => "unknown",
+    };
+    Some((
+        input != "0",
+        format!("hook miui.adbInput (private): MIUI's USB debugging (Security settings) {said}"),
+        "on the phone: Developer options > USB debugging (Security settings) on; while it is off MIUI drops ddp's touches, keys and permission grants".into(),
+    ))
 }
 
 /// When the app is not in front, starts it or brings it there (never a restart), since the checks after read its

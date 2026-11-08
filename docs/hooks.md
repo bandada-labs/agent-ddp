@@ -28,6 +28,12 @@ ddp itself reaches these, from the Mac, for a booted simulator: nothing runs in 
 | `simulator.accessibility` (`AccessibilityPlatformTranslation`'s `AXPTranslatorRequest`, `AXPTranslatorResponse`, `AXPTranslationObject`, archived to `com.apple.CoreSimulator.accessibility`; the flat tree, client type 0, and for a container it leaves empty, such as SwiftUI's navigation and tab bars on iOS 26 and later, that container's children from the full tree, client type 2; for `tree`, the full tree's named containers the flat tree leaves out, at most 1500 nodes; each element's window, attribute 12; the visible point of the element a touch is for, attribute 112); and the simulator's `ApplicationAccessibilityEnabled` preference, read from `SimDevice.dataPath`, turned back on with `simctl spawn defaults write` and the notifications `com.apple.accessibility.cache.app.ax` and `com.apple.accessibility.cache.ax` when an XCTest run left it off | private | `tree --device`, places given by label or id, where a touch on one lands, `doctor`: whether the app is the one in front | the command fails; a tree is never shown with elements missing; an answer without a visible point leaves the touch at the element's middle | iOS 27.0 simulator, Xcode 27.2 |
 | `simulator.tcc` (the simulator's privacy store, `data/Library/TCC/TCC.db` under the device's folder: table `access`, service `kTCCServicePasteboard`, `auth_value` 2 Allow, 0 Deny, 3 Ask; read and written with `sqlite3`) | private | `type --device` of text a US keyboard has no key for (a paste), `permission grant|revoke paste` | the command fails with the hook's name before anything is typed; a write is read back | iOS 27.0 simulator, Xcode 27.2 |
 
+## Android device (apps without the library, `--device`)
+
+| Hook | Kind | What depends on it | When it fails | Checked on |
+| --- | --- | --- | --- | --- |
+| `miui.adbInput` (MIUI's `persist.security.adbinput` property, "USB debugging (Security settings)", read with `getprop` on a phone whose `ro.miui.ui.version.name` is set) | private | `ddp doctor` on a MIUI phone: whether MIUI lets adb's touches, keys and `pm grant` through | only "0" is reported (off, with the switch to turn on); no answer reads "unknown", never a problem | MIUI on Android 11 (Redmi Note 8) |
+
 ## Android
 
 | Hook | Kind | What depends on it | When it fails | Checked on |

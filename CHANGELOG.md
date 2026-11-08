@@ -10,6 +10,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 - Without the library: `type --clear` empties the field first (Control-A and Delete on Android, Command-A and Delete on iOS); `press` takes `Escape` and the arrows, and on Android `Home`, `Recents` and `Notifications`. With the library both are refused instead of doing nothing.
 - `wait text|id <x> --gone`: until no element matches, with or without the library.
 - Without the library, `type` takes text with characters a US keyboard has no key for (ñ, é, an emoji): iOS pastes it with Command-V from the simulator's pasteboard and puts back what the pasteboard held; Android sets it into the focused field at its cursor, as UiAutomator's setText does. Before, it was refused. iOS asks the person before an app pastes from another one, so ddp refuses such text until `ddp permission grant paste` (the app's "Paste from Other Apps", kept in the simulator's privacy store: new hook `simulator.tcc`, asked by `ddp doctor`).
+- Android phones: the runner keeps the screen on while it runs, and a touch or key on a locked or dark screen is refused instead of reaching the lock screen. An install a phone turns down by itself (MIUI asks on its screen) says so and what to tap; on MIUI `ddp doctor` reads "USB debugging (Security settings)" (hook `miui.adbInput`).
 - `ddp screenshot [out.png]`: the screen as the device takes it, with or without the library. `find role <type>` without the library: the elements of one type, as `tree` prints it.
 - Without the library, `tree` marks `checked`/`unchecked`, `selected`, `expanded`/`collapsed`, `focused`, `password` and `error "..."`, and an action that changes one says so (`changed: @e5 "Wi-Fi" checked`). On Android a line ends `in front: <package>, not <app>` when another app is over the session's.
 - `ddp permission grant|revoke <name>`: one of the app's permissions, set as the platform's own switch does (iOS `simctl privacy`, Android `pm grant|revoke`).
@@ -29,6 +30,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 
 ### Fixed
 
+- Android without the library: a key the system refused still read as pressed; the runner now checks each key it sends, as it did for touches.
 - Android without the library: `type` waited for each key event before the next, about 240 ms a character in a Compose field. Only the last one waits now: 10 characters went from 2.4 s to 0.8 s.
 - Android without the library: `press Enter`, `Tab` and `Backspace` did nothing. The runner's key events carried no time, and the system dropped them as stale. They now carry the time they are sent.
 - `ddp permission grant` said "granted" when nothing was granted: Android 16's `pm grant` exits 0 and prints nothing for a permission the app does not declare, and `simctl privacy` takes any bundle id. Android now reads the permission back from the package, and iOS refuses an app that is not installed.

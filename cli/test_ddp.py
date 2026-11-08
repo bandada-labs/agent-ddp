@@ -827,6 +827,24 @@ with tempfile.TemporaryDirectory() as directory:
                         f"echo 'runner-fake tcp:{app.port} localabstract:agentddp.runner.control'\n")
     fake_adb.chmod(0o755)
     host = {"PATH": f"{fake_adb.parent}:{os.environ['PATH']}"}
+    # A MIUI phone: it turns the runner's install down by itself (it asks on its screen), and doctor reads its
+    # "USB debugging (Security settings)" switch.
+    miui_adb = Path(directory, "miui", "adb")
+    miui_adb.parent.mkdir()
+    miui_adb.write_text("#!/bin/sh\n"
+                        "if [ \"$1\" = devices ]; then printf 'List of devices attached\\nmiui-fake\\tdevice\\n'; exit 0; fi\n"
+                        "if [ \"$3\" = get-state ]; then echo device; exit 0; fi\n"
+                        "if [ \"$3\" = forward ]; then echo 'miui-fake tcp:1 localabstract:agentddp.runner.control'; exit 0; fi\n"
+                        "if [ \"$3\" = install ]; then echo 'adb: failed to install r.apk: Failure [INSTALL_FAILED_USER_RESTRICTED: Install canceled by user]' >&2; exit 1; fi\n"
+                        "if [ \"$5\" = ro.miui.ui.version.name ]; then echo V125; exit 0; fi\n"
+                        "if [ \"$5\" = persist.security.adbinput ]; then echo 0; exit 0; fi\n")
+    miui_adb.chmod(0o755)
+    miui = {"PATH": f"{miui_adb.parent}:{os.environ['PATH']}"}
+    refused = ddp_in(directory, "tap", "10,10", "--device", "miui-fake", env=miui)
+    assert refused.returncode == 1 and "the phone turned down the install of ddp's runner (INSTALL_FAILED_USER_RESTRICTED)" in refused.stderr \
+        and "next: tap Install on the phone when it asks" in refused.stderr, refused.stderr
+    miui_doctor = ddp_in(directory, "doctor", "miui-fake", "--app", "dev.example", "--platform", "android", env=miui)
+    assert "FAIL hook miui.adbInput (private): MIUI's USB debugging (Security settings) off\n     fix: on the phone: Developer options" in miui_doctor.stdout, miui_doctor.stdout + miui_doctor.stderr
     double = ddp_in(directory, "double-tap", "10,10", "--device", "runner-fake", env=host)
     assert double.returncode == 0 and re.fullmatch(r"double-tap 10,10 on runner-fake in \d+ms; nothing changed within 1000ms; no checks \(no SDK\)\n", double.stdout), double.stdout + double.stderr
     ddp_in(directory, "swipe", "Save", "0,0", "--for", "200ms", "--device", "runner-fake", env=host)

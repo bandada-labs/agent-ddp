@@ -375,6 +375,9 @@ fn install(platform: &str, device: &str, build: &str) -> Result<()> {
     } else {
         capture(&adb_path()?, &["-s", device, "install", "-r", build])
     };
+    if let Some(refused) = crate::state::install_refused_by_phone(&installed, build) {
+        return Err(refused);
+    }
     if installed.code != 0 || installed.stdout.contains("Failure") {
         fail!(format!("install failed: {}{}", installed.stderr.trim(), installed.stdout.trim()), "install_failed");
     }

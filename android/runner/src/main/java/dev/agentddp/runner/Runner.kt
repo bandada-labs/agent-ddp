@@ -3,11 +3,13 @@ package dev.agentddp.runner
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.app.Instrumentation
+import android.app.KeyguardManager
 import android.app.UiAutomation
 import android.content.res.Resources
 import android.graphics.Rect
 import android.net.LocalServerSocket
 import android.os.Bundle
+import android.os.PowerManager
 import android.os.SystemClock
 import android.view.InputDevice
 import android.view.KeyCharacterMap
@@ -52,6 +54,10 @@ class Runner : Instrumentation() {
 
     override fun onStart() {
         val server = LocalServerSocket(SOCKET_NAME)
+        // A phone that dims and locks between two commands would take the next touch on its lock screen. Held while the
+        // runner lives; the system lets go when it ends. FLAG_KEEP_SCREEN_ON needs a window, and the runner has none.
+        @Suppress("DEPRECATION")
+        context.getSystemService(PowerManager::class.java).newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK, "ddp:runner").acquire()
         // Only one process may hold UiAutomation: while an idle runner keeps it, the app's own UI tests fail with
         // "UiAutomationService already registered". ddp starts the runner again on its next command.
         thread(name = "ddp-runner-idle", isDaemon = true) {
@@ -98,7 +104,11 @@ class Runner : Instrumentation() {
         val started = SystemClock.elapsedRealtimeNanos()
         return try {
             // One action at a time: two agents' touches must not interleave.
-            val result = synchronized(lock) { run(request.optString("method"), request.optJSONObject("params") ?: JSONObject()) }
+            val method = request.optString("method")
+            val result = synchronized(lock) {
+                if (method.startsWith("input.")) requireUnlocked()
+                run(method, request.optJSONObject("params") ?: JSONObject())
+            }
             reply.put("result", result.put("ms", (SystemClock.elapsedRealtimeNanos() - started) / 1e6))
         } catch (error: RunnerError) {
             reply.put("error", JSONObject().put("code", error.code).put("message", error.message))
@@ -141,7 +151,9 @@ class Runner : Instrumentation() {
             val events = KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD).getEvents(text.toCharArray())
             // Waiting for each key took about 240 ms a character in a Compose field; the input queue keeps their
             // order, so only the last one waits.
-            if (events != null) events.forEachIndexed { index, event -> automation.injectInputEvent(event, index == events.lastIndex) }
+            if (events != null) events.forEachIndexed { index, event ->
+                if (!automation.injectInputEvent(event, index == events.lastIndex)) throw RunnerError("the system refused the keys", -32000)
+            }
             else insert(text)
             JSONObject()
         }
@@ -233,7 +245,17 @@ class Runner : Instrumentation() {
     private fun press(code: Int, meta: Int = 0) {
         val now = SystemClock.uptimeMillis()
         listOf(KeyEvent.ACTION_DOWN, KeyEvent.ACTION_UP).forEach {
-            automation.injectInputEvent(KeyEvent(now, now, it, code, 0, meta), true)
+            if (!automation.injectInputEvent(KeyEvent(now, now, it, code, 0, meta), true)) throw RunnerError("the system refused the key", -32000)
+        }
+    }
+
+    /** A touch or key on a dark or locked screen reaches the lock screen, not the app: refused, so nothing reads as done. */
+    private fun requireUnlocked() {
+        if (!context.getSystemService(PowerManager::class.java).isInteractive) {
+            throw RunnerError("the screen is off: wake the device and unlock it", -32000)
+        }
+        if (context.getSystemService(KeyguardManager::class.java).isKeyguardLocked) {
+            throw RunnerError("the screen is locked: unlock the device (one with no PIN, such as an emulator: adb shell wm dismiss-keyguard)", -32000)
         }
     }
 
@@ -356,7 +378,7 @@ class Runner : Instrumentation() {
         const val FRAME_MS = 16L
         const val ROOT_WAIT_MS = 2000L
         /** Raised when what the runner answers changes; the CLI replaces a runner with another number. */
-        const val VERSION = 6
+        const val VERSION = 7
         const val FOCUS_WAIT_MS = 1000L
         const val IDLE_MS = 5 * 60_000L
         const val IDLE_CHECK_MS = 10_000L

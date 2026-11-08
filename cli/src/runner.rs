@@ -23,7 +23,7 @@ const APK: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/runner.apk"));
 /// `am instrument` to the socket open took 2 s on a warm emulator, 21 s on one booted a minute before.
 const START_PATIENCE: Duration = Duration::from_secs(40);
 /// The runner's `VERSION` (Runner.kt) this ddp speaks.
-const RUNNER_VERSION: u64 = 6;
+const RUNNER_VERSION: u64 = 7;
 const POLL: Duration = Duration::from_millis(100);
 
 /// What every runner answer ends with: the runner did it, nothing was checked.
@@ -105,6 +105,9 @@ fn start(device: &str) -> Result<()> {
     let installed = adb(device, &["install", "-r", "-t", &path.to_string_lossy()]);
     let _ = std::fs::remove_file(&path);
     let installed = installed?;
+    if let Some(refused) = crate::state::install_refused_by_phone(&installed, "ddp's runner") {
+        return Err(refused);
+    }
     if installed.code != 0 {
         fail!(format!("installing the runner failed: {}", installed.stderr.trim()), "command_failed", "adb devices");
     }
