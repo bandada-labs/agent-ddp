@@ -30,6 +30,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 
 ### Fixed
 
+- Android without the library: a menu, a dialog or a sheet (a window of its own that takes every touch, which Android lists alone) read as every element of the app gone, and a touch on one of them said "scroll down". The line now says the window opened over the app and lists its elements as new; `tree` says it is open; a touch under it is refused; when it closes the line says what changed under it. Runner version 9.
 - With the library, an element that has an id could not be named by its label (`tap Busy` said "no element", `tap busyButton` worked), though `tap` takes an id, a label or a ref. A label now names the one element that has it; a label more than one element has names none.
 - `ddp doctor` on Android 11 said the app was not in front and brought it there when it already was: Android 11 names the resumed activity `mResumedActivity`, not `topResumedActivity`.
 - Android `permission grant|revoke` refused by an older Android said only "Exception occurred while executing 'grant'"; it now says why (`has not requested permission`, `Unknown permission`).

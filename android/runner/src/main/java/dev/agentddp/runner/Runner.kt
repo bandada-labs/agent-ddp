@@ -16,6 +16,7 @@ import android.view.KeyCharacterMap
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import dev.agentddp.HttpRequest
 import dev.agentddp.WebSocket
 import org.json.JSONArray
@@ -184,9 +185,7 @@ class Runner : Instrumentation() {
             val found = find(label)
             JSONObject().put("found", found != null).put("frame", found?.let { frame(it) } ?: JSONObject.NULL)
         }
-        "screen.elements" -> JSONObject().put("elements", JSONArray().also { elements ->
-            root()?.let { collect(it, elements) }
-        })
+        "screen.elements" -> JSONObject().put("elements", JSONArray().also { elements -> collectWindows(elements) })
         "runner.stop" -> {
             stopped = true
             JSONObject()
@@ -320,6 +319,38 @@ class Runner : Instrumentation() {
         })
     }
 
+    // The app's windows, bottom first: a menu, a dialog or a sheet is a window of its own over the activity's. While
+    // one takes every touch Android lists it alone, so the activity's window drops out though it still shows; the CLI
+    // keeps what it had. Each element says its `window` (id, title, frame). One whose middle a higher window of the
+    // app covers is marked `under` with that window's frame: a touch there lands on the window on top. Another app in
+    // front is read alone.
+    private fun collectWindows(elements: JSONArray) {
+        val root = root() ?: return
+        val windows = automation.windows
+            .filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+            .mapNotNull { window -> window.root?.takeIf { it.packageName == root.packageName }?.let { window to it } }
+            .sortedBy { (window, _) -> window.layer }
+        val read = windows.takeIf { list -> list.any { (_, node) -> node.windowId == root.windowId } }
+            ?: listOf(null to root)
+        val bounds = read.map { (window, node) -> Rect().also { window?.getBoundsInScreen(it) ?: node.getBoundsInScreen(it) } }
+        read.forEachIndexed { index, (window, node) ->
+            val first = elements.length()
+            collect(node, elements)
+            val about = JSONObject().put("id", node.windowId).put("title", window?.title?.toString() ?: JSONObject.NULL)
+                .put("frame", rect(bounds[index]))
+            val above = bounds.drop(index + 1)
+            for (at in first until elements.length()) {
+                val element = elements.getJSONObject(at).put("window", about)
+                val frame = element.getJSONArray("frame")
+                val (x, y) = frame.getInt(0) + frame.getInt(2) / 2 to frame.getInt(1) + frame.getInt(3) / 2
+                above.lastOrNull { it.contains(x, y) }?.let { element.put("under", rect(it)) }
+            }
+        }
+    }
+
+    private fun rect(bounds: Rect): JSONArray =
+        JSONArray().put(bounds.left).put(bounds.top).put(bounds.width()).put(bounds.height())
+
     // Only what an agent can act on or read: nodes with a label, an id, or that take a tap. A node the app still
     // holds but the user cannot see (scrolled away, panned off by the keyboard) is kept with `shown: false`, so the
     // CLI can tell "out of view" from "gone".
@@ -364,10 +395,7 @@ class Runner : Instrumentation() {
     private fun typed(node: AccessibilityNodeInfo): String? =
         node.text?.toString()?.takeIf { node.isEditable && !node.isShowingHintText && it.isNotEmpty() }
 
-    private fun frame(node: AccessibilityNodeInfo): JSONArray {
-        val bounds = Rect().also { node.getBoundsInScreen(it) }
-        return JSONArray().put(bounds.left).put(bounds.top).put(bounds.width()).put(bounds.height())
-    }
+    private fun frame(node: AccessibilityNodeInfo): JSONArray = rect(Rect().also { node.getBoundsInScreen(it) })
 
     private class RunnerError(message: String, val code: Int) : Exception(message) {
         companion object {
@@ -380,7 +408,7 @@ class Runner : Instrumentation() {
         const val FRAME_MS = 16L
         const val ROOT_WAIT_MS = 2000L
         /** Raised when what the runner answers changes; the CLI replaces a runner with another number. */
-        const val VERSION = 8
+        const val VERSION = 9
         const val FOCUS_WAIT_MS = 1000L
         const val IDLE_MS = 5 * 60_000L
         const val IDLE_CHECK_MS = 10_000L

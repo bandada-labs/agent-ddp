@@ -102,10 +102,10 @@ Every result has `ms`, the time spent on the device.
 | `input.clear` | | empties the focused field: Ctrl+A, then Delete (fails when nothing has input focus) |
 | `input.key` | `key`: `Enter`, `Tab`, `Backspace`, `Back`, `Escape`, `Up`, `Down`, `Left`, `Right`; `Home`, `Recents`, `Notifications` as global actions | |
 | `screen.find` | `label` | `found`, `frame` |
-| `screen.elements` | | `elements`: `type`, `label`, `id`, `frame` [x,y,w,h], `tap`, `enabled`; `shown: false` for one the app holds off screen (scrolled away, under the keyboard's pan); `parent`, the place in `elements` of the nearest listed node above it (version 4); `value` (a field's typed text; its `label` is the hint), `checked`, `selected`, `focused`, `password`, `error`, `expanded` (version 5) |
+| `screen.elements` | | `elements`: `type`, `label`, `id`, `frame` [x,y,w,h], `tap`, `enabled`; `shown: false` for one the app holds off screen (scrolled away, under the keyboard's pan); `parent`, the place in `elements` of the nearest listed node above it (version 4); `value` (a field's typed text; its `label` is the hint), `checked`, `selected`, `focused`, `password`, `error`, `expanded` (version 5); `window` (`id`, `title`, `frame`): the app's window it is in, read bottom first, and `under`, the frame of a higher window of the app over its middle (version 9) |
 | `runner.stop` | | |
 
-`app.info` answers `runner`, the runner's version (8). It takes UiAutomation with
+`app.info` answers `runner`, the runner's version (9). It takes UiAutomation with
 `FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES`, so TalkBack and other services keep running while it does, and holds a
 screen wake lock while it runs. Every `input.*` method fails while the screen is off or locked
 (`the screen is locked: unlock the device`), and a key or touch the system refuses fails it. A ddp that finds a runner with another version running stops it

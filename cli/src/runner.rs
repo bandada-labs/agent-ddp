@@ -24,7 +24,7 @@ const APK: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/runner.apk"));
 /// `am instrument` to the socket open took 2 s on a warm emulator, 21 s on one booted a minute before.
 const START_PATIENCE: Duration = Duration::from_secs(40);
 /// The runner's `VERSION` (Runner.kt) this ddp speaks.
-const RUNNER_VERSION: u64 = 8;
+const RUNNER_VERSION: u64 = 9;
 const POLL: Duration = Duration::from_millis(100);
 
 /// What every runner answer ends with: the runner did it, nothing was checked.
@@ -215,7 +215,23 @@ impl Screen {
     /// or a view over the element's middle moves the touch to a part that takes it, and over all of it refuses the
     /// touch, since it would land on the cover and "nothing changed" would read as the app's answer. A container's
     /// point is a child's, so a container keeps its middle; so does any element the app gives no point for.
+    /// On Android a named element under another window of the app (a menu, a dialog, a sheet) is refused: the touch
+    /// would land on that window.
     fn reach(&mut self, elements: &[Value], mut place: Place, device: &str) -> Result<Place> {
+        if let Some(seen) = place.seen.as_ref().filter(|seen| !seen["under"].is_null()) {
+            if crate::hit::point(&place.given).is_none() {
+                let cover: Vec<i64> = crate::model::rect(&seen["under"]).iter().map(|v| v.round() as i64).collect();
+                fail!(
+                    format!(
+                        "'{}' is under another window of the app at {} (a menu, a dialog or a sheet): a touch would land on that window",
+                        place.given,
+                        bracket(&cover)
+                    ),
+                    "covered",
+                    format!("act in the window on top (ddp tree --device {device}), or close it: ddp back --device {device}; tap --force touches it anyway")
+                );
+            }
+        }
         let (Screen::Ios(simulator), Some(seen)) = (&mut *self, &place.seen) else { return Ok(place) };
         let key = element_key(seen);
         if crate::hit::point(&place.given).is_some() || elements.iter().any(|e| e["parent"].as_str() == Some(&key)) {
@@ -455,14 +471,18 @@ fn center(element: &Value) -> (f64, f64) {
 /// `x,y`, or the first element whose label or id is `text` (reading order, as a person scans the screen).
 fn place(elements: &[Value], text: &str, from_ref: bool, device: &str) -> Result<Place> {
     if let Some(at) = crate::hit::point(text) {
-        // The smallest element under the point is what the finger lands on.
+        // The smallest element under the point is what the finger lands on; on Android one in a window on top of
+        // the app's others (a menu) before one under it.
         let seen = elements
             .iter()
             .filter(|e| {
                 let [x, y, w, h] = crate::model::rect(&e["frame"]);
                 at.0 >= x && at.0 <= x + w && at.1 >= y && at.1 <= y + h
             })
-            .min_by(|a, b| area(a).total_cmp(&area(b)))
+            .min_by(|a, b| {
+                let covered = |e: &Value| !e["under"].is_null();
+                covered(a).cmp(&covered(b)).then(area(a).total_cmp(&area(b)))
+            })
             .cloned();
         return Ok(Place { given: text.to_string(), at, seen });
     }
@@ -477,6 +497,20 @@ fn place(elements: &[Value], text: &str, from_ref: bool, device: &str) -> Result
     // Off screen (scrolled away, below the fold): a touch at its middle lands on nothing, and "nothing changed"
     // would read as the app's answer. The agent scrolls first.
     let (candidates, off): (Vec<&Value>, Vec<&Value>) = candidates.into_iter().partition(|e| !off_screen(e));
+    if candidates.is_empty() && off.is_empty() {
+        let matches = |e: &Value| element_key(e) == text || e["label"] == text || e["id"] == text;
+        if let Some((window, _)) = hidden_windows(elements).into_iter().find(|(_, kept)| kept.iter().any(matches)) {
+            let top = elements.first().map_or("a window of the app".into(), |e| window_title(&e["window"]));
+            fail!(
+                format!(
+                    "'{text}' is in {} under {top}, which takes every touch while it is open",
+                    window_title(&window)
+                ),
+                "covered",
+                format!("act in {top} (ddp tree --device {device}), or close it: ddp back --device {device}")
+            );
+        }
+    }
     match candidates[..] {
         [element] => Ok(Place { given: text.to_string(), at: center(element), seen: Some(element.clone()) }),
         [] if !off.is_empty() => {
@@ -669,6 +703,91 @@ fn change(before: &[Value], after: &[Value], busy: &HashSet<String>) -> Change {
     change.gone.retain(|element| !same_place(element, &new));
     pair_unnamed(&mut change, lost, found);
     change
+}
+
+/// The app's windows a menu, a dialog or a sheet is open over, each with its elements as they were: kept by
+/// `window_change` and not in the tree now.
+fn hidden_windows(elements: &[Value]) -> Vec<(Value, Vec<Value>)> {
+    let shown: HashSet<String> = elements.iter().map(|e| e["window"]["id"].to_string()).collect();
+    let under = read_json(&ctx().dir.join("under.json")).unwrap_or(json!({}));
+    under
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter(|(id, _)| !shown.contains(*id))
+        .filter_map(|(_, kept)| {
+            let kept = kept.as_array()?.clone();
+            Some((kept.first()?["window"].clone(), kept))
+        })
+        .collect()
+}
+
+fn window_title(window: &Value) -> String {
+    window["title"].as_str().map_or("a window of the app".into(), |t| py::dumps(&json!(t)))
+}
+
+/// Android lists a menu, a dialog or a sheet of the app alone while it takes every touch: the app's window under it
+/// drops out of the accessibility tree, though it still shows. Its elements are kept in the session (`under.json`),
+/// so the line says the window opened over them, not that they went; when it closes, what changed under it.
+fn window_change(before: &[Value], after: &[Value], busy: &HashSet<String>, diff: &mut Change) -> Result<String> {
+    let windows = |elements: &[Value]| -> BTreeMap<String, Value> {
+        elements
+            .iter()
+            .filter(|e| e["window"].is_object())
+            .map(|e| (e["window"]["id"].to_string(), e["window"].clone()))
+            .collect()
+    };
+    let (was, now) = (windows(before), windows(after));
+    let opened: Vec<&Value> = now.iter().filter(|(id, _)| !was.contains_key(*id)).map(|(_, w)| w).collect();
+    let closed: Vec<&Value> = was.iter().filter(|(id, _)| !now.contains_key(*id)).map(|(_, w)| w).collect();
+    let path = ctx().dir.join("under.json");
+    let mut under = read_json(&path).unwrap_or(json!({}));
+    // A window shown before this action is not under anything now (closed with `back`, or by the app): what was kept
+    // of it is old, and a later close would be said against it.
+    let kept_before = under.as_object().map_or(0, |u| u.len());
+    if let Some(kept) = under.as_object_mut() {
+        kept.retain(|id, _| !was.contains_key(id));
+    }
+    if under.as_object().map_or(0, |u| u.len()) != kept_before {
+        crate::state::write_file(&path, py::dumps(&under))?;
+    }
+    let title = window_title;
+    let inside = |inner: &Value, outer: &Value| {
+        let ([x, y, w, h], [ox, oy, ow, oh]) =
+            (crate::model::rect(&inner["frame"]), crate::model::rect(&outer["frame"]));
+        x >= ox && y >= oy && x + w <= ox + ow && y + h <= oy + oh && w * h < ow * oh
+    };
+    let of = |elements: &[Value], window: &Value| -> Vec<Value> {
+        elements.iter().filter(|e| e["window"]["id"] == window["id"]).cloned().collect()
+    };
+    // Opened over: every new window lies inside one that dropped out, and is smaller (a new screen fills it).
+    if !opened.is_empty() && !closed.is_empty() && opened.iter().all(|o| closed.iter().any(|c| inside(o, c))) {
+        for window in &closed {
+            under[window["id"].to_string()] = json!(of(before, window));
+        }
+        crate::state::write_file(&path, py::dumps(&under))?;
+        diff.gone.clear();
+        diff.moved = 0;
+        return Ok(format!(
+            "window {} opened over {}, which takes no touches while it is open; ",
+            title(opened[0]),
+            title(closed[0])
+        ));
+    }
+    // Closed: a window it was over is read again. What changed is said against that window as it was.
+    let back: Vec<&Value> = opened.iter().copied().filter(|w| under[w["id"].to_string()].is_array()).collect();
+    if closed.is_empty() || back.is_empty() {
+        return Ok(String::new());
+    }
+    let (mut kept, mut shown) = (Vec::new(), Vec::new());
+    for window in &back {
+        kept.extend(under[window["id"].to_string()].as_array().cloned().unwrap_or_default());
+        shown.extend(of(after, window));
+        under.as_object_mut().map(|u| u.remove(&window["id"].to_string()));
+    }
+    crate::state::write_file(&path, py::dumps(&under))?;
+    *diff = change(&kept, &shown, busy);
+    Ok(format!("window {} closed; ", title(closed[0])))
 }
 
 /// Looks until the screen stops changing: the first change within 1 s, then two quiet looks, at most 3 s.
@@ -866,17 +985,22 @@ fn perform(
     let took = started.elapsed().as_secs_f64() * 1000.0;
     let (after, still_changing) = settle(&mut screen, &settled, &busy)?;
     let mut change = change(&settled, &after, &busy);
+    let window = window_change(&settled, &after, &busy, &mut change)?;
     change.still_changing = still_changing;
     let refs = refs_for(&named_keys(&change))?;
     let outcome = describe(&change, &refs);
     let front = screen.front_note(app.as_deref());
-    say!("{verb} on {device} in {}ms; {outcome}{front}; {NO_CHECKS}", took.round() as i64);
+    say!("{verb} on {device} in {}ms; {window}{outcome}{front}; {NO_CHECKS}", took.round() as i64);
     let mut note = json!({
         "mode": "device",
         "platform": platform,
         "places": places.iter().map(|p| json!({"given": p.given, "at": [p.at.0, p.at.1], "seen": p.seen})).collect::<Vec<_>>(),
         "new": change.new.iter().map(display).collect::<Vec<_>>(),
-        "appeared": confirmed(&mut screen, appeared(&on_screen(&settled), &on_screen(&after), &busy))?,
+        // A window that opened or closed: what is new in the window shown, not the whole window read again.
+        "appeared": confirmed(&mut screen, match window.is_empty() {
+            true => appeared(&on_screen(&settled), &on_screen(&after), &busy),
+            false => appeared(&[], &on_screen(&change.new), &busy),
+        })?,
         "gone": change.gone.iter().map(display).collect::<Vec<_>>(),
         "changed": change.changed.iter().map(display).collect::<Vec<_>>(),
         "ms": took.round(),
@@ -1111,7 +1235,14 @@ pub fn tree(args: &Args) -> Result<i32> {
         say!("{}", tree_line(element, &refs));
     }
     let front = screen.front_note(app.as_deref());
-    say!("{} elements on {device}{front}; {NO_CHECKS}", elements.len());
+    let top = elements.first().map_or(String::new(), |e| window_title(&e["window"]));
+    let over = hidden_windows(&elements)
+        .iter()
+        .map(|(window, kept)| {
+            format!("; {top} is open over {} (its {} elements take no touches)", window_title(window), kept.len())
+        })
+        .collect::<String>();
+    say!("{} elements on {device}{over}{front}; {NO_CHECKS}", elements.len());
     Ok(0)
 }
 
@@ -1240,6 +1371,9 @@ fn tree_line(element: &Value, refs: &BTreeMap<String, String>) -> String {
     }
     if element["enabled"] == false {
         line += " disabled";
+    }
+    if !element["under"].is_null() {
+        line += " covered";
     }
     line + &marks(element, true)
 }

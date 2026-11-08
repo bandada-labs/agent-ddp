@@ -431,7 +431,7 @@ class FakeApp:
         self.total, self.mode = 0, "idle"
         self.toggles, self.wifi, self.scrolled = False, False, False
         self.touches, self.runner, self.saved, self.hide_save, self.rows = [], [], False, False, False
-        self.locked = False
+        self.locked, self.menu, self.windows, self.modal = False, False, False, False
         self.scrolls, self.save_late, self.late_id = False, 0, False
         self.server = socket.socket()
         self.server.bind(("127.0.0.1", 0))
@@ -542,6 +542,11 @@ class FakeApp:
                         self.wifi = True
                     if method == "input.drag" and params.get("still"):
                         self.scrolled = True
+                    # A long press opens a menu, a window that takes every touch; its item closes it and saves.
+                    if method == "input.longPress" and self.windows:
+                        self.modal = True
+                    elif method == "input.tap" and self.modal and params.get("y") == 60:
+                        self.modal, self.saved = False, True
                     result = {"ms": 30.4}
                 elif method == "screen.elements":
                     shown = [{"type": "TextView", "label": "Off", "frame": [0, 0, 50, 10], "enabled": False}]
@@ -565,6 +570,15 @@ class FakeApp:
                         shown.append({"type": "Switch", "label": "Wi-Fi", "frame": [0, 500, 100, 40], "tap": True, "checked": self.wifi})
                     if self.rows:
                         shown += [{"type": "Button", "label": "Delete", "frame": [0, 300 + 100 * i, 100, 50], "parent": 0} for i in range(2)]
+                    if self.menu:
+                        # A menu: a window of the app over the activity's, which still shows under it.
+                        shown = [{**e, "under": [0, 0, 300, 300]} if e["label"] == "Save" else e for e in shown]
+                        shown.append({"type": "TextView", "label": "Rename", "frame": [0, 10, 300, 120], "tap": True})
+                    if self.windows:
+                        # While the menu is open Android lists its window alone.
+                        menu, main = {"id": 2, "title": "Pop-Up Window", "frame": [0, 0, 300, 300]}, {"id": 1, "title": "Fake", "frame": [0, 0, 1080, 2000]}
+                        shown = [{"type": "TextView", "label": "Rename", "frame": [0, 10, 300, 100], "tap": True, "window": menu}] if self.modal \
+                            else [{**e, "window": main} for e in shown]
                     result = {"elements": shown}
                 elif method == "input.touch":
                     self.touches.append((params["phase"], round(params["x"]), round(params["y"]), clock.monotonic()))
@@ -919,6 +933,25 @@ with tempfile.TemporaryDirectory() as directory:
     rows_json = json.loads(ddp_in(directory, "tree", "--device", "runner-fake", "--json", env=host).stdout)["elements"]
     assert [e.get("parent") for e in rows_json if e.get("label") == "Delete"] == ["save", "save"], rows_json
     app.rows = False
+    # Under a menu of the app: listed, marked, and a touch on it refused, since it would land on the menu.
+    app.menu, sent = True, len(app.runner)
+    covered = ddp_in(directory, "tree", "--device", "runner-fake", env=host)
+    assert re.search(r'@e\d+ Button "Save" #save \[10,20 200x80\] tap covered\n', covered.stdout), covered.stdout + covered.stderr
+    under = ddp_in(directory, "tap", "Save", "--device", "runner-fake", env=host)
+    assert under.returncode == 1 and "'Save' is under another window of the app at [0,0 300x300] (a menu, a dialog or a sheet)" in under.stderr \
+        and "close it: ddp back --device runner-fake" in under.stderr and not [m for m, _ in app.runner[sent:] if m.startswith("input.tap")], under.stderr
+    app.menu = False
+    # A menu that takes every touch: Android lists it alone, the app's window under it still shows.
+    app.windows, app.saved = True, False
+    opened = ddp_in(directory, "long-press", "Save", "--device", "runner-fake", env=host)
+    assert re.search(r'; window "Pop-Up Window" opened over "Fake", which takes no touches while it is open; new: @e\d+ "Rename"; no checks', opened.stdout), opened.stdout + opened.stderr
+    menu_tree = ddp_in(directory, "tree", "--device", "runner-fake", env=host)
+    assert menu_tree.stdout.endswith('1 elements on runner-fake; "Pop-Up Window" is open over "Fake" (its 2 elements take no touches); no checks (no SDK)\n'), menu_tree.stdout + menu_tree.stderr
+    under_menu = ddp_in(directory, "tap", "Save", "--device", "runner-fake", env=host)
+    assert under_menu.returncode == 1 and "'Save' is in \"Fake\" under \"Pop-Up Window\", which takes every touch while it is open" in under_menu.stderr, under_menu.stderr
+    closed = ddp_in(directory, "tap", "Rename", "--device", "runner-fake", env=host)
+    assert re.search(r'; window "Pop-Up Window" closed; new: @e\d+ "Saved"; no checks', closed.stdout), closed.stdout + closed.stderr
+    app.windows, app.saved = False, False
     # An id that shows up later is the same element, not one gone and one new.
     app.saved, app.late_id = False, True
     renamed = ddp_in(directory, "tap", "Save", "--device", "runner-fake", env=host)
