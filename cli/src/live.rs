@@ -393,6 +393,15 @@ pub fn session_after_start(
     match attach_within(platform, device, app, if has_library { patience } else { Duration::ZERO }) {
         Ok(attached) => Ok(Some(attached)),
         Err(reason) => {
+            // A build with the library whose process is gone ended while ddp connected (a library that does not fit
+            // the app's Compose did that): the platform's way would act on an app that is not there.
+            if platform == "android" && has_library && !android_running(device, app) {
+                fail!(
+                    format!("{app} ended while ddp connected to it ({})", reason.message),
+                    "app_ended",
+                    format!("ddp crash --device {device} --app {app}")
+                );
+            }
             let session = json!({"platform": platform, "device": device, "app": app, "mode": "device"});
             write_file(&ctx().session_file, py::dumps(&session))?;
             say!(
@@ -402,6 +411,13 @@ pub fn session_after_start(
             Ok(None)
         }
     }
+}
+
+/// Whether the app has a process. Unknown (no adb) counts as yes.
+fn android_running(device: &str, app: &str) -> bool {
+    adb_path()
+        .map(|adb| !capture(&adb, &["-s", device, "shell", "pidof", app]).stdout.trim().is_empty())
+        .unwrap_or(true)
 }
 
 /// Whether the installed Android build has the library. Unknown (no adb) counts as yes: it is only waited for.
@@ -1327,6 +1343,9 @@ pub fn recompositions(args: &mut Args) -> Result<i32> {
     };
     let whose = if args.full { "" } else { " of the app" };
     say!("{seconds}s: {} composables{whose} ran{library}", composables.len());
+    if let Some(why) = answer["causesUnread"].as_str() {
+        say!("  causes not read: {why}");
+    }
     let limit = 20;
     for composable in composables.iter().take(limit) {
         let causes: Vec<String> = composable["invalidatedBy"]

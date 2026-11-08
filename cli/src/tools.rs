@@ -366,7 +366,11 @@ fn doctor_checks(platform: &str, device: &str, app: &str) -> Result<Vec<Step>> {
         ));
         steps.extend(front_step(platform, device, app));
         let running = capture(&adb, &["-s", device, "shell", "pidof", app]).stdout.trim().to_string();
-        steps.push((!running.is_empty(), "app running".into(), format!("ddp launch {device} --app {app}")));
+        steps.push((
+            !running.is_empty(),
+            "app running".into(),
+            format!("ddp crash --device {device} --app {app} (why it ended), then ddp launch {device} --app {app}"),
+        ));
         if running.is_empty() {
             return Ok(steps);
         }

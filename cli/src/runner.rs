@@ -952,6 +952,16 @@ pub fn elements_now(platform: &str, device: &str) -> Result<Vec<Value>> {
     Screen::open(platform, device)?.elements()
 }
 
+/// The first place whose element is not where it was seen: moved, or gone. Two rows can share a label, so it is the
+/// same key at the same frame, not the first element with that key.
+fn moved<'a>(places: &'a [Place], now: &[Value]) -> Option<&'a Place> {
+    places.iter().find(|place| {
+        place.seen.as_ref().is_some_and(|seen| {
+            !now.iter().any(|element| element_key(element) == element_key(seen) && frame_of(element) == frame_of(seen))
+        })
+    })
+}
+
 /// The keys of every element a change names, for refs.
 fn named_keys(change: &Change) -> Vec<String> {
     change.new.iter().chain(&change.changed).chain(&change.gone).map(element_key).collect()
@@ -970,14 +980,32 @@ fn perform(
     screen.ready()?;
     let looking = Instant::now();
     let mut before = screen.look()?;
-    let (action, places) = loop {
-        match build(&before, &device, &mut screen) {
+    let mut moving: Option<Instant> = None;
+    let (action, places, settled) = loop {
+        let (action, places) = match build(&before, &device, &mut screen) {
             Err(missing) if missing.code == "unknown_element" && looking.elapsed() < ELEMENT_WAIT => {
                 pause(LOOK_EVERY);
                 before = screen.look()?;
+                continue;
             }
-            built => break built?,
+            built => built?,
+        };
+        pause(BUSY_SAMPLE);
+        let settled = screen.look()?;
+        // A target the app moved between the two looks (a row put above it as the app finishes loading) would be
+        // touched where it was, on whatever is there now: found again in the newer look until it holds still.
+        if let Some(target) = moved(&places, &settled) {
+            if moving.get_or_insert_with(Instant::now).elapsed() >= ELEMENT_WAIT {
+                fail!(
+                    format!("'{}' kept moving on {device} for {} s", target.given, ELEMENT_WAIT.as_secs()),
+                    "still_moving",
+                    format!("ddp wait --settled 300ms --device {device}, then again")
+                );
+            }
+            before = settled;
+            continue;
         }
+        break (action, places, settled);
     };
     // A key has no target: with another app in front (a USB install or a permission dialog) it would go to that app,
     // and Back there says no for the person.
@@ -990,8 +1018,6 @@ fn perform(
             );
         }
     }
-    pause(BUSY_SAMPLE);
-    let settled = screen.look()?;
     let busy = differing(&before, &settled);
     let started = Instant::now();
     if let (Action::Type { .. }, Some(field)) = (&action, places.first()) {
@@ -1502,6 +1528,20 @@ mod tests {
         let mut elements = frame["elements"].as_array().cloned().unwrap();
         key_unnamed(&mut elements);
         elements
+    }
+
+    #[test]
+    fn a_target_that_moved_or_went_is_found_again() {
+        let row = |label: &str, y: i64| json!({"label": label, "type": "Button", "frame": [16, y, 370, 52]});
+        let seen = row("General", 380);
+        let places = [Place { given: "General".into(), at: (200.0, 406.0), seen: Some(seen.clone()) }];
+        assert!(moved(&places, &[row("General", 380)]).is_none());
+        assert!(moved(&places, &[row("Optimizing", 380), row("General", 432)]).is_some());
+        assert!(moved(&places, &[row("About", 380)]).is_some());
+        // The second of two rows with one label is still there: not moved.
+        assert!(moved(&places, &[row("General", 100), row("General", 380)]).is_none());
+        let point = [Place { given: "10,10".into(), at: (10.0, 10.0), seen: None }];
+        assert!(moved(&point, &[]).is_none());
     }
 
     #[test]

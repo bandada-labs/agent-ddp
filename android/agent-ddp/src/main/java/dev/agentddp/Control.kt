@@ -6,6 +6,7 @@ import android.graphics.Canvas
 import android.graphics.PointF
 import android.graphics.RectF
 import android.net.LocalServerSocket
+import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedInputStream
@@ -43,7 +44,11 @@ internal object ControlServer {
                     continue
                 }
                 thread(name = "agentddp-control-session", isDaemon = true) {
-                    socket.use { ControlConnection(BufferedInputStream(it.inputStream), it.outputStream, app).run() }
+                    // Nothing the library does may end the app: an error here only ends this connection.
+                    socket.use {
+                        runCatching { ControlConnection(BufferedInputStream(it.inputStream), it.outputStream, app).run() }
+                            .onFailure { error -> Log.e("agentddp", "control session ended", error) }
+                    }
                 }
             }
         }
