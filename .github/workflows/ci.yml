@@ -13,6 +13,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      # test_ddp.py starts the Android runner that ddp carries (cli/build.rs), so it is built first, as in release.yml.
+      - run: ./samples/android/gradlew -p samples/android :runner:assembleDebug
       - run: cargo fmt --check --manifest-path cli/Cargo.toml
       - run: cargo clippy --release --manifest-path cli/Cargo.toml -- -D warnings
       - run: cargo test --release --manifest-path cli/Cargo.toml
