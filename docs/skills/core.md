@@ -202,6 +202,19 @@ Every error ends with a `next:` line. The common ones:
 - The action from `--then` shows up late: on a simulator a tap lands about 0.5 s after recording starts. Record 120 frames or more.
 - `unknown ref @e7`: refs come from the last `tree` or `find`. Run it again.
 
+## With Xcode's own tools
+
+When the agent also has Xcode's MCP tools (the `xcode` plugin for Claude Code, Xcode 27), split the work: Xcode builds, installs and starts the app, ddp looks at the screen, touches it and checks it.
+
+```
+BuildProject, RunProject or DeviceInteractionInstallAndRun   # Xcode's tools: the app is running on a simulator
+ddp devices                                                  # its UDID
+ddp connect <sim UDID> --app <bundle id>                     # with the library; without it: ddp launch <sim UDID> --app <bundle id>
+ddp tree -i; ddp tap Save; ddp check all                     # from here every look and touch is ddp's
+```
+
+Xcode's device interaction touches a point and answers with the whole hierarchy file and a screenshot each time; `ddp tap Save` touches by name and answers in one line with what changed, and refuses with the reason when the touch would not land. So skip reading the hierarchy after each step while ddp is connected, and keep Xcode for what ddp does not do: the build and its errors, the unit tests, lldb, previews, the documentation. Both drive the same simulator, so do not send touches from the two at once. The tool names are Xcode 27.0's and may change with Xcode; on Android there is no Xcode, and the same ddp commands work.
+
 ## Sessions
 
 Two agents on one machine use `--session <name>` (or `DDP_SESSION`), so each has its own connection and takes under `.ddp/sessions/<name>/`.
