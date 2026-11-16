@@ -46,6 +46,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
@@ -343,6 +345,11 @@ fun SampleScreen(initialAction: String = "none") {
                         }, FrameLayout.LayoutParams(dp(context, 110), dp(context, 48)))
                     }
                 }, Modifier.padding(horizontal = 8.dp).size(110.dp, 48.dp))
+            }
+            item {
+                // Reachable only through accessibility: a screen reader can activate it, and nothing in it takes a touch.
+                Text("Only a11y", Modifier.testTag("trapAccessibilityOnly").padding(horizontal = 16.dp, vertical = 8.dp)
+                    .semantics { onClick("Activate") { lastAction = "accessibility"; true } })
             }
             item { Text("Last action: $lastAction", Modifier.padding(16.dp)) }
             item {

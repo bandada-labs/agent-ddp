@@ -324,8 +324,19 @@ internal object Hit {
             // Unknown never gets here: a center the engine cannot decide counts as reaching.
             Taker.Nothing, Taker.Unknown -> "untouchable" to null
             is Taker.OfView -> "covered" to described(taker.view)
-            is Taker.OfCompose -> "covered" to described(taker)
+            is Taker.OfCompose -> if (passesThrough(target, taker)) "untouchable" to null else "covered" to described(taker)
         }
+    }
+
+    /**
+     * True when everything in the hit path is a parent of the element: nothing lies over it, it takes no touch itself
+     * (text with only an accessibility action), and the touch goes on to what holds it, a list's scroll for one.
+     */
+    private fun passesThrough(target: Target, taker: Taker.OfCompose): Boolean {
+        val layout = target.layout ?: return false
+        if (taker.composeView !== target.view) return false
+        val parents = generateSequence(layout.parentInfo) { it.parentInfo }.toList()
+        return taker.path.all { hit -> parents.any { it === hit } }
     }
 
     private fun described(view: View): String {
