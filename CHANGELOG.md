@@ -12,8 +12,13 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 - An emulator `ddp up` made that died or froze is said so, by any command: `emulator-5560 died: the emulator's process (pid 1833872) is gone`, or `emulator-5560 is hung: the emulator's process runs (pid 1833872) but adb got no answer in 5s`, each with the emulator's last lines and `next: ddp down emulator-5560, then ddp up ...` with the options it was made with (codes `emulator_died`, `emulator_hung`). A command that fails on such an emulator reports that instead of what it ran into, and a command still waiting on it after 15 s ends with it: adb does not give up on a frozen emulator by itself. `ddp devices` lists it as `died` or `hung`, `ddp doctor` stops at it, and `ddp down` ends the process of one that does not stop when asked.
 - `ddp test` reads the run as it goes. When the run goes silent it asks after 10 s whether the device is still there, and stops with what it counted so far when the emulator died or froze or adb lost the device (`STOPPED in Class#test: emulator-5560 is hung ...`). `--stall <duration>` also stops a run in which no test starts or finishes for that long, says how many frames the app drew in the last 2 s when the platform counts them, and stops the app.
 
+- `ddp test --on <device>,<device>`: one instrumentation run split over several devices, one shard each at the same time (AndroidJUnitRunner's `numShards` and `shardIndex`, so every test runs on exactly one device). The counts are joined in one line with each device's part, a failing or stopped test says which device ran it (`FAIL Class#test on emulator-5562: ...`), and `--json` has `devices` and a `device` per failure. Every device is asked for the tests before any starts.
+
 ### Fixed
 
+- Off a Mac, `ddp up --platform ios` said `simctl list failed`; it now says iOS simulators run on a Mac only.
+- `ddp up --app <id>` and `ddp launch` on a device without the app said it `has no launcher activity`; they now say it is not installed, with the install as the next step.
+- `ddp test --json` printed the note that ddp's runner was stopped before the JSON; the note goes to stderr there.
 - `ddp devices` waited forever on a frozen emulator: its questions to a device now give up after 5 s.
 - `ddp up` on Android left the emulator running when it did not boot in time: an emulator that never reached adb could not be told to stop through it. Its process is now ended, an emulator that ends by itself is reported at once (`emulator_died`) instead of after 180 s, and so is one that cannot start its renderer (`no_renderer`: a display it may not use), which stays up without ever booting. Each says the emulator's last lines, kept in `.ddp/emulator-<port>.log`.
 

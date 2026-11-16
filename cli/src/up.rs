@@ -155,6 +155,13 @@ fn seconds(since: Instant) -> String {
 // iOS
 
 fn up_ios(base_name: Option<&str>) -> Result<Value> {
+    if !cfg!(target_os = "macos") {
+        fail!(
+            "iOS simulators run on a Mac only: ddp up --platform ios has to run there",
+            "not_supported",
+            "ddp up --platform android here, or run ddp on the Mac that has Xcode"
+        );
+    }
     let base_name = base_name.unwrap_or(IOS_BASE);
     let base = match find_simulator(base_name)? {
         Some(found) => found,

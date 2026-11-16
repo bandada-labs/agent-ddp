@@ -1082,6 +1082,43 @@ with tempfile.TemporaryDirectory() as directory:
     assert "FAIL emulator-5998 died" in dead_doctor.stdout, dead_doctor.stdout + dead_doctor.stderr
     assert ddp_in(directory, "down", "--session", "dead", env=host).stdout == "down android emulator-5998\n"
     assert json.loads((dead / "devices.json").read_text()) == []
+    # One test run split over two devices: each gets its shard (AndroidJUnitRunner's numShards and shardIndex) at
+    # the same time, the counts are joined, and a failing test says which device ran it.
+    shard_adb = Path(directory, "shards", "adb")
+    shard_adb.parent.mkdir()
+    shard_log = Path(directory, "shards.log")
+    block = lambda test, code, extra="": (f"echo 'INSTRUMENTATION_STATUS: class=fake.Suite'; echo 'INSTRUMENTATION_STATUS: test={test}'; "
+                                          f"echo 'INSTRUMENTATION_STATUS_CODE: 1'; echo 'INSTRUMENTATION_STATUS: class=fake.Suite'; "
+                                          f"echo 'INSTRUMENTATION_STATUS: test={test}'; {extra}echo 'INSTRUMENTATION_STATUS_CODE: {code}'; ")
+    shard_adb.write_text("#!/bin/sh\n"
+                         f"echo \"$*\" >> {shard_log}\n"
+                         "case \"$*\" in\n"
+                         "*'-s shard-none'*) ;;\n"
+                         "*'pm list instrumentation'*) echo 'instrumentation:fake.test/androidx.test.runner.AndroidJUnitRunner (target=fake)';;\n"
+                         "*'-s shard-a'*'am instrument'*) " + block("one", 0) + block("two", 0) + "echo 'INSTRUMENTATION_CODE: -1';;\n"
+                         "*'-s shard-b'*'am instrument'*) " + block("three", 0)
+                         + block("four", -2, "echo 'INSTRUMENTATION_STATUS: stack=java.lang.AssertionError: boom'; ") + "echo 'INSTRUMENTATION_CODE: -1';;\n"
+                         "esac\n")
+    shard_adb.chmod(0o755)
+    shards = {"PATH": f"{shard_adb.parent}:{os.environ['PATH']}"}
+    split = ddp_in(directory, "test", "--on", "shard-a,shard-b", "--app", "fake", env=shards)
+    assert split.returncode == 1 and "FAIL fake.Suite#four on shard-b: java.lang.AssertionError: boom\n" in split.stdout and re.search(
+        r"fake\.test/androidx\.test\.runner\.AndroidJUnitRunner on 2 devices in [\d.]+s: 3 passed, 1 failed, 0 skipped "
+        r"\(shard-a: 2 passed, 0 failed, 0 skipped in [\d.]+s; shard-b: 1 passed, 1 failed, 0 skipped in [\d.]+s\)\n", split.stdout), \
+        split.stdout + split.stderr
+    asked = shard_log.read_text()
+    assert "-s shard-a shell am instrument -w -r -e numShards 2 -e shardIndex 0 fake.test/" in asked and \
+        "-s shard-b shell am instrument -w -r -e numShards 2 -e shardIndex 1 fake.test/" in asked, asked
+    split_json = json.loads(ddp_in(directory, "test", "--on", "shard-a,shard-b", "--app", "fake", "--json", env=shards).stdout)
+    assert split_json["passed"] == 3 and split_json["failed"] == [{"test": "fake.Suite#four", "message": "java.lang.AssertionError: boom", "device": "shard-b"}] \
+        and [d["device"] for d in split_json["devices"]] == ["shard-a", "shard-b"], split_json
+    # A device without the tests stops the run before any test starts on the others.
+    shard_log.write_text("")
+    missing = ddp_in(directory, "test", "--on", "shard-a,shard-none", "--app", "fake", env=shards)
+    assert missing.returncode == 1 and "fake has no instrumentation on shard-none" in missing.stderr and "am instrument" not in shard_log.read_text(), \
+        missing.stderr + shard_log.read_text()
+    one_device = ddp_in(directory, "test", "--on", "shard-a", "--app", "fake", env=shards)
+    assert one_device.returncode == 1 and "--on takes two or more devices" in one_device.stderr, one_device.stderr
     # --gpu is the Android emulator's: a simulator has no such choice.
     ios_gpu = ddp_in(directory, "up", "--platform", "ios", "--gpu", "host")
     assert ios_gpu.returncode == 1 and "--gpu is for the Android emulator" in ios_gpu.stderr, ios_gpu.stderr

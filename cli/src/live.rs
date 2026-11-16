@@ -363,11 +363,22 @@ pub fn launcher_activity(device: &str, app: &str) -> Result<String> {
     );
     match resolved.stdout.lines().map(str::trim).rfind(|line| line.contains('/')) {
         Some(component) if resolved.code == 0 => Ok(component.to_string()),
-        _ => fail!(
-            format!("{app} has no launcher activity on {device}"),
-            "not_installed",
-            format!("ddp doctor {device} --app {app}")
-        ),
+        _ => {
+            // No package at all is the common case (a fresh device): say that, not what it lacks.
+            let installed = capture(&adb_path()?, &["-s", device, "shell", "pm", "path", app]);
+            if installed.code != 0 || !installed.stdout.starts_with("package:") {
+                fail!(
+                    format!("{app} is not installed on {device}"),
+                    "not_installed",
+                    format!("adb -s {device} install <the app's .apk>, or ddp up --platform android --install <.apk> --app {app}")
+                );
+            }
+            fail!(
+                format!("{app} has no launcher activity on {device}"),
+                "not_installed",
+                format!("ddp doctor {device} --app {app}")
+            )
+        }
     }
 }
 

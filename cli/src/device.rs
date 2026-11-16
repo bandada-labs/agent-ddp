@@ -719,8 +719,102 @@ fn stalled(adb_program: &str, device: &str, app: &str, stall: Duration) -> Strin
     format!("no test started or finished for {}s{drew}; the run was stopped (--stall)", stall.as_secs())
 }
 
+/// One device's part of a test run.
+struct DeviceRun {
+    device: String,
+    run: TestRun,
+    seconds: f64,
+}
+
+/// The app's instrumentation on this device: the one named, or the only one that targets the app.
+fn instrumentation_of(device: &str, app: &str, named: Option<&String>) -> Result<String> {
+    let listed = adb(device, &["shell", "pm", "list", "instrumentation"])?.stdout;
+    let target_note = format!("(target={app})");
+    let runners: Vec<String> = listed
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("instrumentation:"))
+        .filter(|line| line.ends_with(&target_note))
+        .filter_map(|line| line.split_whitespace().next().map(String::from))
+        .collect();
+    match (named, runners.as_slice()) {
+        (Some(runner), _) => Ok(runner.clone()),
+        (None, [one]) => Ok(one.clone()),
+        (None, []) => fail!(
+            format!("{app} has no instrumentation on {device}"),
+            "no_tests",
+            "install the test APK: ./gradlew installDebugAndroidTest"
+        ),
+        (None, many) => fail!(
+            format!("{app} has {} instrumentations on {device}: {}", many.len(), many.join(", ")),
+            "ambiguous",
+            "--runner <one of them>"
+        ),
+    }
+}
+
+/// The `am instrument` arguments the run was asked with: the class and each `--env` pair.
+fn instrumentation_arguments(args: &Args) -> Result<Vec<String>> {
+    let mut arguments = Vec::new();
+    if let Some(class) = &args.filter {
+        arguments.extend(["-e".into(), "class".into(), crate::live::shell_quoted(class)]);
+    }
+    for pair in &args.env {
+        let Some((key, value)) = pair.split_once('=').filter(|(key, _)| !key.is_empty()) else {
+            fail!(format!("--env takes KEY=VALUE, not '{pair}'"), "bad_value", "--env size=small");
+        };
+        arguments.extend(["-e".into(), crate::live::shell_quoted(key), crate::live::shell_quoted(value)]);
+    }
+    Ok(arguments)
+}
+
+/// Runs the instrumentation on one device, all of it or one shard of `shards` (AndroidJUnitRunner's own split:
+/// every test lands in exactly one shard).
+fn run_tests_on(
+    device: &str,
+    app: &str,
+    runner: &str,
+    arguments: &[String],
+    shard: Option<(usize, usize)>,
+    stall: Option<Duration>,
+) -> Result<DeviceRun> {
+    let mut command: Vec<String> = ["-s", device, "shell", "am", "instrument", "-w", "-r"].map(String::from).to_vec();
+    command.extend(arguments.iter().cloned());
+    if let Some((index, shards)) = shard {
+        command.extend(["-e".into(), "numShards".into(), shards.to_string()]);
+        command.extend(["-e".into(), "shardIndex".into(), index.to_string()]);
+    }
+    command.push(runner.to_string());
+    let started = Instant::now();
+    let words: Vec<&str> = command.iter().map(String::as_str).collect();
+    let (output, stopped_from_outside) = instrument(&adb_path()?, &words, device, app, stall)?;
+    let mut run = instrumentation_run(&output);
+    if let Some(why) = stopped_from_outside {
+        // The run did not end by itself: why ddp stopped waiting, and the test that was running then.
+        run.stopped = Some((why, run.stopped.and_then(|(_, test)| test)));
+    }
+    Ok(DeviceRun { device: device.to_string(), run, seconds: py::round_f(started.elapsed().as_secs_f64(), 1) })
+}
+
 /// Runs the app's instrumentation tests and counts what passed. It frees UiAutomation from ddp's runner first.
+/// With `--on <device>,<device>` the run is split over those devices, one shard each at the same time, and the
+/// counts are joined; a failing test says which device ran it.
 pub fn test(args: &mut Args) -> Result<i32> {
+    let devices: Vec<String> =
+        args.on.as_deref().map(|on| on.split(',').map(str::trim).map(String::from).collect()).unwrap_or_default();
+    if let Some(first) = devices.first() {
+        if devices.iter().any(String::is_empty) || devices.len() < 2 {
+            fail!(
+                "--on takes two or more devices",
+                "bad_value",
+                "ddp test --on emulator-5560,emulator-5562 --app <id>"
+            );
+        }
+        if let Some(twice) = devices.iter().enumerate().find(|(at, device)| devices[..*at].contains(device)) {
+            fail!(format!("--on names {} twice", twice.1), "bad_value", "one shard per device: name each once");
+        }
+        // The app and the platform come from the first device, as for a run on it alone.
+        args.device = Some(first.clone());
+    }
     let (platform, device, app) = target(args)?;
     let Some(app) = app else { fail!("no app", "missing_option", "pass --app, or ddp connect first") };
     if platform == "ios" {
@@ -730,72 +824,121 @@ pub fn test(args: &mut Args) -> Result<i32> {
             format!("xcodebuild test-without-building -xctestrun <file> -destination id={device}")
         );
     }
-    let listed = adb(&device, &["shell", "pm", "list", "instrumentation"])?.stdout;
-    let target_note = format!("(target={app})");
-    let runners: Vec<String> = listed
-        .lines()
-        .filter_map(|line| line.trim().strip_prefix("instrumentation:"))
-        .filter(|line| line.ends_with(&target_note))
-        .filter_map(|line| line.split_whitespace().next().map(String::from))
-        .collect();
-    let runner = match (&args.name, runners.as_slice()) {
-        (Some(runner), _) => runner.clone(),
-        (None, [one]) => one.clone(),
-        (None, []) => fail!(
-            format!("{app} has no instrumentation on {device}"),
-            "no_tests",
-            "install the test APK: ./gradlew installDebugAndroidTest"
-        ),
-        (None, many) => fail!(
-            format!("{app} has {} instrumentations: {}", many.len(), many.join(", ")),
-            "ambiguous",
-            "--runner <one of them>"
-        ),
-    };
-    if crate::runner::stop(&device).unwrap_or(false) {
-        say!("ddp's runner stopped on {device}: UiAutomation is free for the tests");
-    }
-    let mut command: Vec<String> = ["-s", &device, "shell", "am", "instrument", "-w", "-r"].map(String::from).to_vec();
-    if let Some(class) = &args.filter {
-        command.extend(["-e".into(), "class".into(), crate::live::shell_quoted(class)]);
-    }
-    for pair in &args.env {
-        let Some((key, value)) = pair.split_once('=').filter(|(key, _)| !key.is_empty()) else {
-            fail!(format!("--env takes KEY=VALUE, not '{pair}'"), "bad_value", "--env size=small");
-        };
-        command.extend(["-e".into(), crate::live::shell_quoted(key), crate::live::shell_quoted(value)]);
-    }
-    command.push(runner.clone());
-    let started = Instant::now();
-    let words: Vec<&str> = command.iter().map(String::as_str).collect();
+    let devices = if devices.is_empty() { vec![device] } else { devices };
+    // Every device is asked before any test starts: half a run on the devices that have the tests is no run.
+    let runners: Vec<String> =
+        devices.iter().map(|device| instrumentation_of(device, &app, args.name.as_ref())).collect::<Result<_>>()?;
+    let arguments = instrumentation_arguments(args)?;
     let stall = args.stall.as_deref().map(state::parse_ms).transpose()?.map(|ms| Duration::from_millis(ms as u64));
-    let (output, stopped_from_outside) = instrument(&adb_path()?, &words, &device, &app, stall)?;
-    let mut run = instrumentation_run(&output);
-    if let Some(why) = stopped_from_outside {
-        // The run did not end by itself: why ddp stopped waiting, and the test that was running then.
-        run.stopped = Some((why, run.stopped.and_then(|(_, test)| test)));
+    for device in &devices {
+        if crate::runner::stop(device).unwrap_or(false) {
+            // With --json the answer is one JSON value on stdout: the note goes beside it.
+            let note = format!("ddp's runner stopped on {device}: UiAutomation is free for the tests");
+            if ctx().json {
+                warn!("{note}");
+            } else {
+                say!("{note}");
+            }
+        }
     }
-    let seconds = py::round_f(started.elapsed().as_secs_f64(), 1);
-    if ctx().json {
-        let failed: Vec<Value> =
-            run.failed.iter().map(|(test, message)| json!({"test": test, "message": message})).collect();
-        let stopped = run.stopped.as_ref().map(|(why, test)| json!({"why": why, "test": test}));
-        say!(
-            "{}",
-            py::dumps(
-                &json!({"runner": runner, "passed": run.passed, "failed": failed, "skipped": run.skipped, "stopped": stopped, "seconds": seconds})
-            )
-        );
+    let started = Instant::now();
+    let shards = devices.len();
+    let runs: Vec<DeviceRun> = if shards == 1 {
+        vec![run_tests_on(&devices[0], &app, &runners[0], &arguments, None, stall)?]
     } else {
-        for (test, message) in &run.failed {
-            say!("FAIL {test}: {message}");
+        std::thread::scope(|scope| {
+            let running: Vec<_> = devices
+                .iter()
+                .zip(&runners)
+                .enumerate()
+                .map(|(index, (device, runner))| {
+                    let (app, arguments) = (&app, &arguments);
+                    scope.spawn(move || run_tests_on(device, app, runner, arguments, Some((index, shards)), stall))
+                })
+                .collect();
+            running
+                .into_iter()
+                .map(|run| {
+                    run.join().unwrap_or_else(|_| fail!("a device's test run ended unexpectedly", "command_failed"))
+                })
+                .collect::<Result<Vec<DeviceRun>>>()
+        })?
+    };
+    let seconds = py::round_f(started.elapsed().as_secs_f64(), 1);
+    let runner = &runners[0];
+    let passed: usize = runs.iter().map(|r| r.run.passed).sum();
+    let skipped: usize = runs.iter().map(|r| r.run.skipped).sum();
+    let failures: usize = runs.iter().map(|r| r.run.failed.len()).sum();
+    let all_ran = runs.iter().all(|r| r.run.failed.is_empty() && r.run.stopped.is_none());
+    if ctx().json {
+        let on = |device: &str, mut entry: Value| {
+            if shards > 1 {
+                entry["device"] = json!(device);
+            }
+            entry
+        };
+        let failed: Vec<Value> = runs
+            .iter()
+            .flat_map(|r| {
+                r.run.failed.iter().map(|(test, message)| on(&r.device, json!({"test": test, "message": message})))
+            })
+            .collect();
+        let stopped: Vec<Value> = runs
+            .iter()
+            .filter_map(|r| r.run.stopped.as_ref().map(|(why, test)| on(&r.device, json!({"why": why, "test": test}))))
+            .collect();
+        let mut result =
+            json!({"runner": runner, "passed": passed, "failed": failed, "skipped": skipped, "seconds": seconds});
+        if shards == 1 {
+            result["stopped"] = stopped.into_iter().next().unwrap_or(Value::Null);
+        } else {
+            result["stopped"] = json!(stopped);
+            result["devices"] = runs
+                .iter()
+                .map(|r| json!({"device": r.device, "passed": r.run.passed, "failed": r.run.failed.len(), "skipped": r.run.skipped, "seconds": r.seconds}))
+                .collect();
         }
-        if let Some((why, test)) = &run.stopped {
-            say!("STOPPED {}{why}", test.as_ref().map(|test| format!("in {test}: ")).unwrap_or_default());
-        }
-        say!("{runner} in {seconds}s: {} passed, {} failed, {} skipped", run.passed, run.failed.len(), run.skipped);
+        say!("{}", py::dumps(&result));
+        return Ok(if all_ran { 0 } else { 1 });
     }
-    Ok(if run.failed.is_empty() && run.stopped.is_none() { 0 } else { 1 })
+    for device_run in &runs {
+        let on = if shards > 1 { format!(" on {}", device_run.device) } else { String::new() };
+        for (test, message) in &device_run.run.failed {
+            say!("FAIL {test}{on}: {message}");
+        }
+        if let Some((why, test)) = &device_run.run.stopped {
+            let on = on.trim_start();
+            let place = match (test, on.is_empty()) {
+                (Some(test), true) => format!("in {test}: "),
+                (Some(test), false) => format!("{on} in {test}: "),
+                (None, true) => String::new(),
+                (None, false) => format!("{on}: "),
+            };
+            say!("STOPPED {place}{why}");
+        }
+    }
+    if shards == 1 {
+        say!("{runner} in {seconds}s: {passed} passed, {failures} failed, {skipped} skipped");
+    } else {
+        let each: Vec<String> = runs
+            .iter()
+            .map(|r| {
+                format!(
+                    "{}: {} passed, {} failed, {} skipped in {}s",
+                    r.device,
+                    r.run.passed,
+                    r.run.failed.len(),
+                    r.run.skipped,
+                    r.seconds
+                )
+            })
+            .collect();
+        say!(
+            "{runner} on {shards} devices in {seconds}s: {passed} passed, {failures} failed, {skipped} skipped ({})",
+            each.join("; ")
+        );
+    }
+    Ok(if all_ran { 0 } else { 1 })
 }
 
 /// iOS content size categories as `simctl ui content_size` names them. `default` and `largest` are the names the
