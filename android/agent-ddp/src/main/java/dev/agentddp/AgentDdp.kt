@@ -240,6 +240,16 @@ internal object FrameCapture {
     }
 
     /**
+     * The part of the screen the window of [root] takes touches in: where the window sits and its size. Not the
+     * root's `getLocationOnScreen` rectangle: under a pan that one moves with the content and reaches past the
+     * screen, where no finger gets.
+     */
+    fun windowRect(root: View): RectF {
+        val origin = windowOrigin(root)
+        return RectF(origin[0].toFloat(), origin[1].toFloat(), (origin[0] + root.width).toFloat(), (origin[1] + root.height).toFloat())
+    }
+
+    /**
      * The app's window roots in the order they were added (later ones draw on top). Popup windows (DropdownMenu,
      * Dialog, tooltips) are windows of their own that the activity's view tree does not hold.
      * WindowManagerGlobal is hidden API; Debug builds may use it. Falls back to the activity window alone.

@@ -17,6 +17,8 @@ const TAP_WAIT_MS: u64 = 2000;
 /// How long `tap` looks for a change on screen after the touch.
 const CHANGE_WAIT_MS: u64 = 1000;
 const POLL_MS: u64 = 50;
+/// `by` of an `outside` hit whose point is past the window's edge, as the Android library writes it.
+const OUTSIDE_THE_WINDOW: &str = "the window";
 /// After the first change, the screen is settled when this many polls in a row bring nothing new.
 const QUIET_POLLS: u32 = 3;
 /// The longest `tap` waits for the screen to settle.
@@ -47,7 +49,8 @@ pub fn tap(args: &mut Args) -> Result<i32> {
         say!("tapped {key} at ({:.0}, {:.0})", x + w / 2.0, y + h / 2.0);
         return Ok(0);
     }
-    let (hit, moving) = wait_until_tappable(&mut control, "tap", &key, &element)?;
+    let window = window_size(&before.header);
+    let (hit, moving) = wait_until_tappable(&mut control, "tap", &key, &element, window)?;
     let (x, y) = (f(&hit["point"][0]), f(&hit["point"][1]));
     // Two frames a little apart, so a clock that ticks every frame shows as busy.
     std::thread::sleep(Duration::from_millis(BUSY_SAMPLE_MS).saturating_sub(started.elapsed()));
@@ -77,10 +80,13 @@ pub fn check_tappable(args: &Args) -> Result<usize> {
     let session = require_session()?;
     let mut control = open(&session)?;
     let hits = control.call("screen.hit", json!({}))?;
+    let window = window_size(&control.call("app.info", json!({}))?);
     let hooks = crate::inspect::troubled_hooks(&mut control);
     control.close();
     crate::inspect::say_hooks(&hooks);
-    let hits = hits["elements"].as_array().cloned().unwrap_or_default();
+    let mut hits = hits["elements"].as_array().cloned().unwrap_or_default();
+    // Scrolled or panned out of the window is where content waits, not a control a touch misses.
+    hits.retain(|hit| !window.is_some_and(|window| off_window(rect(&hit["frame"]), window)));
     let mut problems = 0;
     for hit in &hits {
         let key = element_key(hit);
@@ -124,6 +130,7 @@ fn detail(hit: &Value) -> String {
     match text(hit, "reason") {
         "disabled" => "disabled".into(),
         "covered" => format!("covered by {}", if by.is_empty() { "another view" } else { by }),
+        "outside" if by == OUTSIDE_THE_WINDOW => "outside the window".into(),
         "outside" => format!("outside its parent ({by})"),
         "intercepted" => format!("taken first by a parent's {by}"),
         _ if by.is_empty() => "taking no touch".into(),
@@ -131,13 +138,42 @@ fn detail(hit: &Value) -> String {
     }
 }
 
+/// The window's size in the frames' unit, from `app.info` or a take's header. None when the library gave none.
+fn window_size(info: &Value) -> Option<(f64, f64)> {
+    let size = info["screen"].as_array()?;
+    Some((size.first()?.as_f64()?, size.get(1)?.as_f64()?))
+}
+
+/// No part of the frame is inside the window: none of it is drawn and no finger gets there.
+fn off_window([x, y, w, h]: [f64; 4], (width, height): (f64, f64)) -> bool {
+    x + w <= 0.0 || y + h <= 0.0 || x >= width || y >= height
+}
+
+/// The swipe that moves the content toward the window from the side the frame left it on.
+fn swipe_toward([x, y, w, h]: [f64; 4], (width, height): (f64, f64)) -> String {
+    let (near, far) = (0.3, 0.7);
+    let (from, to) = if y + h <= 0.0 {
+        ((width / 2.0, height * near), (width / 2.0, height * far))
+    } else if y >= height {
+        ((width / 2.0, height * far), (width / 2.0, height * near))
+    } else if x + w <= 0.0 {
+        ((width * near, height / 2.0), (width * far, height / 2.0))
+    } else {
+        ((width * far, height / 2.0), (width * near, height / 2.0))
+    };
+    format!("ddp swipe {:.0},{:.0} {:.0},{:.0}", from.0, from.1, to.0, to.1)
+}
+
 /// Asks the app until the element holds still, is enabled and has a point a touch reaches, or the wait is over.
-/// Returns the hit and whether the element was still moving when the wait ran out.
+/// Returns the hit and whether the element was still moving when the wait ran out. `window` is the window's size:
+/// an element with no part inside it is refused, whatever the app's hit test says of points past the edge (the
+/// Android library up to 0.5.0 took a panned window's content above the screen as reachable).
 fn wait_until_tappable(
     control: &mut crate::control::Control,
     command: &str,
     key: &str,
     element: &Value,
+    window: Option<(f64, f64)>,
 ) -> Result<(Value, bool)> {
     let name = py::str(element.get("id").filter(|v| truthy(Some(*v))).unwrap_or(&element["label"]));
     let deadline = Instant::now() + Duration::from_millis(TAP_WAIT_MS);
@@ -154,13 +190,22 @@ fn wait_until_tappable(
         let now = rect(&hit["frame"]);
         let moving = distance(now, last) > STILL;
         last = now;
-        let reachable = hit["reason"] != "disabled" && truthy(hit.get("point"));
+        let off_screen = window.filter(|window| off_window(now, *window));
+        let reachable = hit["reason"] != "disabled" && truthy(hit.get("point")) && off_screen.is_none();
         if reachable && !moving {
             return Ok((hit, false));
         }
         if Instant::now() >= deadline {
             if reachable {
                 return Ok((hit, true));
+            }
+            if let Some(window) = off_screen {
+                let [x, y, w, h] = now;
+                return Err(failure(
+                    format!("{key} is off screen at [{x:.0},{y:.0} {w:.0}x{h:.0}]: bring it into view first"),
+                    "off_screen",
+                    Some(&format!("{}, then ddp {command} {key}", swipe_toward(now, window))),
+                ));
             }
             let reason = text(&hit, "reason");
             let next = format!("ddp check tappable, or ddp {command} {key} --force to touch it anyway");
@@ -383,7 +428,8 @@ pub fn gesture(args: &mut Args) -> Result<i32> {
     // A press on an element waits, like tap, until the app's hit test says a touch reaches it, and goes where it does.
     let from = match (&gesture[..], frame.named(&from_text)) {
         ("double-tap" | "long-press", Some(element)) if !args.force => {
-            let (hit, _) = wait_until_tappable(&mut control, &gesture, &from_text, element)?;
+            let (hit, _) =
+                wait_until_tappable(&mut control, &gesture, &from_text, element, window_size(&before.header))?;
             (f(&hit["point"][0]), f(&hit["point"][1]))
         }
         _ => from,

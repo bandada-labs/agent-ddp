@@ -30,7 +30,7 @@ internal object Input {
         when {
             down == null && point != null -> {
                 val screenPx = point
-                val root = roots().lastOrNull { it.isShown && screenRect(it).contains(screenPx.x, screenPx.y) }
+                val root = roots().lastOrNull { it.isShown && FrameCapture.windowRect(it).contains(screenPx.x, screenPx.y) }
                     ?: throw IllegalStateException("No window at that point")
                 Finger(root, SystemClock.uptimeMillis(), screenPx).also { finger = it }.dispatch(MotionEvent.ACTION_DOWN)
             }

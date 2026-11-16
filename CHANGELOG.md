@@ -2,6 +2,12 @@
 
 Changes that users or agents will notice. Before 1.0, a minor version may change the protocol or the output; those changes are marked.
 
+## Unreleased
+
+### Fixed
+
+- Android with the library: `tap`, `long-press` and `double-tap` touched an element the keyboard's pan had moved above the screen (`tapped animatedButton at (540, -316)`) and the app took it, though no finger gets there. The library asked each window by where its content was drawn, which under a pan reaches past the screen; it now asks by where the window sits. The CLI also refuses an element with no part inside the window, with any library version: `animatedButton is off screen at [383,-385 315x137]: bring it into view first`, next the swipe that brings it back. `check tappable` leaves such elements out: content scrolled out of the window is not a control a touch misses. `screen.hit` answers them `outside` by `the window`.
+
 ## 0.5.0 (2026-11-08)
 
 ### Added

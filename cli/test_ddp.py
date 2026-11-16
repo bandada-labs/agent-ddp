@@ -433,6 +433,7 @@ class FakeApp:
         self.touches, self.runner, self.saved, self.hide_save, self.rows = [], [], False, False, False
         self.locked, self.menu, self.windows, self.modal = False, False, False, False
         self.scrolls, self.save_late, self.late_id = False, 0, False
+        self.panned = False
         self.server = socket.socket()
         self.server.bind(("127.0.0.1", 0))
         self.server.listen()
@@ -456,6 +457,10 @@ class FakeApp:
                     {"id": "locked", "label": "Locked", "tap": True, "frame": [0, 60, 100, 30]},
                     # Reached, but a parent takes the touch on its way.
                     {"id": "row", "label": "Row", "tap": True, "frame": [0, 130, 100, 30]}]
+        if self.panned:
+            # The keyboard panned the window: this one is above its top edge. The fake's hit test still gives it a
+            # point, as the Android library up to 0.5.0 did.
+            elements.append({"id": "above", "label": "Above", "tap": True, "frame": [0, -200, 100, 50]})
         nodes = [{"z": 0, "kind": "layer", "fill": "#0000FFFF", "frame": [0, 0, 100, 50]},
                  {"z": 1, "kind": "layer", "fill": "#000000FF", "frame": [0, 100, 20 + i % 3, 20]}]
         if self.tapped_at is not None:
@@ -718,6 +723,18 @@ with tempfile.TemporaryDirectory() as directory:
     assert tappable.returncode == 1 and "COVERED locked: covered by scrim" in tappable.stdout and \
         "INTERCEPTED row: taken first by a parent's BlockingLayout (onInterceptTouchEvent)" in tappable.stdout and \
         "1 of 3 controls take a touch" in tappable.stdout, tappable.stdout + tappable.stderr
+    # No part of the element is inside the window: no finger gets there, so tap refuses whatever the hit test says,
+    # says which way to bring it in, and check tappable does not count it (content scrolled out is no problem).
+    app.panned = True
+    touches_before = len(app.touches)
+    off_screen = ddp_in(directory, "tap", "above")
+    assert off_screen.returncode == 1 and "above is off screen at [0,-200 100x50]: bring it into view first" in off_screen.stderr \
+        and "next: ddp swipe 195,253 195,591, then ddp tap above" in off_screen.stderr, off_screen.stderr
+    assert len(app.touches) == touches_before, app.touches
+    assert "1 of 3 controls take a touch" in ddp_in(directory, "check", "tappable").stdout
+    long_press = ddp_in(directory, "long-press", "above")
+    assert long_press.returncode == 1 and "above is off screen" in long_press.stderr, long_press.stderr
+    app.panned = False
     then_tap = f"{DDP[0]} tap button"
     waited = ddp_in(directory, "wait", "text", "saved", "--timeout", "2s")
     assert waited.returncode == 1 and "next:" in waited.stderr, waited.stderr  # nothing tapped yet: times out

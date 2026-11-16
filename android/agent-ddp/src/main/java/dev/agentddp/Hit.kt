@@ -149,7 +149,7 @@ internal object Hit {
         val screen = PointF(point.x + origin[0], point.y + origin[1])
         val root = FrameCapture.windowRoots(decor).lastOrNull { root ->
             val flags = (root.layoutParams as? WindowManager.LayoutParams)?.flags ?: 0
-            root.isShown && flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE == 0 && screenRect(root).contains(screen.x, screen.y)
+            root.isShown && flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE == 0 && FrameCapture.windowRect(root).contains(screen.x, screen.y)
         } ?: return Taker.Nothing
         if (Dispatch.windowCallbackDecides(root)) return Taker.Unknown
         val rootOrigin = IntArray(2).also(root::getLocationOnScreen)
@@ -306,6 +306,11 @@ internal object Hit {
 
     /** Why the touch at the element's center misses it, and what takes it instead. */
     private fun blocker(target: Target, point: PointF): Pair<String, String?> {
+        // Panned or scrolled past the window's edge: frames are in the activity window's px, from 0,0.
+        val window = FrameRecorder.resumedActivity?.window?.decorView
+        if (window != null && !RectF(0f, 0f, window.width.toFloat(), window.height.toFloat()).contains(point.x, point.y)) {
+            return "outside" to OUTSIDE_THE_WINDOW
+        }
         if (target.layout == null) {
             val decor = FrameRecorder.resumedActivity?.window?.decorView
             val origin = decor?.let(FrameCapture::windowOrigin) ?: IntArray(2)
@@ -361,6 +366,9 @@ internal object Hit {
     }
 
     private fun JSONArray.f(index: Int) = getDouble(index).toFloat()
+
+    /** `by` of an `outside` whose point is past the activity window's edge. The CLI reads it: keep both in step. */
+    private const val OUTSIDE_THE_WINDOW = "the window"
 }
 
 /**
