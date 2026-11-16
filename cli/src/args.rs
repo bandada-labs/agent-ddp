@@ -101,7 +101,7 @@ Start here (for agents): ddp skills get core
 
   connect | launch | disconnect | doctor   attach to a running Debug app, or start it fresh; check the setup
   stop | clear | test                      stop the app; clear its data; run its instrumentation tests (Android)
-  up | down | devices                     a simulator or emulator of ddp's own for a run, removed after; what is running
+  up | down | devices | version           a simulator or emulator of ddp's own for a run, removed after; what is running; which ddp
   tree | find | get | read | watch | eval  what is drawn, now or over a take (@refs from tree and find)
   record | wait | tap | type | press       take a recording, wait, touch and type
   swipe | drag | scroll | double-tap | long-press   gestures with a real finger, then what changed
@@ -385,6 +385,7 @@ pub fn parser() -> Command {
                                       Android: a runtime permission (CAMERA, POST_NOTIFICATIONS or android.permission.CAMERA)")
                 .required(true))))
         .subcommand(sub("devices", "the booted simulators and adb devices, and which sessions in this folder use them"))
+        .subcommand(sub("version", "which ddp this is, as a command: for a runner that passes subcommands only, not --version"))
         .subcommand(device_options(sub("biometric", "simulated Face ID / Touch ID or fingerprint: enroll, then match or fail")
             .arg(choices("action", &["enroll", "match", "fail"]).required(true))))
         .subcommand(device_options(sub("push", "iOS: deliver a push notification to the app, as APNs would")

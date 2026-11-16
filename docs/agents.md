@@ -52,6 +52,7 @@ ddp press Enter | Tab | Backspace                  without the library also Esca
 ddp scroll up|down|left|right [--to <text>] [--in <element>]   without the library: no fling; --to until it is on screen
 ddp permission grant|revoke <name>                 iOS simctl privacy service (camera, photos...) or paste; Android runtime permission (CAMERA)
 ddp devices                                        booted simulators and adb devices, and the sessions that use them
+ddp version                                        which ddp this is: version, protocol, Android runner (as `--version`, for tools that pass subcommands only)
 ddp prefs [list | set <key> <value> | rm <key> | clear | files] [--in <suite or file>]
 ddp run [<command> ['<params JSON>']]              run a command the app added in Debug; no name lists them
 ddp wait id <id> | text <label> [--gone] | --settled 300ms [--ignore <el>] [--timeout 10s]

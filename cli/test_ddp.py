@@ -1119,6 +1119,11 @@ with tempfile.TemporaryDirectory() as directory:
         missing.stderr + shard_log.read_text()
     one_device = ddp_in(directory, "test", "--on", "shard-a", "--app", "fake", env=shards)
     assert one_device.returncode == 1 and "--on takes two or more devices" in one_device.stderr, one_device.stderr
+    # The version as a subcommand, for a runner that passes subcommands only.
+    said = ddp_in(directory, "version").stdout
+    assert re.fullmatch(r"ddp \d+\.\d+\.\d+(-[\w.]+)? \(protocol 2, Android runner \d+\)\n", said) and \
+        said.split()[1] == ddp_in(directory, "--version").stdout.split()[1], said
+    assert set(json.loads(ddp_in(directory, "version", "--json").stdout)) == {"version", "protocol", "runner"}
     # --gpu is the Android emulator's: a simulator has no such choice.
     ios_gpu = ddp_in(directory, "up", "--platform", "ios", "--gpu", "host")
     assert ios_gpu.returncode == 1 and "--gpu is for the Android emulator" in ios_gpu.stderr, ios_gpu.stderr

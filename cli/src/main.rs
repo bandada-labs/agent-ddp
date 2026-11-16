@@ -66,6 +66,7 @@ fn handler(command: &str) -> fn(&mut Args) -> Result<i32> {
         "press" => device::press,
         "permission" => device::permission,
         "devices" => up::devices,
+        "version" => tools::version,
         "scroll" => device::scroll,
         "prefs" => live::prefs,
         "run" => live::run_command,

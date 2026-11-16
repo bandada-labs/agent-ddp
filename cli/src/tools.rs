@@ -285,6 +285,19 @@ pub fn skills(args: &mut Args) -> Result<i32> {
     Ok(0)
 }
 
+/// `ddp version`: what `ddp --version` prints, plus the protocol it speaks to the libraries and the Android runner
+/// it carries. A subcommand, so a tool that lets only subcommands through can still ask which ddp it runs.
+pub fn version(_args: &mut Args) -> Result<i32> {
+    let (version, protocol, runner) =
+        (env!("CARGO_PKG_VERSION"), crate::model::PROTOCOL, crate::runner::RUNNER_VERSION);
+    if ctx().json {
+        say!("{}", py::dumps(&json!({"version": version, "protocol": protocol, "runner": runner})));
+    } else {
+        say!("ddp {version} (protocol {protocol}, Android runner {runner})");
+    }
+    Ok(0)
+}
+
 type Step = (bool, String, String);
 
 /// (ok, what, fix) for each step from the device to a frame with elements. Stops at the first failure.

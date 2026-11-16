@@ -14,6 +14,8 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 
 - `ddp test --on <device>,<device>`: one instrumentation run split over several devices, one shard each at the same time (AndroidJUnitRunner's `numShards` and `shardIndex`, so every test runs on exactly one device). The counts are joined in one line with each device's part, a failing or stopped test says which device ran it (`FAIL Class#test on emulator-5562: ...`), and `--json` has `devices` and a `device` per failure. Every device is asked for the tests before any starts.
 
+- `ddp version`: the version as a subcommand, with the protocol and the Android runner ddp carries (`ddp 0.5.1 (protocol 2, Android runner 9)`; `--json` for the three). For a tool that lets only subcommands through, where `ddp --version` is refused.
+
 ### Fixed
 
 - Off a Mac, `ddp up --platform ios` said `simctl list failed`; it now says iOS simulators run on a Mac only.
