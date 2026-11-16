@@ -345,6 +345,9 @@ fn doctor_checks(platform: &str, device: &str, app: &str) -> Result<Vec<Step>> {
         if state != "device" {
             return Ok(steps);
         }
+        if let Some(renderer) = crate::up::android_renderer(&adb, device) {
+            steps.push((true, crate::up::drawn_with(&renderer), String::new()));
+        }
         steps.extend(miui_input_step(&adb, device));
         let installed = capture(&adb, &["-s", device, "shell", "pm", "path", app]);
         let is_installed = installed.stdout.starts_with("package:");

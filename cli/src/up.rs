@@ -11,7 +11,7 @@ use crate::{fail, say};
 use serde_json::{json, Value};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 const IOS_BASE: &str = "ddp-base";
@@ -41,12 +41,21 @@ pub fn up(args: &mut Args) -> Result<i32> {
     };
     let started = Instant::now();
     let base = args.name.clone();
-    let device = if platform == "ios" { up_ios(base.as_deref())? } else { up_android(base.as_deref())? };
+    let gpu = args.gpu.as_deref().map(Gpu::named);
+    if gpu.is_some() && platform == "ios" {
+        fail!(
+            "--gpu is for the Android emulator: a simulator draws with the Mac's own",
+            "bad_option",
+            "ddp up --platform ios"
+        );
+    }
+    let device = if platform == "ios" { up_ios(base.as_deref())? } else { up_android(base.as_deref(), gpu)? };
     let mut owned = owned_devices();
     owned.push(device.clone());
     save_owned(&owned)?;
     let id = py::str(&device["device"]);
-    say!("up {platform} {id} in {}s", seconds(started));
+    let draws = device["renderer"].as_str().map(|renderer| format!("; {}", drawn_with(renderer))).unwrap_or_default();
+    say!("up {platform} {id} in {}s{draws}", seconds(started));
 
     if let Some(build) = args.path.clone() {
         install(&platform, &id, &build)?;
@@ -255,19 +264,118 @@ fn avd_exists(name: &str) -> Result<bool> {
     Ok(listed.stdout.lines().any(|line| line.trim() == name))
 }
 
-fn up_android(base_name: Option<&str>) -> Result<Value> {
+/// What `ddp up --gpu` asks the emulator to draw with.
+#[derive(Clone, Copy, PartialEq)]
+enum Gpu {
+    /// The machine's graphics card (`-gpu host`).
+    Host,
+    /// The emulator's own renderer on the CPU (`-gpu swiftshader_indirect`).
+    Software,
+}
+
+impl Gpu {
+    fn named(name: &str) -> Gpu {
+        if name == "host" {
+            Gpu::Host
+        } else {
+            Gpu::Software
+        }
+    }
+
+    fn emulator_mode(self) -> &'static str {
+        match self {
+            Gpu::Host => "host",
+            Gpu::Software => "swiftshader_indirect",
+        }
+    }
+}
+
+/// Renderers that draw on the CPU, by the names they give themselves.
+const SOFTWARE_RENDERERS: [&str; 4] = ["SwiftShader", "llvmpipe", "softpipe", "Software Rasterizer"];
+
+fn draws_in_software(renderer: &str) -> bool {
+    SOFTWARE_RENDERERS.iter().any(|name| renderer.contains(name))
+}
+
+/// "draws with <renderer>", marked when it is a software renderer, so a silent fallback from the graphics card shows.
+pub fn drawn_with(renderer: &str) -> String {
+    let software = if draws_in_software(renderer) { " (software, not the graphics card)" } else { "" };
+    format!("draws with {renderer}{software}")
+}
+
+/// What the device composes its screen with, as SurfaceFlinger names it (`GLES: vendor, renderer, version`). An
+/// emulator's renderer is a translator around the one that draws: `Android Emulator OpenGL ES Translator (<that one>)`.
+/// None when SurfaceFlinger prints no such line (a Vulkan render engine): unknown, never a guess.
+pub fn android_renderer(adb: &str, device: &str) -> Option<String> {
+    let dump = capture(adb, &["-s", device, "shell", "dumpsys", "SurfaceFlinger"]).stdout;
+    renderer_in(&dump)
+}
+
+fn renderer_in(surface_flinger: &str) -> Option<String> {
+    const TRANSLATOR: &str = "Android Emulator OpenGL ES Translator (";
+    let line = surface_flinger.lines().find_map(|line| line.strip_prefix("GLES: "))?;
+    let renderer = line.split(", ").nth(1)?.trim();
+    let drawn_by = renderer.strip_prefix(TRANSLATOR).and_then(|inner| inner.strip_suffix(')')).unwrap_or(renderer);
+    (!drawn_by.is_empty()).then(|| drawn_by.to_string())
+}
+
+fn up_android(base_name: Option<&str>, gpu: Option<Gpu>) -> Result<Value> {
     let base_name = base_name.unwrap_or(ANDROID_BASE);
+    let display = if gpu == Some(Gpu::Host) { host_display()? } else { None };
     if !avd_exists(base_name)? {
         make_android_base(base_name)?;
     }
     let port = free_emulator_port()?;
     let serial = format!("emulator-{port}");
-    start_emulator(base_name, port, true)?;
-    if let Err(reason) = wait_android_boot(&serial) {
-        capture(&adb_path()?, &["-s", &serial, "emu", "kill"]);
-        return Err(reason);
+    let mut emulator = start_emulator(base_name, port, true, gpu, display.as_ref())?;
+    let adb = adb_path()?;
+    wait_android_boot(&serial, &mut emulator)?;
+    let renderer = android_renderer(&adb, &serial);
+    // The emulator falls back to software without a word when it cannot reach the card.
+    if let (Some(Gpu::Host), Some(renderer)) = (gpu, renderer.as_deref().filter(|r| draws_in_software(r))) {
+        capture(&adb, &["-s", &serial, "emu", "kill"]);
+        fail!(
+            format!("asked for the graphics card, but {serial} {}; it is shut down again", drawn_with(renderer)),
+            "gpu_fallback",
+            "ddp up --platform android --gpu software, or start it from a session with a display and a working driver"
+        );
     }
-    Ok(json!({"platform": "android", "device": serial, "name": base_name, "base": base_name}))
+    let mut device = json!({"platform": "android", "device": serial, "name": base_name, "base": base_name});
+    if let Some(renderer) = renderer {
+        device["renderer"] = json!(renderer);
+    }
+    Ok(device)
+}
+
+/// The X display an emulator on the graphics card draws through, when this process has none: the emulator needs
+/// one even with no window. On Linux only; elsewhere the emulator reaches the card by itself.
+struct Display {
+    name: String,
+    authority: Option<PathBuf>,
+}
+
+fn host_display() -> Result<Option<Display>> {
+    if !cfg!(target_os = "linux") || std::env::var_os("DISPLAY").is_some_and(|display| !display.is_empty()) {
+        return Ok(None);
+    }
+    let mut numbers: Vec<u32> = std::fs::read_dir("/tmp/.X11-unix")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|socket| socket.file_name().to_string_lossy().strip_prefix('X')?.parse().ok())
+        .collect();
+    numbers.sort_unstable();
+    let Some(number) = numbers.first() else {
+        fail!(
+            "the graphics card needs a display: DISPLAY is not set and no X server runs here (/tmp/.X11-unix)",
+            "no_display",
+            "ddp up --platform android --gpu software"
+        );
+    };
+    let authority = std::env::var_os("XAUTHORITY")
+        .is_none()
+        .then(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".Xauthority"));
+    Ok(Some(Display { name: format!(":{number}"), authority: authority.filter(|file| file.exists()) }))
 }
 
 /// The lowest even console port in ddp's range that no emulator holds and nothing listens on (port and port + 1).
@@ -284,28 +392,113 @@ fn free_emulator_port() -> Result<u16> {
     }
 }
 
-fn start_emulator(avd: &str, port: u16, read_only: bool) -> Result<()> {
+fn start_emulator(
+    avd: &str,
+    port: u16,
+    read_only: bool,
+    gpu: Option<Gpu>,
+    display: Option<&Display>,
+) -> Result<Emulator> {
     let mut command = Command::new(sdk_tool("emulator/emulator")?);
     command.args(["-avd", avd, "-port", &port.to_string(), "-no-window", "-no-audio", "-no-boot-anim"]);
     if read_only {
         command.arg("-read-only");
     }
-    command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
-    command.spawn().map_err(|e| failure(format!("could not start the emulator: {e}"), "boot_failed", None))?;
-    Ok(())
+    if let Some(gpu) = gpu {
+        command.args(["-gpu", gpu.emulator_mode()]);
+    }
+    // The base's snapshot holds the renderer it was saved with: on the card the emulator boots cold instead.
+    if gpu == Some(Gpu::Host) {
+        command.arg("-no-snapshot");
+    }
+    if let Some(display) = display {
+        command.env("DISPLAY", &display.name);
+        if let Some(authority) = &display.authority {
+            command.env("XAUTHORITY", authority);
+        }
+    }
+    // What the emulator says while it starts is the only word on why a boot failed.
+    let log_file = emulator_log(port);
+    let log = std::fs::create_dir_all(ctx().dir).and_then(|_| std::fs::File::create(&log_file));
+    let (out, err) = match log.and_then(|file| Ok((file.try_clone()?, file))) {
+        Ok((out, err)) => (Stdio::from(out), Stdio::from(err)),
+        Err(_) => (Stdio::null(), Stdio::null()),
+    };
+    command.stdin(Stdio::null()).stdout(out).stderr(err);
+    let process =
+        command.spawn().map_err(|e| failure(format!("could not start the emulator: {e}"), "boot_failed", None))?;
+    Ok(Emulator { process, log_file })
 }
 
-fn wait_android_boot(serial: &str) -> Result<()> {
+/// What the emulator writes when it gives up on drawing; it does not end by itself then.
+const NO_RENDERER: &str = "Could not start renderer";
+
+/// The emulator process `up` started and the file its own output goes to.
+struct Emulator {
+    process: Child,
+    log_file: PathBuf,
+}
+
+fn emulator_log(port: u16) -> PathBuf {
+    ctx().dir.join(format!("emulator-{port}.log"))
+}
+
+/// The last lines the emulator wrote, for a boot that failed.
+fn last_words(log_file: &Path) -> String {
+    const LINES: usize = 5;
+    let text = std::fs::read_to_string(log_file).unwrap_or_default();
+    let lines: Vec<&str> = text.lines().map(str::trim_end).filter(|line| !line.is_empty()).collect();
+    lines[lines.len().saturating_sub(LINES)..].iter().map(|line| format!("\n  {line}")).collect()
+}
+
+/// Waits until Android says it booted. An emulator that ended, or that did not boot in time, is not left behind:
+/// one that never reached adb cannot be told to stop through it, so its process is ended here.
+fn wait_android_boot(serial: &str, emulator: &mut Emulator) -> Result<()> {
     let adb = adb_path()?;
     let deadline = Instant::now() + BOOT_PATIENCE;
+    let log = emulator.log_file.display().to_string();
     while Instant::now() < deadline {
         let booted = capture(&adb, &["-s", serial, "shell", "getprop", "sys.boot_completed"]);
         if booted.stdout.trim() == "1" {
             return Ok(());
         }
+        if let Ok(Some(status)) = emulator.process.try_wait() {
+            let how = status.code().map(|code| format!("exit {code}")).unwrap_or_else(|| "ended by a signal".into());
+            fail!(
+                format!(
+                    "the emulator ended before {serial} booted ({how}); it said:{}",
+                    last_words(&emulator.log_file)
+                ),
+                "emulator_died",
+                format!("cat {log}")
+            );
+        }
+        // Without its renderer the emulator stays up and never boots: no reason to wait the 180 s out.
+        if std::fs::read_to_string(&emulator.log_file).is_ok_and(|said| said.contains(NO_RENDERER)) {
+            let _ = emulator.process.kill();
+            let _ = emulator.process.wait();
+            fail!(
+                format!(
+                    "the emulator could not start its renderer, so {serial} is stopped. It said:{}",
+                    last_words(&emulator.log_file)
+                ),
+                "no_renderer",
+                "ddp up --platform android --gpu software, or check that DISPLAY names a display this user may use"
+            );
+        }
         std::thread::sleep(Duration::from_millis(500));
     }
-    fail!(format!("{serial} did not finish booting in 180s"), "boot_failed", format!("adb -s {serial} logcat -d"))
+    let _ = emulator.process.kill();
+    let _ = emulator.process.wait();
+    fail!(
+        format!(
+            "{serial} did not finish booting in {}s; the emulator is stopped. It said:{}",
+            BOOT_PATIENCE.as_secs(),
+            last_words(&emulator.log_file)
+        ),
+        "boot_failed",
+        format!("cat {log}")
+    )
 }
 
 /// An AVD on the newest installed google_apis image for this Mac's CPU, cold-booted once and closed so the
@@ -355,8 +548,8 @@ fn make_android_base(name: &str) -> Result<()> {
     say!("made the base AVD {name} ({package}), booting it once for its snapshot");
     let port = free_emulator_port()?;
     let serial = format!("emulator-{port}");
-    start_emulator(name, port, false)?;
-    wait_android_boot(&serial)?;
+    let mut emulator = start_emulator(name, port, false, None, None)?;
+    wait_android_boot(&serial, &mut emulator)?;
     capture(&adb_path()?, &["-s", &serial, "emu", "kill"]);
     // The emulator writes the snapshot while it exits: wait until it has let go of its console port.
     let deadline = Instant::now() + Duration::from_secs(60);
@@ -458,11 +651,20 @@ pub fn devices(args: &mut Args) -> Result<i32> {
             })
             .collect()
     };
+    // Asked only of a device ddp up made or a session names, as above.
+    let renderer = |platform: &str, id: &str, known: bool| {
+        adb.as_deref().filter(|_| platform == "android" && known).and_then(|adb| android_renderer(adb, id))
+    };
     if args.json {
         let rows: Vec<Value> = found
             .iter()
             .map(|(platform, id, what)| {
-                json!({"platform": platform, "device": id, "name": what, "up": made(id), "sessions": sessions(id)})
+                let (up, sessions) = (made(id), sessions(id));
+                let mut row = json!({"platform": platform, "device": id, "name": what, "up": up, "sessions": sessions});
+                if let Some(renderer) = renderer(platform, id, up || !sessions.is_empty()) {
+                    row["renderer"] = json!(renderer);
+                }
+                row
             })
             .collect();
         say!("{}", py::dumps(&json!({"devices": rows})));
@@ -470,10 +672,14 @@ pub fn devices(args: &mut Args) -> Result<i32> {
     }
     for (platform, id, what) in &found {
         let mut notes = vec![what.clone()];
-        if made(id) {
+        let (up, sessions) = (made(id), sessions(id));
+        if up {
             notes.push("ddp up made it".into());
         }
-        notes.extend(sessions(id));
+        if let Some(renderer) = renderer(platform, id, up || !sessions.is_empty()) {
+            notes.push(drawn_with(&renderer));
+        }
+        notes.extend(sessions);
         say!("{platform} {id}: {}", notes.join("; "));
     }
     let plural = if found.len() == 1 { "" } else { "s" };
@@ -482,4 +688,30 @@ pub fn devices(args: &mut Args) -> Result<i32> {
         found.len()
     );
     Ok(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn names_what_the_emulator_translates_to() {
+        let software =
+            "------------RE GLES (Ganesh)------------\nGLES: Google (Google Inc.), Android Emulator OpenGL ES \
+                        Translator (Google SwiftShader), OpenGL ES 3.0 (OpenGL ES 3.0 SwiftShader 4.0.0.1)\n";
+        assert_eq!(renderer_in(software).as_deref(), Some("Google SwiftShader"));
+        assert_eq!(drawn_with("Google SwiftShader"), "draws with Google SwiftShader (software, not the graphics card)");
+    }
+
+    #[test]
+    fn keeps_a_phone_renderer_whole() {
+        let phone = "GLES: Qualcomm, Adreno (TM) 610, OpenGL ES 3.2 V@0502.0\n";
+        assert_eq!(renderer_in(phone).as_deref(), Some("Adreno (TM) 610"));
+        assert_eq!(drawn_with("Adreno (TM) 610"), "draws with Adreno (TM) 610");
+    }
+
+    #[test]
+    fn says_nothing_without_a_gles_line() {
+        assert_eq!(renderer_in("RenderEngine: skiavk\n"), None);
+    }
 }

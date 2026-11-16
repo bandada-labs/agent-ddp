@@ -863,6 +863,7 @@ with tempfile.TemporaryDirectory() as directory:
                         "if [ \"$7\" = android.permission.NOPE ]; then printf \"Exception occurred while executing 'grant':\\njava.lang.SecurityException: Package other has not requested permission android.permission.NOPE\\n\\tat com.android.server.pm\\n\" >&2; exit 255; fi\n"
                         "if [ \"$4\" = cmd ]; then echo 'other/.Main'; exit 0; fi\n"
                         "if [ \"$5\" = activity ]; then echo '  topResumedActivity=ActivityRecord{9 u0 com.android.permissioncontroller/.GrantPermissionsActivity t4}'; exit 0; fi\n"
+                        "if [ \"$5\" = SurfaceFlinger ]; then echo 'GLES: Google (Google Inc.), Android Emulator OpenGL ES Translator (Google SwiftShader), OpenGL ES 3.0 (OpenGL ES 3.0 SwiftShader 4.0.0.1)'; exit 0; fi\n"
                         "if [ \"$4\" = dumpsys ]; then echo '        android.permission.CAMERA: granted=true, flags=[ ]'; exit 0; fi\n"
                         f"echo 'runner-fake tcp:{app.port} localabstract:agentddp.runner.control'\n")
     fake_adb.chmod(0o755)
@@ -1058,7 +1059,13 @@ with tempfile.TemporaryDirectory() as directory:
     launched = ddp_in(directory, "launch", "runner-fake", "--app", "other", "--platform", "android", "--session", "launched", env=host)
     assert launched.stdout.startswith("launched other on android runner-fake; in front: com.android.permissioncontroller, not other\n"), launched.stdout + launched.stderr
     listed = ddp_in(directory, "devices", env=host)
-    assert "android runner-fake: device; session " in listed.stdout and "session front: other (without the library)" in listed.stdout, listed.stdout + listed.stderr
+    # A device a session names also says what it draws with, so an emulator that fell back to software shows.
+    assert "android runner-fake: device; draws with Google SwiftShader (software, not the graphics card); session " in listed.stdout \
+        and "session front: other (without the library)" in listed.stdout, listed.stdout + listed.stderr
+    assert '"renderer": "Google SwiftShader"' in ddp_in(directory, "devices", "--json", env=host).stdout
+    # --gpu is the Android emulator's: a simulator has no such choice.
+    ios_gpu = ddp_in(directory, "up", "--platform", "ios", "--gpu", "host")
+    assert ios_gpu.returncode == 1 and "--gpu is for the Android emulator" in ios_gpu.stderr, ios_gpu.stderr
     # pm exits 0 for a permission the app does not declare: what the package says afterwards decides.
     granted = ddp_in(directory, "permission", "grant", "camera", "--session", "front", env=host)
     assert granted.stdout == "granted android.permission.CAMERA for other on runner-fake\n", granted.stdout + granted.stderr

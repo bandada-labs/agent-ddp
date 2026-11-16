@@ -23,6 +23,8 @@ pub struct Args {
     pub device: Option<String>,
     pub app: Option<String>,
     pub platform: Option<String>,
+    /// `up --gpu`: what the Android emulator draws with.
+    pub gpu: Option<String>,
     pub name: Option<String>,
     pub on: Option<String>,
     pub action: Option<String>,
@@ -199,7 +201,8 @@ pub fn parser() -> Command {
             .arg(opt("platform", "ios or android").value_parser(["ios", "android"]).required(true))
             .arg(opt("install", "app build to install: a .app folder (iOS) or an .apk (Android)").id("path"))
             .arg(opt("app", "bundle id / application id to start and connect to"))
-            .arg(opt("base", "base simulator name or AVD to start from (ddp-base / ddp_base, made on first use)").id("name")))
+            .arg(opt("base", "base simulator name or AVD to start from (ddp-base / ddp_base, made on first use)").id("name"))
+            .arg(opt("gpu", "Android: draw on the graphics card (host) or in software; default: the emulator's own choice").value_parser(["host", "software"])))
         .subcommand(sub("down", "shut down and remove a device `ddp up` made (default: the session's)")
             .arg(positional("device", "simulator UDID or emulator serial from `ddp up`"))
             .arg(flag("all", "every device `ddp up` made from this folder").id("full")))
@@ -509,6 +512,7 @@ pub fn parse(argv: &[String]) -> Result<Args, clap::Error> {
         device: string(m, "device"),
         app: string(m, "app"),
         platform: string(m, "platform"),
+        gpu: string(m, "gpu"),
         name: string(m, "name"),
         on: string(m, "on"),
         action: string(m, "action"),

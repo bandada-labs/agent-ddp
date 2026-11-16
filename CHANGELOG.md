@@ -4,7 +4,14 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 
 ## Unreleased
 
+### Added
+
+- `ddp up --platform android --gpu host|software`: what the emulator draws with. `host` is the machine's graphics card (`-gpu host`, a cold boot: the base's snapshot holds the renderer it was saved with). On Linux the emulator needs an X display for the card even with no window: when `DISPLAY` is not set, ddp uses the first X server running on the machine (and `~/.Xauthority`), and says so when there is none. `software` is the emulator's own renderer on the CPU. Without `--gpu` nothing changes: the emulator chooses, and with no display that is software.
+- `ddp up`, `ddp devices` and `ddp doctor` name what an Android device draws with, as SurfaceFlinger says it: `draws with NVIDIA GeForce RTX 4070 SUPER/PCIe/SSE2`, or `draws with Google SwiftShader (software, not the graphics card)`, so a silent fallback to software shows. `devices --json` has `renderer`. `up --gpu host` that ends up in software is shut down and refused (`gpu_fallback`).
+
 ### Fixed
+
+- `ddp up` on Android left the emulator running when it did not boot in time: an emulator that never reached adb could not be told to stop through it. Its process is now ended, an emulator that ends by itself is reported at once (`emulator_died`) instead of after 180 s, and so is one that cannot start its renderer (`no_renderer`: a display it may not use), which stays up without ever booting. Each says the emulator's last lines, kept in `.ddp/emulator-<port>.log`.
 
 - Android with the library: `tap`, `long-press` and `double-tap` touched an element the keyboard's pan had moved above the screen (`tapped animatedButton at (540, -316)`) and the app took it, though no finger gets there. The library asked each window by where its content was drawn, which under a pan reaches past the screen; it now asks by where the window sits. The CLI also refuses an element with no part inside the window, with any library version: `animatedButton is off screen at [383,-385 315x137]: bring it into view first`, next the swipe that brings it back. `check tappable` leaves such elements out: content scrolled out of the window is not a control a touch misses. `screen.hit` answers them `outside` by `the window`.
 
