@@ -335,6 +335,11 @@ fn doctor_checks(platform: &str, device: &str, app: &str) -> Result<Vec<Step>> {
         };
         json!({"platform": "ios", "app": app, "device": device, "port": endpoint["port"]})
     } else {
+        // ddp's own emulator, gone or frozen: every question after this one would wait on it.
+        if let Some(lost) = crate::up::lost_emulator(device) {
+            steps.push((false, lost.message, lost.next.unwrap_or_default()));
+            return Ok(steps);
+        }
         let adb = adb_path()?;
         let state = capture(&adb, &["-s", device, "get-state"]).stdout.trim().to_string();
         steps.push((

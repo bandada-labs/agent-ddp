@@ -154,12 +154,51 @@ pub fn run_command(argv: Vec<String>) -> i32 {
     match result {
         Ok(code) => code,
         Err(failure) => {
-            state::report_failure(&failure);
+            // A command that failed on an emulator ddp made says so when the emulator itself is gone or hung:
+            // that is the cause, whatever the command ran into.
+            let lost = lost_device(&args, &failure);
+            state::report_failure(lost.as_ref().unwrap_or(&failure));
             1
         }
     }
 }
 
+/// The emulator the failed command was for, when `ddp up` made it and it died or hangs. Asked only after a
+/// failure, and not of `up` and `down`, which report on the emulator themselves.
+fn lost_device(args: &args::Args, failure: &state::Failure) -> Option<state::Failure> {
+    if matches!(&args.command[..], "up" | "down" | "devices") || failure.code.starts_with("emulator_") {
+        return None;
+    }
+    let session = state::read_json(&state::ctx().session_file);
+    let device = args.device.clone().or_else(|| session.and_then(|s| s["device"].as_str().map(String::from)))?;
+    up::lost_emulator(&device)
+}
+
+/// How often a command that is still running asks whether its emulator is.
+const LOST_DEVICE_WATCH: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// A command waiting on an emulator ddp made that died or froze would wait forever: adb does not give up by itself.
+/// While the command runs, its emulator is asked now and then, and the command ends with what became of it. Not for
+/// `mcp` and `batch`, which run many commands in one process, nor for the commands that watch the emulator themselves.
+fn watch_for_lost_device(argv: &[String]) {
+    let command = argv.first().map(String::as_str).unwrap_or_default();
+    if matches!(command, "mcp" | "batch" | "up" | "down" | "devices" | "test" | "doctor" | "skills") {
+        return;
+    }
+    let named = argv.iter().position(|word| word == "--device").and_then(|at| argv.get(at + 1)).cloned();
+    std::thread::spawn(move || loop {
+        std::thread::sleep(LOST_DEVICE_WATCH);
+        let session = state::read_json(&state::ctx().session_file);
+        let device = named.clone().or_else(|| session.and_then(|s| s["device"].as_str().map(String::from)));
+        if let Some(lost) = device.and_then(|device| up::lost_emulator(&device)) {
+            state::report_failure(&lost);
+            std::process::exit(1);
+        }
+    });
+}
+
 fn main() {
-    std::process::exit(run_command(std::env::args().skip(1).collect()));
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    watch_for_lost_device(&argv);
+    std::process::exit(run_command(argv));
 }

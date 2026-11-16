@@ -6,7 +6,7 @@
 use crate::args::Args;
 use crate::live;
 use crate::py;
-use crate::state::{adb_path, capture, ctx, failure, now_ms, read_json, write_file, Result};
+use crate::state::{adb_path, capture, ctx, failure, now_ms, read_json, write_file, Failure, Result};
 use crate::{fail, say};
 use serde_json::{json, Value};
 use std::net::TcpListener;
@@ -49,7 +49,13 @@ pub fn up(args: &mut Args) -> Result<i32> {
             "ddp up --platform ios"
         );
     }
-    let device = if platform == "ios" { up_ios(base.as_deref())? } else { up_android(base.as_deref(), gpu)? };
+    let mut device = if platform == "ios" { up_ios(base.as_deref())? } else { up_android(base.as_deref(), gpu)? };
+    // How it was asked for, so a device that died later can be named with the command that brings it back.
+    for (key, value) in [("gpu", &args.gpu), ("install", &args.path), ("app", &args.app)] {
+        if let Some(value) = value {
+            device[key] = json!(value);
+        }
+    }
     let mut owned = owned_devices();
     owned.push(device.clone());
     save_owned(&owned)?;
@@ -109,7 +115,11 @@ pub fn down(args: &mut Args) -> Result<i32> {
             }
         } else {
             // Read-only: the emulator saves nothing back to the base AVD.
-            capture(&adb_path()?, &["-s", &id, "emu", "kill"]);
+            capture_within(&adb_path()?, &["-s", &id, "emu", "kill"], ADB_PATIENCE);
+            if end_emulator_process(device) {
+                say!("down android {id}: it did not stop when asked, so its process was ended");
+                continue;
+            }
         }
         say!("down {} {id}", py::str(&device["platform"]));
     }
@@ -307,7 +317,7 @@ pub fn drawn_with(renderer: &str) -> String {
 /// emulator's renderer is a translator around the one that draws: `Android Emulator OpenGL ES Translator (<that one>)`.
 /// None when SurfaceFlinger prints no such line (a Vulkan render engine): unknown, never a guess.
 pub fn android_renderer(adb: &str, device: &str) -> Option<String> {
-    let dump = capture(adb, &["-s", device, "shell", "dumpsys", "SurfaceFlinger"]).stdout;
+    let dump = capture_within(adb, &["-s", device, "shell", "dumpsys", "SurfaceFlinger"], ADB_PATIENCE)?.stdout;
     renderer_in(&dump)
 }
 
@@ -340,7 +350,8 @@ fn up_android(base_name: Option<&str>, gpu: Option<Gpu>) -> Result<Value> {
             "ddp up --platform android --gpu software, or start it from a session with a display and a working driver"
         );
     }
-    let mut device = json!({"platform": "android", "device": serial, "name": base_name, "base": base_name});
+    let mut device = json!({"platform": "android", "device": serial, "name": base_name, "base": base_name,
+        "pid": emulator.process.id(), "log": emulator.log_file.display().to_string()});
     if let Some(renderer) = renderer {
         device["renderer"] = json!(renderer);
     }
@@ -559,6 +570,113 @@ fn make_android_base(name: &str) -> Result<()> {
     Ok(())
 }
 
+// An emulator that died or hangs
+
+/// How long adb gets to answer before the device counts as not answering.
+const ADB_PATIENCE: Duration = Duration::from_secs(5);
+/// How long an emulator told to stop gets before its process is ended.
+const STOP_PATIENCE: Duration = Duration::from_secs(5);
+
+/// `capture` that gives up: None when the program did not end in time (it is ended) or did not start.
+pub fn capture_within(program: &str, args: &[&str], patience: Duration) -> Option<crate::state::Output> {
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .ok()?;
+    let deadline = Instant::now() + patience;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(50)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
+    let output = child.wait_with_output().ok()?;
+    Some(crate::state::Output {
+        code: output.status.code().unwrap_or(1),
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+    })
+}
+
+/// Whether the emulator process `up` started still runs: its pid, with its own port on the command line, so a pid
+/// the system gave to another process later does not count. None where there is no `ps` to ask (Windows) or the
+/// device entry has no pid (made by an older ddp).
+fn emulator_runs(device: &Value) -> Option<bool> {
+    let pid = device["pid"].as_u64()?;
+    let port = py::str(&device["device"]).strip_prefix("emulator-")?.to_string();
+    if cfg!(windows) {
+        return None;
+    }
+    let listed = capture("ps", &["-p", &pid.to_string(), "-o", "args="]);
+    let zombie = capture("ps", &["-p", &pid.to_string(), "-o", "stat="]).stdout.trim_start().starts_with('Z');
+    Some(listed.stdout.contains(&format!("-port {port}")) && !zombie)
+}
+
+/// Ends the emulator's process when it still runs after it was told to stop. True when it had to.
+fn end_emulator_process(device: &Value) -> bool {
+    let deadline = Instant::now() + STOP_PATIENCE;
+    while emulator_runs(device) == Some(true) {
+        if Instant::now() >= deadline {
+            // A hung emulator takes no request to stop: only the kill signal ends it. Nothing is lost, it is read-only.
+            capture("kill", &["-9", &py::str(&device["pid"])]);
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    false
+}
+
+/// The `ddp up` line that makes the same device again.
+fn up_again(device: &Value) -> String {
+    let mut command = "ddp up --platform android".to_string();
+    for (option, key) in [("--gpu", "gpu"), ("--install", "install"), ("--app", "app")] {
+        if let Some(value) = device[key].as_str() {
+            command.push_str(&format!(" {option} {value}"));
+        }
+    }
+    command
+}
+
+/// What became of an emulator `ddp up` made in this folder, when it is gone or does not answer: the failure to
+/// report instead of the one a command ran into. None when it answers, or when it is not ddp's emulator: then the
+/// command's own failure stands.
+pub fn lost_emulator(id: &str) -> Option<Failure> {
+    let device = owned_devices().into_iter().find(|d| d["device"] == id && d["platform"] == "android")?;
+    let pid = py::str(&device["pid"]);
+    let said = device["log"].as_str().map(|log| last_words(Path::new(log))).unwrap_or_default();
+    let said = if said.is_empty() { String::new() } else { format!(" The emulator's last lines:{said}") };
+    let next = format!("ddp down {id}, then {}", up_again(&device));
+    if !emulator_runs(&device)? {
+        return Some(failure(
+            format!("{id} died: the emulator's process (pid {pid}) is gone.{said}"),
+            "emulator_died",
+            Some(&next),
+        ));
+    }
+    let adb = adb_path().ok()?;
+    let answered = capture_within(&adb, &["-s", id, "shell", "echo", "ok"], ADB_PATIENCE);
+    if answered.as_ref().is_some_and(|answer| answer.stdout.trim() == "ok") {
+        return None;
+    }
+    let adb_said = match &answered {
+        None => format!("adb got no answer in {}s", ADB_PATIENCE.as_secs()),
+        Some(answer) => format!("adb says: {}", answer.stderr.lines().next().unwrap_or("nothing").trim()),
+    };
+    Some(failure(
+        format!("{id} is hung: the emulator's process runs (pid {pid}) but {adb_said}.{said}"),
+        "emulator_hung",
+        Some(&next),
+    ))
+}
+
 // Apps
 
 fn install(platform: &str, device: &str, build: &str) -> Result<()> {
@@ -613,13 +731,38 @@ pub fn devices(args: &mut Args) -> Result<i32> {
             }
         }
     }
+    // An emulator ddp up made here that adb no longer lists: say what became of it, not nothing.
+    for device in owned_devices().iter().filter(|d| d["platform"] == "android") {
+        let id = py::str(&device["device"]);
+        if found.iter().any(|(_, listed, _)| *listed == id) {
+            continue;
+        }
+        let what = match emulator_runs(device) {
+            Some(false) => format!("died, its process is gone (ddp down {id} clears it)"),
+            Some(true) => "its process runs but adb does not list it".to_string(),
+            None => "not listed by adb".to_string(),
+        };
+        found.push(("android".into(), id, what));
+    }
+    // One adb still lists as a device but that does not answer: said once here, and not asked anything more below.
+    let mut hung: Vec<String> = Vec::new();
+    for (_, id, what) in found.iter_mut().filter(|(platform, _, state)| platform == "android" && state == "device") {
+        if lost_emulator(id).is_some_and(|lost| lost.code == "emulator_hung") {
+            *what = format!("hung, its process runs but adb gets no answer (ddp down {id} ends it)");
+            hung.push(id.clone());
+        }
+    }
     // The next emulator on a port gets the same serial: a session saved before the device booted named the one before.
     // Asked only of a device a session names, so ddp devices does not reach into every device on the machine.
     let saved_since_boot = |file: &Path, id: &str| {
-        let Some(adb) = adb.as_deref().filter(|_| found.iter().any(|(p, d, _)| p == "android" && d == id)) else {
+        let listed = found.iter().any(|(p, d, _)| p == "android" && d == id) && !hung.iter().any(|h| h == id);
+        let Some(adb) = adb.as_deref().filter(|_| listed) else {
             return true;
         };
-        let uptime = capture(adb, &["-s", id, "shell", "cat", "/proc/uptime"]).stdout;
+        let Some(uptime) = capture_within(adb, &["-s", id, "shell", "cat", "/proc/uptime"], ADB_PATIENCE) else {
+            return true;
+        };
+        let uptime = uptime.stdout;
         let Some(up_s) = uptime.split_whitespace().next().and_then(|s| s.parse::<f64>().ok()) else { return true };
         let saved = std::fs::metadata(file).and_then(|m| m.modified()).ok();
         let saved_ms =
@@ -653,7 +796,8 @@ pub fn devices(args: &mut Args) -> Result<i32> {
     };
     // Asked only of a device ddp up made or a session names, as above.
     let renderer = |platform: &str, id: &str, known: bool| {
-        adb.as_deref().filter(|_| platform == "android" && known).and_then(|adb| android_renderer(adb, id))
+        let ask = platform == "android" && known && !hung.iter().any(|h| h == id);
+        adb.as_deref().filter(|_| ask).and_then(|adb| android_renderer(adb, id))
     };
     if args.json {
         let rows: Vec<Value> = found

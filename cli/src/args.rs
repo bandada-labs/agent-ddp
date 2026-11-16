@@ -25,6 +25,8 @@ pub struct Args {
     pub platform: Option<String>,
     /// `up --gpu`: what the Android emulator draws with.
     pub gpu: Option<String>,
+    /// `test --stall`: stop the run when no test starts or finishes for this long.
+    pub stall: Option<String>,
     pub name: Option<String>,
     pub on: Option<String>,
     pub action: Option<String>,
@@ -393,7 +395,8 @@ pub fn parser() -> Command {
             .arg(opt("class", "only this class, or Class#method").id("filter"))
             .arg(opt("runner", "the instrumentation, package/runner, when the app has more than one").id("name"))
             .arg(Arg::new("env").long("env").num_args(1).action(ArgAction::Append).value_name("KEY=VALUE")
-                .help("an argument for the tests (am instrument -e KEY VALUE); repeat for more"))))
+                .help("an argument for the tests (am instrument -e KEY VALUE); repeat for more"))
+            .arg(opt("stall", "stop the run when no test starts or finishes for this long (5m); default: wait for it"))))
         .subcommand(device_options(sub("job", "Android: run one of the app's scheduled jobs now (JobScheduler, WorkManager)")
             .arg(positional("value", "the job id").required(true))))
         .subcommand(sub("compare", "how far the screen is from a reference image, or one element from the other phone")
@@ -513,6 +516,7 @@ pub fn parse(argv: &[String]) -> Result<Args, clap::Error> {
         app: string(m, "app"),
         platform: string(m, "platform"),
         gpu: string(m, "gpu"),
+        stall: string(m, "stall"),
         name: string(m, "name"),
         on: string(m, "on"),
         action: string(m, "action"),

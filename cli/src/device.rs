@@ -613,6 +613,112 @@ fn instrumentation_run(output: &str) -> TestRun {
     run
 }
 
+/// How long a test run may say nothing before ddp asks whether the device is still there.
+const SILENCE_BEFORE_ASKING: Duration = Duration::from_secs(10);
+/// The window the app's drawn frames are counted over when a run stalled.
+const STALL_FRAME_WINDOW: Duration = Duration::from_secs(2);
+
+/// Runs `am instrument` and reads what it prints as it comes. A long run that goes silent is not waited on forever
+/// when its device is gone: the emulator died or hangs, or adb lost the device. With `stall`, a run with no test
+/// line for that long is stopped too, with what the app drew meanwhile. Returns the output and why ddp stopped it.
+fn instrument(
+    adb_program: &str,
+    words: &[&str],
+    device: &str,
+    app: &str,
+    stall: Option<Duration>,
+) -> Result<(String, Option<String>)> {
+    use std::io::BufRead;
+    use std::sync::mpsc::{channel, RecvTimeoutError};
+    let mut child = std::process::Command::new(adb_program)
+        .args(words)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| failure(format!("could not run adb: {e}"), "command_failed", None))?;
+    let (sender, lines) = channel::<String>();
+    if let Some(stdout) = child.stdout.take() {
+        std::thread::spawn(move || {
+            for line in std::io::BufReader::new(stdout).lines().map_while(std::result::Result::ok) {
+                if sender.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+    }
+    let mut output = String::new();
+    let mut last_line = Instant::now();
+    let mut ask_after = SILENCE_BEFORE_ASKING;
+    let stopped = loop {
+        match lines.recv_timeout(Duration::from_millis(500)) {
+            Ok(line) => {
+                output.push_str(&line);
+                output.push('\n');
+                last_line = Instant::now();
+                ask_after = SILENCE_BEFORE_ASKING;
+            }
+            Err(RecvTimeoutError::Disconnected) => break None,
+            Err(RecvTimeoutError::Timeout) => {
+                let silent = last_line.elapsed();
+                if silent >= ask_after {
+                    ask_after += SILENCE_BEFORE_ASKING;
+                    if let Some(gone) = device_gone(adb_program, device) {
+                        break Some(gone);
+                    }
+                }
+                if let Some(stall) = stall.filter(|stall| silent >= *stall) {
+                    break Some(stalled(adb_program, device, app, stall));
+                }
+            }
+        }
+    };
+    if stopped.is_some() {
+        let _ = child.kill();
+    }
+    let _ = child.wait();
+    Ok((output, stopped))
+}
+
+/// Why the device no longer runs the tests, when it does not: ddp's own emulator died or hangs, or adb lost it.
+fn device_gone(adb_program: &str, device: &str) -> Option<String> {
+    if let Some(lost) = crate::up::lost_emulator(device) {
+        return Some(lost.message);
+    }
+    let patience = Duration::from_secs(5);
+    match crate::up::capture_within(adb_program, &["-s", device, "get-state"], patience) {
+        None => Some(format!("{device} did not answer adb in {}s", patience.as_secs())),
+        Some(state) if state.stdout.trim() == "device" => None,
+        Some(state) => {
+            let said = if state.stderr.trim().is_empty() { state.stdout } else { state.stderr };
+            Some(format!("adb lost {device}: {}", said.lines().next().unwrap_or("no state").trim()))
+        }
+    }
+}
+
+/// A run stopped for `--stall`: how long it was silent and how many frames the app drew meanwhile, as the platform
+/// counts them (`dumpsys gfxinfo`). The app is stopped so the device is free again.
+fn stalled(adb_program: &str, device: &str, app: &str, stall: Duration) -> String {
+    let frames = || -> Option<u64> {
+        let dump = capture(adb_program, &["-s", device, "shell", "dumpsys", "gfxinfo", app]).stdout;
+        dump.lines().find_map(|line| line.trim().strip_prefix("Total frames rendered: ")?.trim().parse().ok())
+    };
+    let before = frames();
+    std::thread::sleep(STALL_FRAME_WINDOW);
+    let drew = match (before, frames()) {
+        (Some(before), Some(after)) => {
+            format!(
+                "; the app drew {} frames in the last {}s",
+                after.saturating_sub(before),
+                STALL_FRAME_WINDOW.as_secs()
+            )
+        }
+        _ => String::new(),
+    };
+    capture(adb_program, &["-s", device, "shell", "am", "force-stop", app]);
+    format!("no test started or finished for {}s{drew}; the run was stopped (--stall)", stall.as_secs())
+}
+
 /// Runs the app's instrumentation tests and counts what passed. It frees UiAutomation from ddp's runner first.
 pub fn test(args: &mut Args) -> Result<i32> {
     let (platform, device, app) = target(args)?;
@@ -662,8 +768,13 @@ pub fn test(args: &mut Args) -> Result<i32> {
     command.push(runner.clone());
     let started = Instant::now();
     let words: Vec<&str> = command.iter().map(String::as_str).collect();
-    let output = capture(&adb_path()?, &words);
-    let run = instrumentation_run(&output.stdout);
+    let stall = args.stall.as_deref().map(state::parse_ms).transpose()?.map(|ms| Duration::from_millis(ms as u64));
+    let (output, stopped_from_outside) = instrument(&adb_path()?, &words, &device, &app, stall)?;
+    let mut run = instrumentation_run(&output);
+    if let Some(why) = stopped_from_outside {
+        // The run did not end by itself: why ddp stopped waiting, and the test that was running then.
+        run.stopped = Some((why, run.stopped.and_then(|(_, test)| test)));
+    }
     let seconds = py::round_f(started.elapsed().as_secs_f64(), 1);
     if ctx().json {
         let failed: Vec<Value> =

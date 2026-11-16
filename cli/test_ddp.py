@@ -1063,6 +1063,25 @@ with tempfile.TemporaryDirectory() as directory:
     assert "android runner-fake: device; draws with Google SwiftShader (software, not the graphics card); session " in listed.stdout \
         and "session front: other (without the library)" in listed.stdout, listed.stdout + listed.stderr
     assert '"renderer": "Google SwiftShader"' in ddp_in(directory, "devices", "--json", env=host).stdout
+    # An emulator ddp up made whose process is gone: the command that fails on it says the emulator died and how to
+    # bring it back, devices lists it as died, doctor stops at it, and down clears it.
+    dead = Path(directory, ".ddp", "sessions", "dead")
+    dead.mkdir(parents=True)
+    (dead / "emulator-5998.log").write_text("INFO | boot completed\nERROR | the last thing it said\n")
+    (dead / "devices.json").write_text(json.dumps([{"platform": "android", "device": "emulator-5998", "name": "ddp_base",
+                                                    "pid": 4194000, "log": str(dead / "emulator-5998.log"), "gpu": "host"}]))
+    (dead / "session.json").write_text(json.dumps({"platform": "android", "app": "fake", "device": "emulator-5998", "port": 1}))
+    died = ddp_in(directory, "tap", "button", "--session", "dead", env=host)
+    assert died.returncode == 1 and "emulator-5998 died: the emulator's process (pid 4194000) is gone. The emulator's last lines:" in died.stderr \
+        and "ERROR | the last thing it said" in died.stderr \
+        and "next: ddp down emulator-5998, then ddp up --platform android --gpu host" in died.stderr, died.stderr
+    assert '"code": "emulator_died"' in ddp_in(directory, "tap", "button", "--session", "dead", "--json", env=host).stdout
+    assert "android emulator-5998: died, its process is gone (ddp down emulator-5998 clears it); ddp up made it" in \
+        ddp_in(directory, "devices", "--session", "dead", env=host).stdout
+    dead_doctor = ddp_in(directory, "doctor", "emulator-5998", "--app", "fake", "--platform", "android", "--session", "dead", env=host)
+    assert "FAIL emulator-5998 died" in dead_doctor.stdout, dead_doctor.stdout + dead_doctor.stderr
+    assert ddp_in(directory, "down", "--session", "dead", env=host).stdout == "down android emulator-5998\n"
+    assert json.loads((dead / "devices.json").read_text()) == []
     # --gpu is the Android emulator's: a simulator has no such choice.
     ios_gpu = ddp_in(directory, "up", "--platform", "ios", "--gpu", "host")
     assert ios_gpu.returncode == 1 and "--gpu is for the Android emulator" in ios_gpu.stderr, ios_gpu.stderr

@@ -37,4 +37,12 @@ class SampleTest {
         assumeTrue(asked.getString("crash") == "1")
         android.os.Process.killProcess(android.os.Process.myPid())
     }
+
+    /** A test that takes its time, for runs that must outlive something: `-e wait <seconds>`. */
+    @Test
+    fun waitsWhenAsked() {
+        val seconds = asked.getString("wait")?.toLongOrNull()
+        assumeTrue(seconds != null)
+        Thread.sleep(seconds!! * 1000)
+    }
 }
