@@ -1,12 +1,14 @@
 # Status
 
-Last update: 2026-11-08. Read this after a break, then [DECISIONS.md](DECISIONS.md).
+Last update: 2026-11-16. Read this after a break, then [DECISIONS.md](DECISIONS.md).
 
 ## In one paragraph
 
 A small library inside a Debug build of an iOS or Android app serves what the app draws, frame by frame (ADR 0001). The `ddp` CLI, one Rust binary on npm (ADR 0002, 0003), reads it live or from recordings and prints short text for coding agents (ADR 0006). The protocol between them is versioned (ADR 0004). A flight recorder keeps the last 15 minutes on both platforms (ADR 0005).
 
 ## Released
+
+0.5.1 on 2026-11-16 (CLI and the Android library; npm, GitHub release with 5 binaries, JitPack `v0.5.1`; the Swift library is the same as in 0.5.0): one wrong answer fixed, an Android touch on an element the keyboard's pan had moved above the screen, which is now refused as off screen. Added: `ddp up --gpu host|software` with the renderer named by `up`, `devices` and `doctor`; an emulator that died or froze said so by any command; `ddp test --stall` and `ddp test --on` for one run split over several devices; `ddp version`. Checked before the tag: the Android side live on a Linux PC (API 36 emulator on an NVIDIA card and in software), and on a Mac the build, clippy for both Mac targets, the unit tests, `test_ddp.py` and the sample app driven on an iOS simulator with and without the library. Not checked live: Windows (CI compiles it) and a real freeze of the emulator's graphics, which was imitated by stopping its process. What is in it: [CHANGELOG.md](../CHANGELOG.md).
 
 0.5.0 on 2026-11-08 (CLI and both libraries; npm, GitHub release with 5 binaries, JitPack `v0.5.0`, SwiftPM from the repo URL): apps without the library on both platforms (Android through ddp's runner instrumentation, a tap in about 35 ms; iOS from the Mac through the simulator's HID and accessibility services, about 200 ms a command, no XCTest), `ddp up` / `ddp down` for a device of ddp's own, every action printing what changed with refs, `ddp walk` with replay and parity and no model, `scroll`, `screenshot`, `permission`, `devices`, element state marks, and Android phones (MIUI). Checked before the tag: an app team's beta use from 2026-11-06 to 2026-11-08 (24 betas, every report fixed), live runs on the iOS 27.0 simulator, API 35 and 36 emulators (the sample on Compose 1.7.6 and 1.9.0) and a Redmi Note 8 (MIUI, Android 11), each against the library as truth where the app had it. What is in it: [CHANGELOG.md](../CHANGELOG.md).
 
