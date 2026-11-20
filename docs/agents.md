@@ -9,7 +9,7 @@ Works only in Debug builds. Release builds contain none of it.
 ```
 ddp connect <sim UDID | adb serial> --app <bundle or application id> [--wait 15s]   --wait: keep trying while the app starts
 ddp launch <device> --app <id> [--env KEY=VALUE ...]   start the app fresh with values for it, then connect
-ddp up --platform ios|android [--install <.app|.apk>] [--app <id>] [--gpu host|software]   a simulator or emulator of ddp's own, from a warm base
+ddp up --platform ios|android [--install <.app|.apk>] [--app <id>] [--gpu host|vulkan|software] [--cold] [--min-free GB]   a simulator or emulator of ddp's own, from a warm base
 ddp down [<device>] [--all]                        shut down and remove what `ddp up` made, a frozen emulator too
 ddp state [list] | get <name> | set <name> <value> | watch <name> [--until '>100'] [--for 10s]   the app's own values
 ddp events [--follow] [--for 10s] [--grep <text>]   events the app sent in Debug, also in ddp history
@@ -23,7 +23,7 @@ ddp source <el> [--full]                           which line of the app's code 
 ddp storage [files [<folder>]] | read <file> | rm <file> | query <db> "<sql>" | keys   the app's own data
 ddp launch <device> --app <id> --reset             clear the app's data first, like a fresh install
 ddp stop | clear [--device <d> --app <id>]          stop the app; clear its data like a fresh install (it stops it too)
-ddp test [--class C[#m]] [--env K=V] [--runner R] [--stall 5m] [--on D1,D2]   Android: the app's instrumentation tests, then passed, failed, skipped
+ddp test [--install APK]... [--class C[#m]] [--env K=V] [--runner R] [--stall 5m] [--on D1,D2]   Android: the app's instrumentation tests, then the time per phase and passed, failed, skipped
 ddp doctor [<device> --app <id>]                  what is wrong between the device and a frame, with the fix, and every engine hook's state; starts the app or brings it to the front first
 ddp tree [-i] [-c] [--within <el>] [-d N]         what is on screen now, per element, with @refs
 ddp find text <part of a label> | id <id> | role <type>   elements by name or type, with @refs (role: no library)
@@ -51,7 +51,9 @@ ddp type <text> [--into <element>] [--clear]       type as the keyboard does, in
 ddp press Enter | Tab | Backspace                  without the library also Escape, Up, Down, Left, Right; Android Home, Recents, Notifications
 ddp scroll up|down|left|right [--to <text>] [--in <element>]   without the library: no fling; --to until it is on screen
 ddp permission grant|revoke <name>                 iOS simctl privacy service (camera, photos...) or paste; Android runtime permission (CAMERA)
-ddp devices                                        booted simulators and adb devices, and the sessions that use them
+ddp devices                                        booted simulators and adb devices, who leases them, and the sessions that use them
+ddp lease <device>; ddp release <device> [--force] one owner per adb device: another owner's commands for it are refused
+ddp clean                                          Linux: end the Gradle daemons Gradle marked idle, and say the memory that freed
 ddp version                                        which ddp this is: version, protocol, Android runner (as `--version`, for tools that pass subcommands only)
 ddp prefs [list | set <key> <value> | rm <key> | clear | files] [--in <suite or file>]
 ddp run [<command> ['<params JSON>']]              run a command the app added in Debug; no name lists them
@@ -287,6 +289,16 @@ file: .ddp/walks/add-a-note-then-delete-it.jsonl; screenshots: .ddp/walks/add-a-
 While a walk is open, every `tap`, `double-tap`, `long-press`, `swipe`, `drag`, `type` and `press` is a step: its line, the places it was given with the element seen there (label, id, frame), what changed, and a screenshot taken in the background after the screen settled (`step-01.png` ...). `walk expect <element>` waits up to 3 s for an element (label, id or ref) and adds it as a check; it fails when the element does not show. Works with the library and without it.
 
 `walk replay [<walk>]` does the steps again with no model and no tokens: each target is found again by its id, else its label (the one nearest where it was, on the same platform), never by its old pixels; a point is replayed at the same spot of the element it landed on. It waits up to 3 s for each target. It fails only when a target or an expected element is not on screen: one line with the step and what the screen shows instead. It passes with one line: `replay add-a-note on ios <udid>: 3 steps passed in 2.4s`. It starts from the screen as it is: put the app where the walk started first (`ddp stop`, then `ddp launch`), or a toggle the walk turned on is turned off again. `--device` replays on another device, the other platform too: ids differ between platforms more often than labels, so a walk that should run on both is best walked by label. `walk parity` compares the last replay on iOS with the last on Android, step by step: which passed, and what appeared on one and not on the other.
+
+### up, leases, test
+
+`ddp up --platform android` starts the base AVD read-only from a snapshot, and says which: `up android emulator-5560 in 6.6s (from the snapshot ddp_vulkan); draws with NVIDIA GeForce RTX 4070 SUPER (Vulkan)`. The base's own snapshot holds the renderer the emulator chose by itself, so each renderer on the graphics card has a snapshot of its own next to it: `ddp_host` for `--gpu host` (OpenGL), `ddp_vulkan` for `--gpu vulkan` (`-gpu host -feature GuestAngle,Vulkan,VulkanSnapshots`; the emulator saves no snapshot with Vulkan without that last feature). The first `up` on a renderer makes its snapshot (one cold boot, said as `made the snapshot ...`); later ones start from it. On one PC with an RTX 4070: Vulkan 6.6 s from the snapshot against 17 to 25 s cold, OpenGL 7.6 s against 14 s. `--cold` boots without a snapshot (`(cold boot)`; Vulkan then runs with `GuestAngle,Vulkan` only). When the emulator turns a snapshot down, because it or the driver changed, ddp says so, removes it, and the next `up` makes it again.
+
+Before the boot `up` reads the memory the machine has available (Linux, `/proc/meminfo`). With less than the AVD's guest RAM plus 2 GB it starts nothing: `no emulator started: 3.1 GB of memory available, 4.0 GB needed (2.0 GB for ddp_base's guest and 2.0 GB beside it); 1 idle Gradle daemon holds 3.2 GB`, code `low_memory`. `--min-free <GB>` sets the bar (`0` for none). `ddp clean` ends the Gradle daemons whose own log ends on "Marking the daemon as idle", with the signal `gradle --stop` uses; a daemon with a build running is never touched. An emulator `ddp down` had to end with the kill signal leaves its temp images behind; `down` removes those too.
+
+A lease gives a device one owner. `up` takes one for its emulator and `down` gives it back; `ddp lease <device>` takes one for any adb device (an emulator another tool started, a phone). The owner is `DDP_OWNER`, or the folder ddp runs in. A command for a device another owner holds stops before it does anything: `emulator-5560 is leased to /work/app since 14:02: one owner per device`, code `leased`. Leases live in `~/.ddp/leases`, so every folder and session sees them, and `ddp devices` lists them. A lease names one boot of the device (the kernel's boot id): a new emulator on the same port is another device and the old lease is gone. A device that does not answer is never refused on a lease's word. `ddp release <device> --force` is for an owner that is gone. Android only for now.
+
+`ddp test --install app.apk --install app-test.apk` puts the APKs on every device first. One whose bytes the device already holds is not sent again (the SHA-256 of the file against the installed `base.apk`): `app.apk is on emulator-5560 already (com.app, the same bytes): not installed again, 0.1s`. `up --install` does the same. When Android turns an install down, the failure carries adb's own words; for an app installed with another signing key (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`) the code is `signing_key_differs` and the next step is the uninstall. Android decides that at the install, ddp does not guess it before. The run then says where its time went: `phases: boot 6.6s (from the snapshot ddp_vulkan, at ddp up), install 0.3s (2 of 2 unchanged), runner start 1.1s, tests 41.2s`. The boot is there for emulators `up` made, the install with `--install`; `runner start` is from `am instrument` to its first line. With `--json` the same under `phases`.
 
 ### device actions
 

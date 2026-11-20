@@ -1127,6 +1127,81 @@ with tempfile.TemporaryDirectory() as directory:
     # --gpu is the Android emulator's: a simulator has no such choice.
     ios_gpu = ddp_in(directory, "up", "--platform", "ios", "--gpu", "host")
     assert ios_gpu.returncode == 1 and "--gpu is for the Android emulator" in ios_gpu.stderr, ios_gpu.stderr
+    # A lease: one owner per device. It names the device's boot, so another owner's command for the device is refused
+    # only while that boot runs; a new boot on the same serial is another device, free to take.
+    lease_adb = Path(directory, "leases", "adb")
+    lease_adb.parent.mkdir()
+    boot_id = Path(directory, "boot_id")
+    boot_id.write_text("11111111-1111-1111-1111-111111111111\n")
+    lease_log = Path(directory, "leases.log")
+    lease_adb.write_text("#!/bin/sh\n"
+                         f"echo \"$*\" >> {lease_log}\n"
+                         "case \"$*\" in\n"
+                         f"*random/boot_id*) cat {boot_id};;\n"
+                         "devices) printf 'List of devices attached\\nleased-fake\\tdevice\\n';;\n"
+                         "esac\n")
+    lease_adb.chmod(0o755)
+    home = Path(directory, "home")
+    home.mkdir()
+    one = {"PATH": f"{lease_adb.parent}:{os.environ['PATH']}", "HOME": str(home), "DDP_OWNER": "one"}
+    two = {**one, "DDP_OWNER": "two"}
+    took = ddp_in(directory, "lease", "leased-fake", env=one)
+    assert took.stdout == "leased leased-fake to one; ddp release leased-fake frees it\n", took.stdout + took.stderr
+    lease_log.write_text("")
+    refused = ddp_in(directory, "stop", "--device", "leased-fake", "--app", "fake", env=two)
+    assert refused.returncode == 1 and re.search(r"leased-fake is leased to one since \d\d:\d\d: one owner per device", refused.stderr) \
+        and "force-stop" not in lease_log.read_text(), refused.stderr + lease_log.read_text()
+    assert json.loads(ddp_in(directory, "stop", "--device", "leased-fake", "--app", "fake", "--json", env=two).stdout)["code"] == "leased"
+    assert "android leased-fake: device; leased to one\n" in ddp_in(directory, "devices", env=two).stdout
+    assert "leased to one (you)" in ddp_in(directory, "devices", env=one).stdout
+    not_theirs = ddp_in(directory, "release", "leased-fake", env=two)
+    assert not_theirs.returncode == 1 and "next: ddp release leased-fake --force" in not_theirs.stderr, not_theirs.stderr
+    assert ddp_in(directory, "stop", "--device", "leased-fake", "--app", "fake", env=one).returncode == 0
+    boot_id.write_text("22222222-2222-2222-2222-222222222222\n")
+    assert "leased to" not in ddp_in(directory, "devices", env=two).stdout
+    assert ddp_in(directory, "lease", "leased-fake", env=two).returncode == 0
+    forced = ddp_in(directory, "release", "leased-fake", "--force", env=one)
+    assert forced.stdout == "released leased-fake, it was leased to two\n", forced.stdout + forced.stderr
+    assert ddp_in(directory, "release", "leased-fake", env=one).stdout == "leased-fake has no lease\n"
+    # ddp test --install: an APK the device already holds byte for byte is not sent again, and the run says where its
+    # time went.
+    apk = Path(directory, "app.apk")
+    apk.write_bytes(b"an apk")
+    apk_hash = hashlib.sha256(b"an apk").hexdigest()
+    installed_apks = Path(directory, "installed")
+    installed_apks.write_text("")
+    install_adb = Path(directory, "installs", "adb")
+    install_adb.parent.mkdir()
+    install_log = Path(directory, "installs.log")
+    install_adb.write_text("#!/bin/sh\n"
+                           f"echo \"$*\" >> {install_log}\n"
+                           "case \"$*\" in\n"
+                           f"*'pm list packages -f -3'*) cat {installed_apks};;\n"
+                           "*' install '*) echo Success;;\n"
+                           "*'pm list instrumentation'*) echo 'instrumentation:fake.test/androidx.test.runner.AndroidJUnitRunner (target=fake)';;\n"
+                           "*'am instrument'*) " + block("one", 0) + "echo 'INSTRUMENTATION_CODE: -1';;\n"
+                           "esac\n")
+    install_adb.chmod(0o755)
+    installs = {"PATH": f"{install_adb.parent}:{os.environ['PATH']}", "HOME": str(home)}
+    fresh = ddp_in(directory, "test", "--device", "install-fake", "--app", "fake", "--install", str(apk), env=installs)
+    assert fresh.returncode == 0 and re.search(
+        rf"installed {re.escape(str(apk))} in [\d.]+s\n(.*\n)*phases: install [\d.]+s \(0 of 1 unchanged\), runner start [\d.]+s, tests [\d.]+s\n"
+        r"fake\.test/androidx\.test\.runner\.AndroidJUnitRunner in [\d.]+s: 1 passed, 0 failed, 0 skipped\n", fresh.stdout), fresh.stdout + fresh.stderr
+    assert f"-s install-fake install -r -t {apk}\n" in install_log.read_text(), install_log.read_text()
+    if any(Path(folder, tool).exists() for folder in os.environ["PATH"].split(os.pathsep) for tool in ("sha256sum", "shasum")):
+        installed_apks.write_text(f"package:/data/app/~~a==/fake-b==/base.apk=fake\n{apk_hash}  /data/app/~~a==/fake-b==/base.apk\n")
+        install_log.write_text("")
+        same = ddp_in(directory, "test", "--device", "install-fake", "--app", "fake", "--install", str(apk), "--json", env=installs)
+        assert json.loads(same.stdout)["phases"]["unchanged"] == 1 and "(fake, the same bytes): not installed again" in same.stderr \
+            and " install -r" not in install_log.read_text(), same.stdout + same.stderr + install_log.read_text()
+    no_apk = ddp_in(directory, "test", "--device", "install-fake", "--app", "fake", "--install", str(Path(directory, "none.apk")), env=installs)
+    assert no_apk.returncode == 1 and "no APK at" in no_apk.stderr, no_apk.stderr
+    # The memory bar is read before anything starts; where the memory cannot be read (off Linux) nothing is refused.
+    bar = ddp_in(directory, "up", "--platform", "android", "--min-free", "lots")
+    assert bar.returncode == 1 and "--min-free takes gigabytes" in bar.stderr, bar.stderr
+    if sys.platform == "linux":
+        low = ddp_in(directory, "up", "--platform", "android", "--min-free", "100000", "--json")
+        assert json.loads(low.stdout)["code"] == "low_memory" and "100000.0 GB needed (--min-free)" in low.stdout, low.stdout
     # pm exits 0 for a permission the app does not declare: what the package says afterwards decides.
     granted = ddp_in(directory, "permission", "grant", "camera", "--session", "front", env=host)
     assert granted.stdout == "granted android.permission.CAMERA for other on runner-fake\n", granted.stdout + granted.stderr

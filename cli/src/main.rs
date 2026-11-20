@@ -7,7 +7,10 @@ mod device;
 mod history;
 mod hit;
 mod inspect;
+mod install;
+mod lease;
 mod live;
+mod memory;
 mod model;
 mod process;
 mod py;
@@ -66,6 +69,9 @@ fn handler(command: &str) -> fn(&mut Args) -> Result<i32> {
         "press" => device::press,
         "permission" => device::permission,
         "devices" => up::devices,
+        "lease" => lease::lease,
+        "release" => lease::release,
+        "clean" => memory::clean,
         "version" => tools::version,
         "scroll" => device::scroll,
         "prefs" => live::prefs,
@@ -140,6 +146,7 @@ pub fn run_command(argv: Vec<String>) -> i32 {
             args.id_from_ref = id.starts_with("@e");
             args.id = Some(queries::resolve_ref(id)?);
         }
+        refuse_leased_devices(&args)?;
         handler(&args.command.clone())(&mut args)
     })();
     if walking {
@@ -162,6 +169,27 @@ pub fn run_command(argv: Vec<String>) -> i32 {
             1
         }
     }
+}
+
+/// One owner per device: a command for a device another owner leased is refused before it does anything. Not the
+/// commands that name no device, show or change leases, or only act on what this folder made (`up`, `down`); `mcp`
+/// and `batch` are asked per command they run.
+fn refuse_leased_devices(args: &args::Args) -> Result<()> {
+    const WITHOUT_A_DEVICE: [&str; 11] =
+        ["devices", "lease", "release", "clean", "version", "skills", "up", "down", "disconnect", "mcp", "batch"];
+    if WITHOUT_A_DEVICE.contains(&args.command.as_str()) {
+        return Ok(());
+    }
+    let named: Vec<String> = match (&args.on, &args.device) {
+        (Some(on), _) if args.command == "test" => on.split(',').map(|device| device.trim().to_string()).collect(),
+        (_, Some(device)) => vec![device.clone()],
+        _ => {
+            let session = state::read_json(&state::ctx().session_file);
+            let device = session.and_then(|s| s["device"].as_str().map(String::from));
+            device.or_else(|| std::env::var("DDP_DEVICE").ok()).into_iter().collect()
+        }
+    };
+    named.iter().try_for_each(|device| lease::refuse_foreign(device))
 }
 
 /// The emulator the failed command was for, when `ddp up` made it and it died or hangs. Asked only after a

@@ -1,8 +1,9 @@
 //! `ddp up` and `ddp down`: a simulator or emulator of ddp's own for a run, made from a warm base and removed after.
 //!
 //! iOS clones a base simulator that has booted once (`simctl clone`), so the clone skips first-boot work.
-//! Android starts the base AVD read-only from its quickboot snapshot, so several runs share one AVD and leave
-//! nothing on disk. Only devices listed in `.ddp/devices.json` are ever shut down or deleted by `ddp down`.
+//! Android starts the base AVD read-only from a snapshot, so several runs share one AVD and leave nothing on disk:
+//! the base's quickboot snapshot, or on the graphics card a snapshot of its own per renderer, made on first use.
+//! Only devices listed in `.ddp/devices.json` are ever shut down or deleted by `ddp down`.
 use crate::args::Args;
 use crate::live;
 use crate::py;
@@ -49,7 +50,12 @@ pub fn up(args: &mut Args) -> Result<i32> {
             "ddp up --platform ios"
         );
     }
-    let mut device = if platform == "ios" { up_ios(base.as_deref())? } else { up_android(base.as_deref(), gpu)? };
+    let mut device = if platform == "ios" {
+        up_ios(base.as_deref())?
+    } else {
+        up_android(base.as_deref(), gpu, args.cold, args.min_free.as_deref())?
+    };
+    device["boot_s"] = json!(py::round_f(started.elapsed().as_secs_f64(), 1));
     // How it was asked for, so a device that died later can be named with the command that brings it back.
     for (key, value) in [("gpu", &args.gpu), ("install", &args.path), ("app", &args.app)] {
         if let Some(value) = value {
@@ -61,7 +67,18 @@ pub fn up(args: &mut Args) -> Result<i32> {
     save_owned(&owned)?;
     let id = py::str(&device["device"]);
     let draws = device["renderer"].as_str().map(|renderer| format!("; {}", drawn_with(renderer))).unwrap_or_default();
-    say!("up {platform} {id} in {}s{draws}", seconds(started));
+    let how = match device["boot"].as_str() {
+        Some("cold") => " (cold boot)".to_string(),
+        Some(snapshot) => format!(" (from the snapshot {snapshot})"),
+        None => String::new(),
+    };
+    say!("up {platform} {id} in {}s{how}{draws}", seconds(started));
+    if platform == "android" {
+        // The emulator is this owner's until `down`. The port was free, so no lease that stands can be in the way.
+        if let Err(no_lease) = crate::lease::take(&id, &device) {
+            crate::warn!("ddp: {id} runs without a lease: {}", no_lease.message);
+        }
+    }
 
     if let Some(build) = args.path.clone() {
         install(&platform, &id, &build)?;
@@ -116,6 +133,7 @@ pub fn down(args: &mut Args) -> Result<i32> {
         } else {
             // Read-only: the emulator saves nothing back to the base AVD.
             capture_within(&adb_path()?, &["-s", &id, "emu", "kill"], ADB_PATIENCE);
+            crate::lease::drop_lease(&id);
             if end_emulator_process(device) {
                 say!("down android {id}: it did not stop when asked, so its process was ended");
                 continue;
@@ -284,26 +302,46 @@ fn avd_exists(name: &str) -> Result<bool> {
 /// What `ddp up --gpu` asks the emulator to draw with.
 #[derive(Clone, Copy, PartialEq)]
 enum Gpu {
-    /// The machine's graphics card (`-gpu host`).
+    /// The machine's graphics card through OpenGL (`-gpu host`).
     Host,
+    /// The machine's graphics card through Vulkan, the guest's OpenGL on ANGLE (`-gpu host -feature GuestAngle,Vulkan`).
+    Vulkan,
     /// The emulator's own renderer on the CPU (`-gpu swiftshader_indirect`).
     Software,
 }
 
 impl Gpu {
     fn named(name: &str) -> Gpu {
-        if name == "host" {
-            Gpu::Host
-        } else {
-            Gpu::Software
+        match name {
+            "host" => Gpu::Host,
+            "vulkan" => Gpu::Vulkan,
+            _ => Gpu::Software,
         }
     }
 
-    fn emulator_mode(self) -> &'static str {
-        match self {
-            Gpu::Host => "host",
-            Gpu::Software => "swiftshader_indirect",
+    /// The emulator's arguments for it. With Vulkan the emulator saves and loads a snapshot only when asked to with
+    /// VulkanSnapshots (`avd snapshot save` answers `UNSUPPORTED_VK_APP` without it); a cold boot leaves that out.
+    fn emulator_arguments(self, with_snapshot: bool) -> &'static [&'static str] {
+        match (self, with_snapshot) {
+            (Gpu::Host, _) => &["-gpu", "host"],
+            (Gpu::Vulkan, true) => &["-gpu", "host", "-feature", "GuestAngle,Vulkan,VulkanSnapshots"],
+            (Gpu::Vulkan, false) => &["-gpu", "host", "-feature", "GuestAngle,Vulkan"],
+            (Gpu::Software, _) => &["-gpu", "swiftshader_indirect"],
         }
+    }
+
+    /// The snapshot of the base that holds this renderer. The base's own (quickboot) snapshot holds the renderer the
+    /// emulator chose by itself, so a run on the card cannot start from that one.
+    fn snapshot(self) -> Option<&'static str> {
+        match self {
+            Gpu::Host => Some("ddp_host"),
+            Gpu::Vulkan => Some("ddp_vulkan"),
+            Gpu::Software => None,
+        }
+    }
+
+    fn on_the_card(self) -> bool {
+        self != Gpu::Software
     }
 }
 
@@ -336,20 +374,49 @@ fn renderer_in(surface_flinger: &str) -> Option<String> {
     (!drawn_by.is_empty()).then(|| drawn_by.to_string())
 }
 
-fn up_android(base_name: Option<&str>, gpu: Option<Gpu>) -> Result<Value> {
+fn up_android(base_name: Option<&str>, gpu: Option<Gpu>, cold: bool, min_free: Option<&str>) -> Result<Value> {
     let base_name = base_name.unwrap_or(ANDROID_BASE);
     let display = if gpu == Some(Gpu::Host) { host_display()? } else { None };
+    crate::memory::guard(base_name, min_free)?;
     if !avd_exists(base_name)? {
         make_android_base(base_name)?;
     }
+    let on_the_card = gpu.filter(|gpu| gpu.on_the_card());
+    let mut snapshot = on_the_card.and_then(Gpu::snapshot).filter(|_| !cold);
+    if let (Some(gpu), Some(name)) = (on_the_card, snapshot) {
+        if !has_snapshot(base_name, name) {
+            // Without its snapshot the run still starts, cold as before.
+            if let Err(not_made) = make_snapshot(base_name, gpu, name, display.as_ref()) {
+                crate::warn!("ddp: no snapshot {name} of {base_name}, so a cold boot: {}", not_made.message);
+                snapshot = None;
+            }
+        }
+    }
     let port = free_emulator_port()?;
     let serial = format!("emulator-{port}");
-    let mut emulator = start_emulator(base_name, port, true, gpu, display.as_ref())?;
+    let mut arguments = vec!["-read-only"];
+    arguments.extend(gpu.map(|gpu| gpu.emulator_arguments(snapshot.is_some())).unwrap_or_default());
+    match snapshot {
+        Some(name) => arguments.extend(["-snapshot", name, "-no-snapshot-save"]),
+        // The base's own snapshot holds the renderer it was saved with: on the card without one, the boot is cold.
+        None if cold || on_the_card.is_some() => arguments.push("-no-snapshot"),
+        None => {}
+    }
+    let mut emulator = start_emulator(base_name, port, &arguments, gpu, display.as_ref())?;
     let adb = adb_path()?;
     wait_android_boot(&serial, &mut emulator)?;
-    let renderer = android_renderer(&adb, &serial);
+    let said = std::fs::read_to_string(&emulator.log_file).unwrap_or_default();
+    let loaded = loaded_snapshot(&said);
+    if let Some(name) = snapshot.filter(|name| loaded.as_deref() != Some(name)) {
+        // The emulator turns a snapshot down when it or the driver changed since. Removed, so the next up makes it again.
+        if let Some(folder) = avd_folder(base_name) {
+            let _ = std::fs::remove_dir_all(folder.join("snapshots").join(name));
+        }
+        crate::warn!("ddp: the emulator did not load the snapshot {name}, so this was a cold boot; the next up makes the snapshot again");
+    }
+    let renderer = android_renderer(&adb, &serial).or_else(|| vulkan_device(&said));
     // The emulator falls back to software without a word when it cannot reach the card.
-    if let (Some(Gpu::Host), Some(renderer)) = (gpu, renderer.as_deref().filter(|r| draws_in_software(r))) {
+    if let (Some(_), Some(renderer)) = (on_the_card, renderer.as_deref().filter(|r| draws_in_software(r))) {
         capture(&adb, &["-s", &serial, "emu", "kill"]);
         fail!(
             format!("asked for the graphics card, but {serial} {}; it is shut down again", drawn_with(renderer)),
@@ -358,7 +425,8 @@ fn up_android(base_name: Option<&str>, gpu: Option<Gpu>) -> Result<Value> {
         );
     }
     let mut device = json!({"platform": "android", "device": serial, "name": base_name, "base": base_name,
-        "pid": emulator.process.id(), "log": emulator.log_file.display().to_string()});
+        "pid": emulator.process.id(), "log": emulator.log_file.display().to_string(),
+        "boot": loaded.unwrap_or_else(|| "cold".into())});
     if let Some(renderer) = renderer {
         device["renderer"] = json!(renderer);
     }
@@ -413,21 +481,16 @@ fn free_emulator_port() -> Result<u16> {
 fn start_emulator(
     avd: &str,
     port: u16,
-    read_only: bool,
+    arguments: &[&str],
     gpu: Option<Gpu>,
     display: Option<&Display>,
 ) -> Result<Emulator> {
     let mut command = Command::new(sdk_tool("emulator/emulator")?);
     command.args(["-avd", avd, "-port", &port.to_string(), "-no-window", "-no-audio", "-no-boot-anim"]);
-    if read_only {
-        command.arg("-read-only");
-    }
-    if let Some(gpu) = gpu {
-        command.args(["-gpu", gpu.emulator_mode()]);
-    }
-    // The base's snapshot holds the renderer it was saved with: on the card the emulator boots cold instead.
-    if gpu == Some(Gpu::Host) {
-        command.arg("-no-snapshot");
+    command.args(arguments);
+    // Vulkan needs no display, and it is started the way it was measured to hold: without one.
+    if gpu == Some(Gpu::Vulkan) && cfg!(target_os = "linux") {
+        command.env_remove("DISPLAY");
     }
     if let Some(display) = display {
         command.env("DISPLAY", &display.name);
@@ -566,15 +629,73 @@ fn make_android_base(name: &str) -> Result<()> {
     say!("made the base AVD {name} ({package}), booting it once for its snapshot");
     let port = free_emulator_port()?;
     let serial = format!("emulator-{port}");
-    let mut emulator = start_emulator(name, port, false, None, None)?;
+    let mut emulator = start_emulator(name, port, &[], None, None)?;
     wait_android_boot(&serial, &mut emulator)?;
     capture(&adb_path()?, &["-s", &serial, "emu", "kill"]);
-    // The emulator writes the snapshot while it exits: wait until it has let go of its console port.
+    // The emulator writes the snapshot while it exits.
+    wait_until_port_is_free(port);
+    Ok(())
+}
+
+/// Waits until an emulator told to stop has let go of its console port.
+fn wait_until_port_is_free(port: u16) {
     let deadline = Instant::now() + Duration::from_secs(60);
     while Instant::now() < deadline && TcpListener::bind(("127.0.0.1", port)).is_err() {
         std::thread::sleep(Duration::from_millis(500));
     }
+}
+
+/// The folder of an AVD: its config and its snapshots.
+pub fn avd_folder(name: &str) -> Option<PathBuf> {
+    let avds = std::env::var_os("ANDROID_AVD_HOME")
+        .map(PathBuf::from)
+        .or_else(|| Some(PathBuf::from(std::env::var_os("HOME")?).join(".android").join("avd")))?;
+    Some(avds.join(format!("{name}.avd")))
+}
+
+fn has_snapshot(base: &str, name: &str) -> bool {
+    avd_folder(base).is_some_and(|folder| folder.join("snapshots").join(name).join("ram.bin").exists())
+}
+
+/// How long the base runs after its boot before the snapshot is taken, so the launcher's first work is in it.
+const SETTLE_BEFORE_SNAPSHOT: Duration = Duration::from_secs(3);
+
+/// Boots the base once on this renderer and saves that state under the renderer's snapshot name, next to the base's
+/// own. Nothing is saved on exit, so the base's own snapshot stays as it is.
+fn make_snapshot(base: &str, gpu: Gpu, name: &str, display: Option<&Display>) -> Result<()> {
+    let started = Instant::now();
+    let port = free_emulator_port()?;
+    let serial = format!("emulator-{port}");
+    let mut arguments = gpu.emulator_arguments(true).to_vec();
+    arguments.extend(["-no-snapshot-load", "-no-snapshot-save"]);
+    let mut emulator = start_emulator(base, port, &arguments, Some(gpu), display)?;
+    wait_android_boot(&serial, &mut emulator)?;
+    std::thread::sleep(SETTLE_BEFORE_SNAPSHOT);
+    let adb = adb_path()?;
+    let saved = capture(&adb, &["-s", &serial, "emu", "avd", "snapshot", "save", name]);
+    capture(&adb, &["-s", &serial, "emu", "kill"]);
+    wait_until_port_is_free(port);
+    if !saved.stdout.lines().any(|line| line.trim() == "OK") {
+        let answer = format!("{}{}", saved.stdout.trim(), saved.stderr.trim());
+        fail!(format!("the emulator did not save it ({answer})"), "snapshot_failed");
+    }
+    say!(
+        "made the snapshot {name} of {base} in {}s, once: the next boots on this renderer start from it",
+        seconds(started)
+    );
     Ok(())
+}
+
+/// The snapshot the emulator says it started from. None is a cold boot.
+fn loaded_snapshot(emulator_said: &str) -> Option<String> {
+    let name = emulator_said.lines().find_map(|line| line.split("Successfully loaded snapshot '").nth(1))?;
+    Some(name.split('\'').next()?.to_string())
+}
+
+/// The card the emulator says it draws on through Vulkan, where SurfaceFlinger names no OpenGL renderer.
+fn vulkan_device(emulator_said: &str) -> Option<String> {
+    let device = emulator_said.lines().find_map(|line| line.split("Selecting Vulkan device: ").nth(1))?;
+    Some(format!("{} (Vulkan)", device.split(", Version").next()?.trim()))
 }
 
 // An emulator that died or hangs
@@ -627,13 +748,30 @@ fn emulator_runs(device: &Value) -> Option<bool> {
     Some(listed.stdout.contains(&format!("-port {port}")) && !zombie)
 }
 
+/// The images an emulator holds open in the system's temp folder (`android-<user>/`). It removes them when it ends by
+/// itself; one ended by the kill signal leaves them, and on a temp folder kept in memory they take that memory.
+fn held_temp_images(pid: &str) -> Vec<PathBuf> {
+    let temp = std::env::temp_dir();
+    let its_own = |file: &PathBuf| {
+        let inside = file.strip_prefix(&temp).ok().and_then(|rest| rest.components().next());
+        inside.is_some_and(|folder| folder.as_os_str().to_string_lossy().starts_with("android-")) && file.is_file()
+    };
+    let open = std::fs::read_dir(format!("/proc/{pid}/fd")).into_iter().flatten().flatten();
+    open.filter_map(|descriptor| std::fs::read_link(descriptor.path()).ok()).filter(its_own).collect()
+}
+
 /// Ends the emulator's process when it still runs after it was told to stop. True when it had to.
 fn end_emulator_process(device: &Value) -> bool {
     let deadline = Instant::now() + STOP_PATIENCE;
     while emulator_runs(device) == Some(true) {
         if Instant::now() >= deadline {
             // A hung emulator takes no request to stop: only the kill signal ends it. Nothing is lost, it is read-only.
-            capture("kill", &["-9", &py::str(&device["pid"])]);
+            let pid = py::str(&device["pid"]);
+            let left_behind = held_temp_images(&pid);
+            capture("kill", &["-9", &pid]);
+            for image in left_behind {
+                let _ = std::fs::remove_file(image);
+            }
             return true;
         }
         std::thread::sleep(Duration::from_millis(200));
@@ -688,14 +826,10 @@ pub fn lost_emulator(id: &str) -> Option<Failure> {
 
 fn install(platform: &str, device: &str, build: &str) -> Result<()> {
     let started = Instant::now();
-    let installed = if platform == "ios" {
-        capture("xcrun", &["simctl", "install", device, build])
-    } else {
-        capture(&adb_path()?, &["-s", device, "install", "-r", build])
-    };
-    if let Some(refused) = crate::state::install_refused_by_phone(&installed, build) {
-        return Err(refused);
+    if platform != "ios" {
+        return crate::install::apk(device, build).map(|_| ());
     }
+    let installed = capture("xcrun", &["simctl", "install", device, build]);
     if installed.code != 0 || installed.stdout.contains("Failure") {
         fail!(format!("install failed: {}{}", installed.stderr.trim(), installed.stdout.trim()), "install_failed");
     }
@@ -806,12 +940,20 @@ pub fn devices(args: &mut Args) -> Result<i32> {
         let ask = platform == "android" && known && !hung.iter().any(|h| h == id);
         adb.as_deref().filter(|_| ask).and_then(|adb| android_renderer(adb, id))
     };
+    // Asked only of a device a lease file names.
+    let leased_to = |platform: &str, id: &str| {
+        let standing = platform == "android" && !hung.iter().any(|h| h == id);
+        standing.then(|| crate::lease::standing(id)).flatten().map(|lease| py::str(&lease["owner"]))
+    };
     if args.json {
         let rows: Vec<Value> = found
             .iter()
             .map(|(platform, id, what)| {
                 let (up, sessions) = (made(id), sessions(id));
                 let mut row = json!({"platform": platform, "device": id, "name": what, "up": up, "sessions": sessions});
+                if let Some(owner) = leased_to(platform, id) {
+                    row["lease"] = json!(owner);
+                }
                 if let Some(renderer) = renderer(platform, id, up || !sessions.is_empty()) {
                     row["renderer"] = json!(renderer);
                 }
@@ -829,6 +971,10 @@ pub fn devices(args: &mut Args) -> Result<i32> {
         }
         if let Some(renderer) = renderer(platform, id, up || !sessions.is_empty()) {
             notes.push(drawn_with(&renderer));
+        }
+        if let Some(owner) = leased_to(platform, id) {
+            let yours = if owner == crate::lease::owner() { " (you)" } else { "" };
+            notes.push(format!("leased to {owner}{yours}"));
         }
         notes.extend(sessions);
         say!("{platform} {id}: {}", notes.join("; "));

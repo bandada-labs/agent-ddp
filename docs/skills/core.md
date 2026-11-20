@@ -70,6 +70,9 @@ ddp job 7                        # Android: run a scheduled job now
 ddp launch <device> --app ID --reset   # wipe the app's data first (the iOS Keychain stays)
 ddp stop; ddp clear              # stop the app; clear its data (stops it too); the session stays
 ddp test --class com.app.LoginTest   # Android instrumentation: FAIL lines, then "2 passed, 1 failed, 0 skipped"; exit 1 on a failure
+ddp test --install app.apk --install app-test.apk   # the APKs first (not sent again when unchanged), then a "phases:" line: boot, install, runner start, tests
+ddp up --platform android --gpu vulkan   # on the graphics card, warm from its own snapshot; refuses when memory is short (ddp clean ends idle Gradle daemons)
+ddp lease <device>; ddp release <device>   # one owner per device (DDP_OWNER or this folder); `up` leases its emulator. "leased to ..." means it is someone else's: take another
 ddp logs --since-launch --grep Exception   # the app process's lines since it started (no take needed)
 ddp launch <device> --app ID --arg -SomeDefault --arg YES   # iOS launch arguments, as an Xcode scheme; Android: use --env
 ```

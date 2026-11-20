@@ -27,6 +27,12 @@ pub struct Args {
     pub gpu: Option<String>,
     /// `test --stall`: stop the run when no test starts or finishes for this long.
     pub stall: Option<String>,
+    /// `test --install`: the APKs to put on every device first.
+    pub installs: Vec<String>,
+    /// `up --cold`: boot without a snapshot.
+    pub cold: bool,
+    /// `up --min-free`: the memory that has to be available before the emulator starts.
+    pub min_free: Option<String>,
     pub name: Option<String>,
     pub on: Option<String>,
     pub action: Option<String>,
@@ -204,7 +210,9 @@ pub fn parser() -> Command {
             .arg(opt("install", "app build to install: a .app folder (iOS) or an .apk (Android)").id("path"))
             .arg(opt("app", "bundle id / application id to start and connect to"))
             .arg(opt("base", "base simulator name or AVD to start from (ddp-base / ddp_base, made on first use)").id("name"))
-            .arg(opt("gpu", "Android: draw on the graphics card (host) or in software; default: the emulator's own choice").value_parser(["host", "software"])))
+            .arg(opt("gpu", "Android: draw on the graphics card through OpenGL (host) or Vulkan (vulkan), or in software; default: the emulator's own choice").value_parser(["host", "vulkan", "software"]))
+            .arg(flag("cold", "Android: boot without a snapshot (slower; for when a snapshot's state is in doubt)"))
+            .arg(opt("min-free", "Android, Linux: refuse to boot with less memory available than this, in GB (default: the AVD's RAM + 2; 0 for no bar)")))
         .subcommand(sub("down", "shut down and remove a device `ddp up` made (default: the session's)")
             .arg(positional("device", "simulator UDID or emulator serial from `ddp up`"))
             .arg(flag("all", "every device `ddp up` made from this folder").id("full")))
@@ -384,7 +392,13 @@ pub fn parser() -> Command {
             .arg(positional("value", "iOS: simctl privacy's service (camera, photos, location, contacts, microphone...); \
                                       Android: a runtime permission (CAMERA, POST_NOTIFICATIONS or android.permission.CAMERA)")
                 .required(true))))
-        .subcommand(sub("devices", "the booted simulators and adb devices, and which sessions in this folder use them"))
+        .subcommand(sub("devices", "the booted simulators and adb devices, who leases them, and which sessions in this folder use them"))
+        .subcommand(sub("lease", "take an adb device for this owner (env DDP_OWNER, default: this folder); other owners' commands for it are refused")
+            .arg(positional("device", "adb serial").required(true)))
+        .subcommand(sub("release", "give a leased device back")
+            .arg(positional("device", "adb serial").required(true))
+            .arg(flag("force", "also when another owner holds it (for an owner that is gone)")))
+        .subcommand(sub("clean", "Linux: end the Gradle daemons that Gradle marked idle, and say what memory that freed"))
         .subcommand(sub("version", "which ddp this is, as a command: for a runner that passes subcommands only, not --version"))
         .subcommand(device_options(sub("biometric", "simulated Face ID / Touch ID or fingerprint: enroll, then match or fail")
             .arg(choices("action", &["enroll", "match", "fail"]).required(true))))
@@ -398,6 +412,8 @@ pub fn parser() -> Command {
             .arg(Arg::new("env").long("env").num_args(1).action(ArgAction::Append).value_name("KEY=VALUE")
                 .help("an argument for the tests (am instrument -e KEY VALUE); repeat for more"))
             .arg(opt("stall", "stop the run when no test starts or finishes for this long (5m); default: wait for it"))
+            .arg(Arg::new("install").long("install").num_args(1).action(ArgAction::Append).value_name("APK")
+                .help("an APK to put on every device first (the app, the test APK); not sent again when the device has the same bytes; repeat for more"))
             .arg(opt("on", "split the run over these devices, one shard each at the same time: emulator-5560,emulator-5562"))))
         .subcommand(device_options(sub("job", "Android: run one of the app's scheduled jobs now (JobScheduler, WorkManager)")
             .arg(positional("value", "the job id").required(true))))
@@ -519,6 +535,9 @@ pub fn parse(argv: &[String]) -> Result<Args, clap::Error> {
         platform: string(m, "platform"),
         gpu: string(m, "gpu"),
         stall: string(m, "stall"),
+        installs: if command == "test" { strings(m, "install") } else { Vec::new() },
+        cold: boolean(m, "cold"),
+        min_free: string(m, "min-free"),
         name: string(m, "name"),
         on: string(m, "on"),
         action: string(m, "action"),

@@ -620,14 +620,15 @@ const STALL_FRAME_WINDOW: Duration = Duration::from_secs(2);
 
 /// Runs `am instrument` and reads what it prints as it comes. A long run that goes silent is not waited on forever
 /// when its device is gone: the emulator died or hangs, or adb lost the device. With `stall`, a run with no test
-/// line for that long is stopped too, with what the app drew meanwhile. Returns the output and why ddp stopped it.
+/// line for that long is stopped too, with what the app drew meanwhile. Returns the output, why ddp stopped it, and
+/// how long the instrumentation took to say its first line (its process starting and finding the tests).
 fn instrument(
     adb_program: &str,
     words: &[&str],
     device: &str,
     app: &str,
     stall: Option<Duration>,
-) -> Result<(String, Option<String>)> {
+) -> Result<(String, Option<String>, Option<Duration>)> {
     use std::io::BufRead;
     use std::sync::mpsc::{channel, RecvTimeoutError};
     let mut child = std::process::Command::new(adb_program)
@@ -648,11 +649,14 @@ fn instrument(
         });
     }
     let mut output = String::new();
+    let started = Instant::now();
+    let mut first_line = None;
     let mut last_line = Instant::now();
     let mut ask_after = SILENCE_BEFORE_ASKING;
     let stopped = loop {
         match lines.recv_timeout(Duration::from_millis(500)) {
             Ok(line) => {
+                first_line.get_or_insert_with(|| started.elapsed());
                 output.push_str(&line);
                 output.push('\n');
                 last_line = Instant::now();
@@ -677,7 +681,7 @@ fn instrument(
         let _ = child.kill();
     }
     let _ = child.wait();
-    Ok((output, stopped))
+    Ok((output, stopped, first_line))
 }
 
 /// Why the device no longer runs the tests, when it does not: ddp's own emulator died or hangs, or adb lost it.
@@ -724,6 +728,8 @@ struct DeviceRun {
     device: String,
     run: TestRun,
     seconds: f64,
+    /// From `am instrument` to its first line. None when it never said one.
+    runner_start: Option<f64>,
 }
 
 /// The app's instrumentation on this device: the one named, or the only one that targets the app.
@@ -786,13 +792,63 @@ fn run_tests_on(
     command.push(runner.to_string());
     let started = Instant::now();
     let words: Vec<&str> = command.iter().map(String::as_str).collect();
-    let (output, stopped_from_outside) = instrument(&adb_path()?, &words, device, app, stall)?;
+    let (output, stopped_from_outside, first_line) = instrument(&adb_path()?, &words, device, app, stall)?;
     let mut run = instrumentation_run(&output);
     if let Some(why) = stopped_from_outside {
         // The run did not end by itself: why ddp stopped waiting, and the test that was running then.
         run.stopped = Some((why, run.stopped.and_then(|(_, test)| test)));
     }
-    Ok(DeviceRun { device: device.to_string(), run, seconds: py::round_f(started.elapsed().as_secs_f64(), 1) })
+    Ok(DeviceRun {
+        device: device.to_string(),
+        run,
+        seconds: py::round_f(started.elapsed().as_secs_f64(), 1),
+        runner_start: first_line.map(|waited| py::round_f(waited.as_secs_f64(), 1)),
+    })
+}
+
+/// Where a test run's time went, phase by phase, as far as ddp saw it: the boot only for emulators `ddp up` made
+/// (their lease keeps it), the install only with `--install`.
+fn test_phases(
+    devices: &[String],
+    install: Option<(f64, usize, usize)>,
+    runs: &[DeviceRun],
+    seconds: f64,
+) -> (String, Value) {
+    let mut said = Vec::new();
+    let mut phases = json!({});
+    let boots: Vec<(f64, String)> = devices
+        .iter()
+        .filter_map(|device| {
+            let lease = crate::lease::standing(device)?;
+            Some((lease["boot_s"].as_f64()?, py::str(&lease["boot"])))
+        })
+        .collect();
+    // With several devices, the slowest boot: they started side by side.
+    if let Some((boot, from)) = boots.iter().max_by(|a, b| a.0.total_cmp(&b.0)).filter(|_| boots.len() == devices.len())
+    {
+        let from_what = if from == "cold" { "cold".to_string() } else { format!("from the snapshot {from}") };
+        said.push(format!("boot {boot}s ({from_what}, at ddp up)"));
+        phases["boot"] = json!(boot);
+        phases["boot_from"] = json!(from);
+    }
+    if let Some((install, apks, unchanged)) = install {
+        said.push(format!("install {install}s ({unchanged} of {apks} unchanged)"));
+        phases["install"] = json!(install);
+        phases["apks"] = json!(apks);
+        phases["unchanged"] = json!(unchanged);
+    }
+    let starts: Vec<f64> = runs.iter().filter_map(|run| run.runner_start).collect();
+    let tests = match starts.iter().copied().max_by(f64::total_cmp).filter(|_| starts.len() == runs.len()) {
+        Some(start) => {
+            said.push(format!("runner start {start}s"));
+            phases["runner_start"] = json!(start);
+            py::round_f(seconds - start, 1)
+        }
+        None => seconds,
+    };
+    said.push(format!("tests {tests}s"));
+    phases["tests"] = json!(tests);
+    (format!("phases: {}", said.join(", ")), phases)
 }
 
 /// Runs the app's instrumentation tests and counts what passed. It frees UiAutomation from ddp's runner first.
@@ -825,6 +881,27 @@ pub fn test(args: &mut Args) -> Result<i32> {
         );
     }
     let devices = if devices.is_empty() { vec![device] } else { devices };
+    // Installed first: the test APK is one of them. With --json the answer is one JSON value on stdout, so what the
+    // installs print goes beside it.
+    let install_started = Instant::now();
+    if ctx().json {
+        state::push_capture(false);
+    }
+    let installs = devices
+        .iter()
+        .flat_map(|device| args.installs.iter().map(move |apk| crate::install::apk(device, apk)))
+        .collect::<Result<Vec<bool>>>();
+    if ctx().json {
+        let printed = state::pop_capture();
+        if !printed.trim().is_empty() {
+            warn!("{}", printed.trim_end());
+        }
+    }
+    let installs = installs?;
+    let install = (!installs.is_empty()).then(|| {
+        let unchanged = installs.iter().filter(|sent| !**sent).count();
+        (py::round_f(install_started.elapsed().as_secs_f64(), 1), installs.len(), unchanged)
+    });
     // Every device is asked before any test starts: half a run on the devices that have the tests is no run.
     let runners: Vec<String> =
         devices.iter().map(|device| instrumentation_of(device, &app, args.name.as_ref())).collect::<Result<_>>()?;
@@ -870,6 +947,7 @@ pub fn test(args: &mut Args) -> Result<i32> {
     let skipped: usize = runs.iter().map(|r| r.run.skipped).sum();
     let failures: usize = runs.iter().map(|r| r.run.failed.len()).sum();
     let all_ran = runs.iter().all(|r| r.run.failed.is_empty() && r.run.stopped.is_none());
+    let (phases_line, phases) = test_phases(&devices, install, &runs, seconds);
     if ctx().json {
         let on = |device: &str, mut entry: Value| {
             if shards > 1 {
@@ -887,8 +965,8 @@ pub fn test(args: &mut Args) -> Result<i32> {
             .iter()
             .filter_map(|r| r.run.stopped.as_ref().map(|(why, test)| on(&r.device, json!({"why": why, "test": test}))))
             .collect();
-        let mut result =
-            json!({"runner": runner, "passed": passed, "failed": failed, "skipped": skipped, "seconds": seconds});
+        let mut result = json!({"runner": runner, "passed": passed, "failed": failed, "skipped": skipped,
+            "seconds": seconds, "phases": phases});
         if shards == 1 {
             result["stopped"] = stopped.into_iter().next().unwrap_or(Value::Null);
         } else {
@@ -917,6 +995,7 @@ pub fn test(args: &mut Args) -> Result<i32> {
             say!("STOPPED {place}{why}");
         }
     }
+    say!("{phases_line}");
     if shards == 1 {
         say!("{runner} in {seconds}s: {passed} passed, {failures} failed, {skipped} skipped");
     } else {

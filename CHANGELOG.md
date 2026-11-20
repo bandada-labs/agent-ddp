@@ -2,6 +2,28 @@
 
 Changes that users or agents will notice. Before 1.0, a minor version may change the protocol or the output; those changes are marked.
 
+## Unreleased
+
+### Added
+
+- Leases, one owner per Android device. `ddp up` takes one for its emulator and `ddp down` gives it back; `ddp lease <device>` and `ddp release <device>` do it for any adb device. The owner is `DDP_OWNER`, or the folder ddp runs in. A command for a device another owner holds is refused before it does anything (`emulator-5560 is leased to /work/app since 14:02: one owner per device`, code `leased`), and `ddp devices` lists who holds what. A lease names one boot of the device, so a new emulator on the same port is free.
+- `ddp up --platform android` reads the available memory before the boot (Linux) and starts nothing with less than the AVD's guest RAM plus 2 GB (`low_memory`); `--min-free <GB>` sets the bar. `ddp clean` ends the Gradle daemons that Gradle marked idle and says the memory that freed.
+- `ddp up --gpu vulkan`: the graphics card through Vulkan (`-gpu host -feature GuestAngle,Vulkan`), named as `draws with <card> (Vulkan)`.
+- Warm boots on the graphics card. `--gpu host` and `--gpu vulkan` start from a snapshot of their own (`ddp_host`, `ddp_vulkan`), made on the first use, where they booted cold before: 6.6 s against 17 to 25 s with Vulkan, 7.6 s against 14 s with OpenGL on one PC. `up` says what it started from; `--cold` boots without a snapshot.
+- `ddp test --install <apk>` (repeat for more) and `ddp up --install`: an APK the device already holds byte for byte is not sent again.
+- `ddp test` prints where the time went: `phases: boot 6.6s (from the snapshot ddp_vulkan, at ddp up), install 0.3s (2 of 2 unchanged), runner start 1.1s, tests 41.2s`; `phases` in `--json`.
+- The core guide says how to use Xcode's own tools and ddp together.
+
+### Changed
+
+- An install Android turns down is reported in adb's own words, whole. An app installed with another signing key gets its own code, `signing_key_differs`, and the uninstall as the next step.
+- `ddp up --install` passes `-t` to adb, so a build marked test-only installs.
+- `ddp down` removes the temp images of an emulator it had to end with the kill signal.
+
+### Fixed
+
+- Android with the library: an element that has only an accessibility action (a Compose `semantics { onClick }` with no pointer input) was reported as covered by its own parent. The reason is now `untouchable`.
+
 ## 0.5.1 (2026-11-16)
 
 ### Added
