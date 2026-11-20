@@ -1185,7 +1185,7 @@ with tempfile.TemporaryDirectory() as directory:
     installs = {"PATH": f"{install_adb.parent}:{os.environ['PATH']}", "HOME": str(home)}
     fresh = ddp_in(directory, "test", "--device", "install-fake", "--app", "fake", "--install", str(apk), env=installs)
     assert fresh.returncode == 0 and re.search(
-        rf"installed {re.escape(str(apk))} in [\d.]+s\n(.*\n)*phases: install [\d.]+s \(0 of 1 unchanged\), runner start [\d.]+s, tests [\d.]+s\n"
+        rf"installed {re.escape(str(apk))} in [\d.]+s\n(.*\n)*phases: install [\d.]+s \(0 of 1 unchanged\), focus [\d.]+s, runner start [\d.]+s, tests [\d.]+s\n"
         r"fake\.test/androidx\.test\.runner\.AndroidJUnitRunner in [\d.]+s: 1 passed, 0 failed, 0 skipped\n", fresh.stdout), fresh.stdout + fresh.stderr
     assert f"-s install-fake install -r -t {apk}\n" in install_log.read_text(), install_log.read_text()
     if any(Path(folder, tool).exists() for folder in os.environ["PATH"].split(os.pathsep) for tool in ("sha256sum", "shasum")):
@@ -1194,6 +1194,40 @@ with tempfile.TemporaryDirectory() as directory:
         same = ddp_in(directory, "test", "--device", "install-fake", "--app", "fake", "--install", str(apk), "--json", env=installs)
         assert json.loads(same.stdout)["phases"]["unchanged"] == 1 and "(fake, the same bytes): not installed again" in same.stderr \
             and " install -r" not in install_log.read_text(), same.stdout + same.stderr + install_log.read_text()
+    # A run that ends early goes on with the tests that are left. The app's process crashing in a test fails that test;
+    # the runner then names the rest (`-e log true`) and ddp hands it those in a file.
+    crash_adb = Path(directory, "crashes", "adb")
+    crash_adb.parent.mkdir()
+    crash_log = Path(directory, "crashes.log")
+    started = lambda test: ("echo 'INSTRUMENTATION_STATUS: class=fake.Suite'; "
+                            f"echo 'INSTRUMENTATION_STATUS: test={test}'; echo 'INSTRUMENTATION_STATUS_CODE: 1'; ")
+    crash_adb.write_text("#!/bin/sh\n"
+                         f"echo \"$*\" >> {crash_log}\n"
+                         "case \"$*\" in\n"
+                         "*'pm list instrumentation'*) echo 'instrumentation:fake.test/androidx.test.runner.AndroidJUnitRunner (target=fake)';;\n"
+                         "*'-s focus-fake'*'am start -W -a android.settings.SETTINGS'*) echo 'Activity: com.android.settings/.Settings';;\n"
+                         "*'-s focus-fake'*mCurrentFocus*) echo '  mCurrentFocus=Window{1 u0 com.launcher/com.launcher.Home}';;\n"
+                         "*'-e log true'*) " + block("one", 0) + block("two", 0) + block("three", 0) + "echo 'INSTRUMENTATION_CODE: -1';;\n"
+                         "*'-e testFile'*) " + block("three", 0) + "echo 'INSTRUMENTATION_CODE: -1';;\n"
+                         "*'am instrument'*) " + block("one", 0) + started("two")
+                         + "echo 'INSTRUMENTATION_RESULT: shortMsg=Process crashed.'; echo 'INSTRUMENTATION_CODE: 0';;\n"
+                         "*' push '*) cp \"$4\" " + str(Path(directory, "pushed-tests.txt")) + ";;\n"
+                         "*' get-state'*) echo device;;\n"
+                         "esac\n")
+    crash_adb.chmod(0o755)
+    crashes = {"PATH": f"{crash_adb.parent}:{os.environ['PATH']}", "HOME": str(home)}
+    went_on = ddp_in(directory, "test", "--device", "crash-fake", "--app", "fake", env=crashes)
+    assert went_on.returncode == 1 and "FAIL fake.Suite#two: Process crashed.\n" in went_on.stdout and "STOPPED" not in went_on.stdout \
+        and re.search(r"AndroidJUnitRunner in [\d.]+s: 2 passed, 1 failed, 0 skipped\n", went_on.stdout), went_on.stdout + went_on.stderr
+    assert Path(directory, "pushed-tests.txt").read_text() == "fake.Suite#three\n" \
+        and "-s crash-fake shell am instrument -w -r -e testFile /data/local/tmp/ddp-tests.txt fake.test/" in crash_log.read_text(), crash_log.read_text()
+    # Before the tests ddp opens Settings: an app window has to take the focus. Where it stays on the launcher, no
+    # test would get its touches, so none starts.
+    crash_log.write_text("")
+    stuck = ddp_in(directory, "test", "--device", "focus-fake", "--app", "fake", "--json", env=crashes)
+    assert json.loads(stuck.stdout)["code"] == "no_focus" and "com.launcher/com.launcher.Home" in stuck.stdout \
+        and "am instrument" not in crash_log.read_text(), stuck.stdout + crash_log.read_text()
+    assert ddp_in(directory, "test", "--device", "focus-fake", "--app", "fake", "--no-focus-check", env=crashes).returncode == 1
     no_apk = ddp_in(directory, "test", "--device", "install-fake", "--app", "fake", "--install", str(Path(directory, "none.apk")), env=installs)
     assert no_apk.returncode == 1 and "no APK at" in no_apk.stderr, no_apk.stderr
     # The memory bar is read before anything starts; where the memory cannot be read (off Linux) nothing is refused.

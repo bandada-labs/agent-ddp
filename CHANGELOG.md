@@ -12,13 +12,17 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 - Warm boots on the graphics card. `--gpu host` and `--gpu vulkan` start from a snapshot of their own (`ddp_host`, `ddp_vulkan`), made on the first use, where they booted cold before: 6.6 s against 17 to 25 s with Vulkan, 7.6 s against 14 s with OpenGL on one PC. `up` says what it started from; `--cold` boots without a snapshot.
 - `ddp test --install <apk>` (repeat for more) and `ddp up --install`: an APK the device already holds byte for byte is not sent again.
 - `ddp test` prints where the time went: `phases: boot 6.6s (from the snapshot ddp_vulkan, at ddp up), install 0.3s (2 of 2 unchanged), runner start 1.1s, tests 41.2s`; `phases` in `--json`.
+- `ddp test` goes on after a run ends early. An emulator `ddp up` made that dies or freezes in the run is started again on its port, gets the `--install` APKs again, and the run goes on with the test that was running and the ones after it (`RESTARTED emulator-5560 in 16.9s (in Class#method): ...`); a test the emulator is lost in twice is given up on and the rest still runs. `--restarts N` sets how often (3; 0 for the old behaviour).
+- `ddp test` checks before the tests that an app's window can take the focus on the device (the screen on, the keyguard away, Settings opened and closed). A device where the focus stays on the launcher ends with `no_focus`, an emulator of ddp's own is started again. `--no-focus-check` skips it; `focus` is a phase.
+- `ddp up --hwui skiagl|skiavk`: what the apps in the guest draw with (`debug.hwui.renderer`), set after the boot and read back.
 - The core guide says how to use Xcode's own tools and ddp together.
 
 ### Changed
 
 - An install Android turns down is reported in adb's own words, whole. An app installed with another signing key gets its own code, `signing_key_differs`, and the uninstall as the next step.
 - `ddp up --install` passes `-t` to adb, so a build marked test-only installs.
-- `ddp down` removes the temp images of an emulator it had to end with the kill signal.
+- `ddp test`: the app's process crashing in a test was `STOPPED in Class#method: Process crashed.` and ended the run. It is now `FAIL Class#method: Process crashed.` and the tests after it still run. `STOPPED` is left for a run that could not go on.
+- `ddp down` and a restart remove the temp images (about 1 GB per read-only emulator) of an emulator that was killed or died.
 
 ### Fixed
 

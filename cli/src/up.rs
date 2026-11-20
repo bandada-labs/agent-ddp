@@ -50,17 +50,38 @@ pub fn up(args: &mut Args) -> Result<i32> {
             "ddp up --platform ios"
         );
     }
+    if args.hwui.is_some() && platform == "ios" {
+        fail!("--hwui is for Android: debug.hwui.renderer is its property", "bad_option", "ddp up --platform ios");
+    }
     let mut device = if platform == "ios" {
         up_ios(base.as_deref())?
     } else {
-        up_android(base.as_deref(), gpu, args.cold, args.min_free.as_deref())?
+        let asked = Asked {
+            base: base.as_deref().unwrap_or(ANDROID_BASE),
+            gpu,
+            cold: args.cold,
+            min_free: args.min_free.as_deref(),
+            hwui: args.hwui.as_deref(),
+        };
+        up_android(&asked, None)?
     };
     device["boot_s"] = json!(py::round_f(started.elapsed().as_secs_f64(), 1));
-    // How it was asked for, so a device that died later can be named with the command that brings it back.
-    for (key, value) in [("gpu", &args.gpu), ("install", &args.path), ("app", &args.app)] {
+    // How it was asked for, so a device that died later can be started again the same way, or named with the
+    // command that brings it back.
+    let asked_with = [
+        ("gpu", &args.gpu),
+        ("install", &args.path),
+        ("app", &args.app),
+        ("min_free", &args.min_free),
+        ("hwui", &args.hwui),
+    ];
+    for (key, value) in asked_with {
         if let Some(value) = value {
             device[key] = json!(value);
         }
+    }
+    if args.cold {
+        device["cold"] = json!(true);
     }
     let mut owned = owned_devices();
     owned.push(device.clone());
@@ -72,7 +93,8 @@ pub fn up(args: &mut Args) -> Result<i32> {
         Some(snapshot) => format!(" (from the snapshot {snapshot})"),
         None => String::new(),
     };
-    say!("up {platform} {id} in {}s{how}{draws}", seconds(started));
+    let hwui = device["hwui"].as_str().map(|hwui| format!("; debug.hwui.renderer={hwui}")).unwrap_or_default();
+    say!("up {platform} {id} in {}s{how}{draws}{hwui}", seconds(started));
     if platform == "android" {
         // The emulator is this owner's until `down`. The port was free, so no lease that stands can be in the way.
         if let Err(no_lease) = crate::lease::take(&id, &device) {
@@ -374,8 +396,19 @@ fn renderer_in(surface_flinger: &str) -> Option<String> {
     (!drawn_by.is_empty()).then(|| drawn_by.to_string())
 }
 
-fn up_android(base_name: Option<&str>, gpu: Option<Gpu>, cold: bool, min_free: Option<&str>) -> Result<Value> {
-    let base_name = base_name.unwrap_or(ANDROID_BASE);
+/// How an Android emulator was asked for. Its device entry keeps this, so a restart boots the same one.
+struct Asked<'a> {
+    base: &'a str,
+    gpu: Option<Gpu>,
+    cold: bool,
+    min_free: Option<&'a str>,
+    /// `debug.hwui.renderer`, what the apps in the guest draw with.
+    hwui: Option<&'a str>,
+}
+
+/// Boots the emulator on a free port of ddp's range, or on the port given (an emulator of ddp's being started again).
+fn up_android(asked: &Asked, port: Option<u16>) -> Result<Value> {
+    let Asked { base: base_name, gpu, cold, min_free, hwui } = *asked;
     let display = if gpu == Some(Gpu::Host) { host_display()? } else { None };
     crate::memory::guard(base_name, min_free)?;
     if !avd_exists(base_name)? {
@@ -392,7 +425,10 @@ fn up_android(base_name: Option<&str>, gpu: Option<Gpu>, cold: bool, min_free: O
             }
         }
     }
-    let port = free_emulator_port()?;
+    let port = match port {
+        Some(port) => port,
+        None => free_emulator_port()?,
+    };
     let serial = format!("emulator-{port}");
     let mut arguments = vec!["-read-only"];
     arguments.extend(gpu.map(|gpu| gpu.emulator_arguments(snapshot.is_some())).unwrap_or_default());
@@ -430,7 +466,71 @@ fn up_android(base_name: Option<&str>, gpu: Option<Gpu>, cold: bool, min_free: O
     if let Some(renderer) = renderer {
         device["renderer"] = json!(renderer);
     }
+    // Written down while it runs: once the process is gone nothing says which images were its own.
+    let mut images: Vec<String> =
+        held_temp_images(emulator.process.id()).iter().map(|image| image.display().to_string()).collect();
+    images.sort();
+    images.dedup();
+    if !images.is_empty() {
+        device["temp"] = json!(images);
+    }
+    if let Some(hwui) = hwui {
+        // A property of the running system: the apps started from now on read it. Believed only when read back.
+        const PROPERTY: &str = "debug.hwui.renderer";
+        capture(&adb, &["-s", &serial, "shell", "setprop", PROPERTY, hwui]);
+        let now = capture(&adb, &["-s", &serial, "shell", "getprop", PROPERTY]).stdout;
+        if now.trim() != hwui {
+            capture(&adb, &["-s", &serial, "emu", "kill"]);
+            fail!(
+                format!("{serial} did not take {PROPERTY}={hwui} (it reads '{}'); it is shut down again", now.trim()),
+                "property_not_set"
+            );
+        }
+    }
     Ok(device)
+}
+
+/// Whether `ddp up` made this emulator in this folder, so ddp knows how to start it again.
+pub fn can_restart(id: &str) -> bool {
+    owned_devices().iter().any(|device| device["device"] == id && device["platform"] == "android")
+}
+
+/// Starts an emulator `ddp up` made again after it died or froze: what is left of the old one is ended, and a new one
+/// boots on the same port, the way the first was asked for. A fresh device: nothing that was installed is on it.
+pub fn restart(id: &str) -> Result<()> {
+    // Two shards can lose their emulators at the same moment, and both rewrite devices.json.
+    static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut owned = owned_devices();
+    let at = owned.iter().position(|device| device["device"] == id && device["platform"] == "android");
+    let port = id.strip_prefix("emulator-").and_then(|port| port.parse::<u16>().ok());
+    let (Some(at), Some(port)) = (at, port) else {
+        fail!(format!("{id} is not an emulator ddp up made in {}", ctx().dir.display()), "not_owned");
+    };
+    let old = owned[at].clone();
+    capture_within(&adb_path()?, &["-s", id, "emu", "kill"], ADB_PATIENCE);
+    end_emulator_process(&old);
+    wait_until_port_is_free(port);
+    let asked = Asked {
+        base: old["base"].as_str().unwrap_or(ANDROID_BASE),
+        gpu: old["gpu"].as_str().map(Gpu::named),
+        cold: old["cold"] == true,
+        min_free: old["min_free"].as_str(),
+        hwui: old["hwui"].as_str(),
+    };
+    let mut fresh = up_android(&asked, Some(port))?;
+    // The boot the phases name stays the one `ddp up` did: a restart's time is counted where it happens.
+    for key in ["gpu", "install", "app", "min_free", "hwui", "cold", "boot_s"] {
+        if !old[key].is_null() {
+            fresh[key] = old[key].clone();
+        }
+    }
+    owned[at] = fresh.clone();
+    save_owned(&owned)?;
+    if let Err(no_lease) = crate::lease::take(id, &fresh) {
+        crate::warn!("ddp: {id} runs without a lease: {}", no_lease.message);
+    }
+    Ok(())
 }
 
 /// The X display an emulator on the graphics card draws through, when this process has none: the emulator needs
@@ -748,9 +848,10 @@ fn emulator_runs(device: &Value) -> Option<bool> {
     Some(listed.stdout.contains(&format!("-port {port}")) && !zombie)
 }
 
-/// The images an emulator holds open in the system's temp folder (`android-<user>/`). It removes them when it ends by
-/// itself; one ended by the kill signal leaves them, and on a temp folder kept in memory they take that memory.
-fn held_temp_images(pid: &str) -> Vec<PathBuf> {
+/// The images an emulator holds open in the system's temp folder (`android-<user>/`): the overlays of a read-only
+/// run, about 1 GB on one PC. It removes them when it ends by itself; one that is killed or dies leaves them, and on
+/// a temp folder kept in memory they take that memory.
+fn held_temp_images(pid: u32) -> Vec<PathBuf> {
     let temp = std::env::temp_dir();
     let its_own = |file: &PathBuf| {
         let inside = file.strip_prefix(&temp).ok().and_then(|rest| rest.components().next());
@@ -760,32 +861,47 @@ fn held_temp_images(pid: &str) -> Vec<PathBuf> {
     open.filter_map(|descriptor| std::fs::read_link(descriptor.path()).ok()).filter(its_own).collect()
 }
 
+/// Removes the temp images of an emulator whose process is gone. Only the ones written down at its boot.
+fn remove_temp_images(device: &Value) {
+    if emulator_runs(device) != Some(false) {
+        return;
+    }
+    for image in device["temp"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+        let _ = std::fs::remove_file(image);
+    }
+}
+
 /// Ends the emulator's process when it still runs after it was told to stop. True when it had to.
 fn end_emulator_process(device: &Value) -> bool {
     let deadline = Instant::now() + STOP_PATIENCE;
     while emulator_runs(device) == Some(true) {
         if Instant::now() >= deadline {
             // A hung emulator takes no request to stop: only the kill signal ends it. Nothing is lost, it is read-only.
-            let pid = py::str(&device["pid"]);
-            let left_behind = held_temp_images(&pid);
-            capture("kill", &["-9", &pid]);
-            for image in left_behind {
-                let _ = std::fs::remove_file(image);
+            capture("kill", &["-9", &py::str(&device["pid"])]);
+            // The system needs a moment to let the process go.
+            let gone = Instant::now() + STOP_PATIENCE;
+            while emulator_runs(device) == Some(true) && Instant::now() < gone {
+                std::thread::sleep(Duration::from_millis(50));
             }
+            remove_temp_images(device);
             return true;
         }
         std::thread::sleep(Duration::from_millis(200));
     }
+    remove_temp_images(device);
     false
 }
 
 /// The `ddp up` line that makes the same device again.
 fn up_again(device: &Value) -> String {
     let mut command = "ddp up --platform android".to_string();
-    for (option, key) in [("--gpu", "gpu"), ("--install", "install"), ("--app", "app")] {
+    for (option, key) in [("--gpu", "gpu"), ("--hwui", "hwui"), ("--install", "install"), ("--app", "app")] {
         if let Some(value) = device[key].as_str() {
             command.push_str(&format!(" {option} {value}"));
         }
+    }
+    if device["cold"] == true {
+        command.push_str(" --cold");
     }
     command
 }

@@ -31,6 +31,12 @@ pub struct Args {
     pub installs: Vec<String>,
     /// `up --cold`: boot without a snapshot.
     pub cold: bool,
+    /// `up --hwui`: the guest's `debug.hwui.renderer`.
+    pub hwui: Option<String>,
+    /// `test --restarts`: how often a lost emulator is started again.
+    pub restarts: Option<usize>,
+    /// `test --no-focus-check`.
+    pub no_focus_check: bool,
     /// `up --min-free`: the memory that has to be available before the emulator starts.
     pub min_free: Option<String>,
     pub name: Option<String>,
@@ -212,6 +218,7 @@ pub fn parser() -> Command {
             .arg(opt("base", "base simulator name or AVD to start from (ddp-base / ddp_base, made on first use)").id("name"))
             .arg(opt("gpu", "Android: draw on the graphics card through OpenGL (host) or Vulkan (vulkan), or in software; default: the emulator's own choice").value_parser(["host", "vulkan", "software"]))
             .arg(flag("cold", "Android: boot without a snapshot (slower; for when a snapshot's state is in doubt)"))
+            .arg(opt("hwui", "Android: what the apps in the guest draw with (the property debug.hwui.renderer), set after the boot").value_parser(["skiagl", "skiavk"]))
             .arg(opt("min-free", "Android, Linux: refuse to boot with less memory available than this, in GB (default: the AVD's RAM + 2; 0 for no bar)")))
         .subcommand(sub("down", "shut down and remove a device `ddp up` made (default: the session's)")
             .arg(positional("device", "simulator UDID or emulator serial from `ddp up`"))
@@ -412,6 +419,9 @@ pub fn parser() -> Command {
             .arg(Arg::new("env").long("env").num_args(1).action(ArgAction::Append).value_name("KEY=VALUE")
                 .help("an argument for the tests (am instrument -e KEY VALUE); repeat for more"))
             .arg(opt("stall", "stop the run when no test starts or finishes for this long (5m); default: wait for it"))
+            .arg(opt("restarts", "how often an emulator `ddp up` made is started again when it dies or freezes in the run, which then goes on with the tests that are left (3; 0: stop there); needs --install")
+                .value_parser(clap::value_parser!(usize)))
+            .arg(flag("no-focus-check", "do not check first that an app's window can take the focus on the device"))
             .arg(Arg::new("install").long("install").num_args(1).action(ArgAction::Append).value_name("APK")
                 .help("an APK to put on every device first (the app, the test APK); not sent again when the device has the same bytes; repeat for more"))
             .arg(opt("on", "split the run over these devices, one shard each at the same time: emulator-5560,emulator-5562"))))
@@ -537,6 +547,9 @@ pub fn parse(argv: &[String]) -> Result<Args, clap::Error> {
         stall: string(m, "stall"),
         installs: if command == "test" { strings(m, "install") } else { Vec::new() },
         cold: boolean(m, "cold"),
+        hwui: string(m, "hwui"),
+        restarts: number::<usize>(m, "restarts"),
+        no_focus_check: boolean(m, "no-focus-check"),
         min_free: string(m, "min-free"),
         name: string(m, "name"),
         on: string(m, "on"),

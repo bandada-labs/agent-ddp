@@ -24,7 +24,7 @@ A small library inside a Debug build of an iOS or Android app serves what the ap
 
 ## Next
 
-Not released yet, on a local branch: leases (one owner per Android device), a memory bar before an emulator boots and `ddp clean`, `--gpu vulkan`, warm snapshot boots on the graphics card, APKs not sent again when unchanged, the time per phase in `ddp test`. Checked on Linux with an emulator; the Mac and Windows builds of it are not checked yet.
+Not released yet, on a local branch: leases (one owner per Android device), a memory bar before an emulator boots and `ddp clean`, `--gpu vulkan`, warm snapshot boots on the graphics card, APKs not sent again when unchanged, the time per phase in `ddp test`, a test run that goes on after its emulator died or its app crashed, the focus check before the tests, `--hwui`. Checked on Linux with an emulator; the Mac and Windows builds of it are not checked yet.
 
 0. After 0.5.0: the hook matrix on older versions (API 26 to 28, iOS 17 and 18) once the images can be downloaded, and a physical iPhone when there is a test device.
 1. The control endpoint in the library (ADR 0008, which replaced the CDP plan of ADR 0007). Seven phases, in order:
