@@ -1144,6 +1144,16 @@ with tempfile.TemporaryDirectory() as directory:
     assert re.fullmatch(r"ddp \d+\.\d+\.\d+(-[\w.]+)? \(protocol 2, Android runner \d+\)\n", said) and \
         said.split()[1] == ddp_in(directory, "--version").stdout.split()[1], said
     assert set(json.loads(ddp_in(directory, "version", "--json").stdout)) == {"version", "protocol", "runner"}
+    # --port: an even emulator console port, refused before anything boots when it is odd, out of range or taken.
+    assert json.loads(ddp_in(directory, "up", "--platform", "android", "--port", "5555", "--json").stdout)["code"] == "bad_value"
+    assert json.loads(ddp_in(directory, "up", "--platform", "android", "--port", "5700", "--json").stdout)["code"] == "bad_value"
+    import socket
+    with socket.socket() as taken:
+        taken.bind(("127.0.0.1", 5681))
+        refused = json.loads(ddp_in(directory, "up", "--platform", "android", "--port", "5680", "--json").stdout)
+        assert refused["code"] == "port_taken" and "5681" in refused["error"], refused
+    ios_port = ddp_in(directory, "up", "--platform", "ios", "--port", "5554")
+    assert ios_port.returncode == 1 and "--port is for the Android emulator" in ios_port.stderr, ios_port.stderr
     # --gpu is the Android emulator's: a simulator has no such choice.
     ios_gpu = ddp_in(directory, "up", "--platform", "ios", "--gpu", "host")
     assert ios_gpu.returncode == 1 and "--gpu is for the Android emulator" in ios_gpu.stderr, ios_gpu.stderr

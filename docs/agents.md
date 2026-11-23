@@ -9,7 +9,7 @@ Works only in Debug builds. Release builds contain none of it.
 ```
 ddp connect <sim UDID | adb serial> --app <bundle or application id> [--wait 15s]   --wait: keep trying while the app starts
 ddp launch <device> --app <id> [--env KEY=VALUE ...]   start the app fresh with values for it, then connect
-ddp up --platform ios|android [--install <.app|.apk>] [--app <id>] [--gpu host|vulkan|software] [--hwui skiagl|skiavk] [--cold] [--min-free GB]   a simulator or emulator of ddp's own, from a warm base
+ddp up --platform ios|android [--install <.app|.apk>] [--app <id>] [--gpu host|vulkan|software] [--hwui skiagl|skiavk] [--cold] [--min-free GB] [--port N]   a simulator or emulator of ddp's own, from a warm base
 ddp down [<device>] [--all]                        shut down and remove what `ddp up` made, a frozen emulator too
 ddp state [list] | get <name> | set <name> <value> | watch <name> [--until '>100'] [--for 10s]   the app's own values
 ddp events [--follow] [--for 10s] [--grep <text>]   events the app sent in Debug, also in ddp history
@@ -305,6 +305,8 @@ A run that ends early goes on with the tests that have no verdict yet: ddp asks 
 Before the tests `ddp test` wakes the screen, dismisses the keyguard, opens Settings and waits until its window has the focus (`dumpsys window`, `mCurrentFocus`), then closes it; `focus 0.9s` in the phases. An emulator can leave the focus on the launcher with an app in front: popups never draw, injected touches reach nothing, and tests fail for the device's sake. One more try after the Home key; then an emulator of ddp's own is started again, and any other device ends the command with `no_focus` and what holds the focus. `--no-focus-check` skips it. Where the device does not answer these questions, ddp says nothing.
 
 `--class A,B#method` takes several classes or tests with commas, and `--env notClass=A#method,B` leaves some out (both are the runner's own filters). A skipped test is named, `SKIPPED Class#method` (`skipped_tests` in `--json`). A run with no test in it is no pass: `STOPPED no test ran: the runner found none to run`, exit 1 (or why the device went away, when it did). `--rerun-failed` runs each failed test once more on the same device after the run: one that passes then is `FLAKY Class#method: failed first (<its first failure>), passed when run again`, counted as passed, and the summary adds `, 1 of the passed flaky` (`flaky` in `--json`); one that fails again, is skipped or does not get to run stays `FAIL`. Off by default: a test that fails once is a failure unless the caller says it accepts a second try.
+
+`ddp up --platform android --port 5554` boots the emulator on that console port (even, 5554 to 5682) instead of the first free one from 5560, for a machine where each team keeps to its own ports; a port that is taken (an emulator on it, or anything listening on it or on the port after it) is refused before the boot, `port_taken`. A restart keeps the port, and the `next: ddp up ...` of a lost emulator names `--base` and `--port` when they were given.
 
 `ddp up --hwui skiagl|skiavk` sets what the apps in the guest draw with (the property `debug.hwui.renderer`) after the boot, reads it back, and says `debug.hwui.renderer=skiagl`; a restart sets it again. It is not the same as `--gpu`, which is what the emulator itself draws with on the host.
 

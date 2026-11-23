@@ -41,6 +41,8 @@ pub struct Args {
     pub rerun_failed: bool,
     /// `up --min-free`: the memory that has to be available before the emulator starts.
     pub min_free: Option<String>,
+    /// `up --port`: the emulator's console port, instead of the first free one from 5560.
+    pub port: Option<u16>,
     pub name: Option<String>,
     pub on: Option<String>,
     pub action: Option<String>,
@@ -221,7 +223,9 @@ pub fn parser() -> Command {
             .arg(opt("gpu", "Android: draw on the graphics card through OpenGL (host) or Vulkan (vulkan), or in software; default: the emulator's own choice").value_parser(["host", "vulkan", "software"]))
             .arg(flag("cold", "Android: boot without a snapshot (slower; for when a snapshot's state is in doubt)"))
             .arg(opt("hwui", "Android: what the apps in the guest draw with (the property debug.hwui.renderer), set after the boot").value_parser(["skiagl", "skiavk"]))
-            .arg(opt("min-free", "Android, Linux: refuse to boot with less memory available than this, in GB (default: the AVD's RAM + 2; 0 for no bar)")))
+            .arg(opt("min-free", "Android, Linux: refuse to boot with less memory available than this, in GB (default: the AVD's RAM + 2; 0 for no bar)"))
+            .arg(opt("port", "Android: the emulator's console port, even, 5554 to 5682 (default: the first free one from 5560)")
+                .value_parser(clap::value_parser!(u16))))
         .subcommand(sub("down", "shut down and remove a device `ddp up` made (default: the session's)")
             .arg(positional("device", "simulator UDID or emulator serial from `ddp up`"))
             .arg(flag("all", "every device `ddp up` made from this folder").id("full")))
@@ -555,6 +559,7 @@ pub fn parse(argv: &[String]) -> Result<Args, clap::Error> {
         no_focus_check: boolean(m, "no-focus-check"),
         rerun_failed: boolean(m, "rerun-failed"),
         min_free: string(m, "min-free"),
+        port: number::<u16>(m, "port"),
         name: string(m, "name"),
         on: string(m, "on"),
         action: string(m, "action"),

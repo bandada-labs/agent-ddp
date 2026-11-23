@@ -50,6 +50,9 @@ pub fn up(args: &mut Args) -> Result<i32> {
             "ddp up --platform ios"
         );
     }
+    if args.port.is_some() && platform == "ios" {
+        fail!("--port is for the Android emulator: a simulator has no port", "bad_option", "ddp up --platform ios");
+    }
     if args.hwui.is_some() && platform == "ios" {
         fail!("--hwui is for Android: debug.hwui.renderer is its property", "bad_option", "ddp up --platform ios");
     }
@@ -63,7 +66,7 @@ pub fn up(args: &mut Args) -> Result<i32> {
             min_free: args.min_free.as_deref(),
             hwui: args.hwui.as_deref(),
         };
-        up_android(&asked, None)?
+        up_android(&asked, args.port.map(asked_port).transpose()?)?
     };
     device["boot_s"] = json!(py::round_f(started.elapsed().as_secs_f64(), 1));
     // How it was asked for, so a device that died later can be started again the same way, or named with the
@@ -82,6 +85,9 @@ pub fn up(args: &mut Args) -> Result<i32> {
     }
     if args.cold {
         device["cold"] = json!(true);
+    }
+    if let Some(port) = args.port {
+        device["port"] = json!(port);
     }
     let mut owned = owned_devices();
     owned.push(device.clone());
@@ -564,14 +570,37 @@ fn host_display() -> Result<Option<Display>> {
     Ok(Some(Display { name: format!(":{number}"), authority: authority.filter(|file| file.exists()) }))
 }
 
+/// Whether no emulator holds this console port and nothing listens on it or on its adb port (port + 1).
+fn port_is_free(attached: &str, port: u16) -> bool {
+    !attached.contains(&format!("emulator-{port}"))
+        && TcpListener::bind(("127.0.0.1", port)).is_ok()
+        && TcpListener::bind(("127.0.0.1", port + 1)).is_ok()
+}
+
+/// `up --port`: a port the caller chose, for a machine where each team keeps to its own. The emulator takes even
+/// console ports from 5554 to 5682 only.
+fn asked_port(port: u16) -> Result<u16> {
+    if !port.is_multiple_of(2) || !(5554..=5682).contains(&port) {
+        fail!(
+            format!("--port {port} is no emulator console port"),
+            "bad_value",
+            "an even port from 5554 to 5682: --port 5554"
+        );
+    }
+    if !port_is_free(&capture(&adb_path()?, &["devices"]).stdout, port) {
+        fail!(
+            format!("port {port} is taken: emulator-{port} runs, or something listens on {port} or {}", port + 1),
+            "port_taken",
+            "ddp devices"
+        );
+    }
+    Ok(port)
+}
+
 /// The lowest even console port in ddp's range that no emulator holds and nothing listens on (port and port + 1).
 fn free_emulator_port() -> Result<u16> {
     let attached = capture(&adb_path()?, &["devices"]).stdout;
-    let free = ANDROID_PORTS.step_by(2).find(|port| {
-        !attached.contains(&format!("emulator-{port}"))
-            && TcpListener::bind(("127.0.0.1", *port)).is_ok()
-            && TcpListener::bind(("127.0.0.1", port + 1)).is_ok()
-    });
+    let free = ANDROID_PORTS.step_by(2).find(|port| port_is_free(&attached, *port));
     match free {
         Some(port) => Ok(port),
         None => fail!("no free emulator port between 5560 and 5680", "no_port", "ddp down --all"),
@@ -907,6 +936,12 @@ fn end_emulator_process(device: &Value) -> bool {
 /// The `ddp up` line that makes the same device again.
 fn up_again(device: &Value) -> String {
     let mut command = "ddp up --platform android".to_string();
+    if let Some(base) = device["base"].as_str().filter(|base| *base != ANDROID_BASE) {
+        command.push_str(&format!(" --base {base}"));
+    }
+    if let Some(port) = device["port"].as_u64() {
+        command.push_str(&format!(" --port {port}"));
+    }
     for (option, key) in [("--gpu", "gpu"), ("--hwui", "hwui"), ("--install", "install"), ("--app", "app")] {
         if let Some(value) = device[key].as_str() {
             command.push_str(&format!(" {option} {value}"));
