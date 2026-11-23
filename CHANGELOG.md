@@ -24,6 +24,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 - `ddp up --install` passes `-t` to adb, so a build marked test-only installs.
 - `ddp test`: the app's process crashing in a test was `STOPPED in Class#method: Process crashed.` and ended the run. It is now `FAIL Class#method: Process crashed.` and the tests after it still run. `STOPPED` is left for a run that could not go on.
 - `ddp test --on`: the run is split by how long each test took when it last ran (kept in `~/.ddp/test-times/<app>.json`), whole classes per device, not by AndroidJUnitRunner's `numShards`, which splits by count: on one suite of 360 tests its two halves took 205 s and 264 s. The first run of an app splits by count. `listing` is a new phase.
+- `ddp up --json` printed its text line, not JSON. It now answers one object (`platform`, `device`, `seconds`, and `boot`, `renderer`, `hwui`, `port` when known); what the install and the app's start print goes to stderr.
 - An adb command whose output did not fit in a pipe (64 KB) waited until its deadline and counted as no answer: a listing of a few hundred tests, so `ddp test --on` and a run that went on after a restart could not list the tests of a big suite. The output is now read while the command runs.
 - `ddp up --platform android --port <N>`: the emulator's console port, even, 5554 to 5682, refused when taken (`port_taken`). Without it the first free port from 5560, as before.
 - `ddp test` names each skipped test: `SKIPPED Class#method`, `skipped_tests` in `--json`.

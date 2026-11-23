@@ -93,14 +93,10 @@ pub fn up(args: &mut Args) -> Result<i32> {
     owned.push(device.clone());
     save_owned(&owned)?;
     let id = py::str(&device["device"]);
-    let draws = device["renderer"].as_str().map(|renderer| format!("; {}", drawn_with(renderer))).unwrap_or_default();
-    let how = match device["boot"].as_str() {
-        Some("cold") => " (cold boot)".to_string(),
-        Some(snapshot) => format!(" (from the snapshot {snapshot})"),
-        None => String::new(),
-    };
-    let hwui = device["hwui"].as_str().map(|hwui| format!("; debug.hwui.renderer={hwui}")).unwrap_or_default();
-    say!("up {platform} {id} in {}s{how}{draws}{hwui}", seconds(started));
+    let answer = up_answer(&device, py::round_f(started.elapsed().as_secs_f64(), 1), ctx().json);
+    if !ctx().json {
+        say!("{answer}");
+    }
     if platform == "android" {
         // The emulator is this owner's until `down`. The port was free, so no lease that stands can be in the way.
         if let Err(no_lease) = crate::lease::take(&id, &device) {
@@ -108,11 +104,22 @@ pub fn up(args: &mut Args) -> Result<i32> {
         }
     }
 
-    if let Some(build) = args.path.clone() {
-        install(&platform, &id, &build)?;
+    // With --json the answer is one JSON value on stdout: what the install and the start say goes beside it.
+    if ctx().json {
+        crate::state::push_capture(false);
     }
+    let installed = args.path.clone().map_or(Ok(()), |build| install(&platform, &id, &build));
+    let started_app = args.app.clone().map_or(Ok(()), |app| start_app(&platform, &id, &app));
+    if ctx().json {
+        let said = crate::state::pop_capture();
+        if !said.trim().is_empty() {
+            crate::warn!("{}", said.trim_end());
+        }
+        say!("{answer}");
+    }
+    installed?;
+    started_app?;
     if let Some(app) = args.app.clone() {
-        start_app(&platform, &id, &app)?;
         args.device = Some(id.clone());
         args.platform = Some(platform.clone());
         if let Some((session, snapshot)) = live::session_after_start(&platform, &id, &app, ENDPOINT_PATIENCE)? {
@@ -120,6 +127,27 @@ pub fn up(args: &mut Args) -> Result<i32> {
         }
     }
     Ok(0)
+}
+
+/// What `up` answers: one line, or with --json one object with the device's serial or UDID under `device`.
+fn up_answer(device: &Value, seconds: f64, json: bool) -> String {
+    if json {
+        let mut answer = json!({"platform": device["platform"], "device": device["device"], "seconds": seconds});
+        for key in ["boot", "renderer", "hwui", "port"] {
+            if !device[key].is_null() {
+                answer[key] = device[key].clone();
+            }
+        }
+        return py::dumps(&answer);
+    }
+    let draws = device["renderer"].as_str().map(|renderer| format!("; {}", drawn_with(renderer))).unwrap_or_default();
+    let how = match device["boot"].as_str() {
+        Some("cold") => " (cold boot)".to_string(),
+        Some(snapshot) => format!(" (from the snapshot {snapshot})"),
+        None => String::new(),
+    };
+    let hwui = device["hwui"].as_str().map(|hwui| format!("; debug.hwui.renderer={hwui}")).unwrap_or_default();
+    format!("up {} {} in {seconds:.1}s{how}{draws}{hwui}", py::str(&device["platform"]), py::str(&device["device"]))
 }
 
 pub fn down(args: &mut Args) -> Result<i32> {
@@ -1153,6 +1181,20 @@ pub fn devices(args: &mut Args) -> Result<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn up_answers_one_json_object_with_json_and_one_line_without() {
+        let device = json!({"platform": "android", "device": "emulator-5554", "boot": "ddp_vulkan",
+            "renderer": "NVIDIA GeForce RTX 4070 SUPER (Vulkan)", "hwui": "skiagl", "port": 5554, "pid": 7});
+        let answer: Value = serde_json::from_str(&up_answer(&device, 3.8, true)).unwrap();
+        assert_eq!(answer["device"], "emulator-5554");
+        assert_eq!(answer["port"], 5554);
+        assert!(answer.get("pid").is_none());
+        assert_eq!(
+            up_answer(&device, 3.8, false),
+            "up android emulator-5554 in 3.8s (from the snapshot ddp_vulkan); draws with NVIDIA GeForce RTX 4070 SUPER (Vulkan); debug.hwui.renderer=skiagl"
+        );
+    }
 
     #[cfg(unix)]
     #[test]
