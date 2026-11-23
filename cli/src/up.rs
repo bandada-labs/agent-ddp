@@ -814,10 +814,23 @@ pub fn capture_within(program: &str, args: &[&str], patience: Duration) -> Optio
         .stderr(Stdio::piped())
         .spawn()
         .ok()?;
+    // Read while it runs: a child that fills a pipe (64 KB, the listing of a few hundred tests) waits for a reader and
+    // never ends, so waiting first and reading after ran into the deadline every time.
+    let drain = |pipe: Option<Box<dyn std::io::Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            if let Some(mut pipe) = pipe {
+                let _ = pipe.read_to_end(&mut bytes);
+            }
+            String::from_utf8_lossy(&bytes).into_owned()
+        })
+    };
+    let stdout = drain(child.stdout.take().map(|pipe| Box::new(pipe) as Box<dyn std::io::Read + Send>));
+    let stderr = drain(child.stderr.take().map(|pipe| Box::new(pipe) as Box<dyn std::io::Read + Send>));
     let deadline = Instant::now() + patience;
-    loop {
+    let status = loop {
         match child.try_wait() {
-            Ok(Some(_)) => break,
+            Ok(Some(status)) => break status,
             Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(50)),
             _ => {
                 let _ = child.kill();
@@ -825,12 +838,11 @@ pub fn capture_within(program: &str, args: &[&str], patience: Duration) -> Optio
                 return None;
             }
         }
-    }
-    let output = child.wait_with_output().ok()?;
+    };
     Some(crate::state::Output {
-        code: output.status.code().unwrap_or(1),
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        code: status.code().unwrap_or(1),
+        stdout: stdout.join().unwrap_or_default(),
+        stderr: stderr.join().unwrap_or_default(),
     })
 }
 
@@ -1106,6 +1118,15 @@ pub fn devices(args: &mut Args) -> Result<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_child_that_prints_more_than_a_pipe_holds_still_ends_in_time() {
+        let started = Instant::now();
+        let output = capture_within("sh", &["-c", "head -c 300000 /dev/zero | tr '\\0' x"], Duration::from_secs(10));
+        assert_eq!(output.map(|output| output.stdout.len()), Some(300_000));
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
 
     #[test]
     fn names_what_the_emulator_translates_to() {
