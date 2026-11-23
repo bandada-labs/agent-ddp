@@ -53,10 +53,31 @@ pub fn apk(device: &str, apk: &str) -> Result<bool> {
         return Err(refused);
     }
     if installed.code != 0 || installed.stdout.contains("Failure") {
-        return Err(turned_down(device, apk, &installed));
+        // On an emulator ddp started, its data is disposable: an app signed with another key (one baked into the
+        // base's snapshot by an earlier build) goes, and the install runs once more. Any other device keeps its app.
+        let Some(package) = signed_with_another_key(&installed).filter(|_| crate::up::can_restart(device)) else {
+            return Err(turned_down(device, apk, &installed));
+        };
+        capture(&adb, &["-s", device, "uninstall", &package]);
+        let again = capture(&adb, &["-s", device, "install", "-r", "-t", apk]);
+        if again.code != 0 || again.stdout.contains("Failure") {
+            return Err(turned_down(device, apk, &again));
+        }
+        say!("installed {apk} in {}s: the {package} on {device} was signed with another key, and the emulator is ddp's own, so it was uninstalled first", seconds());
+        return Ok(true);
     }
     say!("installed {apk} in {}s", seconds());
     Ok(true)
+}
+
+/// The package an install was turned down for because the one on the device was signed with another key.
+/// adb: "INSTALL_FAILED_UPDATE_INCOMPATIBLE: Existing package com.example signatures do not match newer version".
+fn signed_with_another_key(adb_said: &Output) -> Option<String> {
+    let words = format!("{}\n{}", adb_said.stderr, adb_said.stdout);
+    if !words.contains("INSTALL_FAILED_UPDATE_INCOMPATIBLE") {
+        return None;
+    }
+    words.split("Existing package ").nth(1)?.split_whitespace().next().map(String::from)
 }
 
 /// An install Android turned down, in adb's own words: adb writes the reason to stderr, and stdout holds only
@@ -66,10 +87,7 @@ fn turned_down(device: &str, apk: &str, adb_said: &Output) -> Failure {
         [adb_said.stderr.trim(), adb_said.stdout.trim()].into_iter().filter(|said| !said.is_empty()).collect();
     let words = words.join("\n");
     let message = format!("{apk} was not installed on {device}. adb said: {words}");
-    // "Existing package com.example signatures do not match newer version; ignoring!"
-    let other_key = words.contains("INSTALL_FAILED_UPDATE_INCOMPATIBLE");
-    let package = words.split("Existing package ").nth(1).and_then(|rest| rest.split_whitespace().next());
-    match package.filter(|_| other_key) {
+    match signed_with_another_key(adb_said) {
         Some(package) => failure(
             format!("{message}\nThe {package} on the device was signed with another key, and Android updates an app only with the key it was installed with."),
             "signing_key_differs",

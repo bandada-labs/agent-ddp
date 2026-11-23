@@ -1224,6 +1224,34 @@ with tempfile.TemporaryDirectory() as directory:
         same = ddp_in(directory, "test", "--device", "install-fake", "--app", "fake", "--install", str(apk), "--json", env=installs)
         assert json.loads(same.stdout)["phases"]["unchanged"] == 1 and "(fake, the same bytes): not installed again" in same.stderr \
             and " install -r" not in install_log.read_text(), same.stdout + same.stderr + install_log.read_text()
+    # An app on the device signed with another key: on an emulator ddp started (its data is disposable) it is
+    # uninstalled and the install runs once more; on any other device the install is refused, nothing uninstalled.
+    resign_adb = Path(directory, "resign", "adb")
+    resign_adb.parent.mkdir()
+    resign_log = Path(directory, "resign.log")
+    resign_mark = Path(directory, "resign-uninstalled")
+    resign_adb.write_text("#!/bin/sh\n"
+                          f"echo \"$*\" >> {resign_log}\n"
+                          "case \"$*\" in\n"
+                          f"*' uninstall '*) touch {resign_mark}; echo Success;;\n"
+                          f"*' install '*) if [ -f {resign_mark} ]; then echo Success; else echo 'Performing Streamed Install'; "
+                          "echo 'adb: failed to install app.apk: Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE: Existing package fake signatures do not match newer version; ignoring!]' >&2; exit 1; fi;;\n"
+                          "*'pm list instrumentation'*) echo 'instrumentation:fake.test/androidx.test.runner.AndroidJUnitRunner (target=fake)';;\n"
+                          "*'am instrument'*) " + block("one", 0) + "echo 'INSTRUMENTATION_CODE: -1';;\n"
+                          "esac\n")
+    resign_adb.chmod(0o755)
+    resigns = {"PATH": f"{resign_adb.parent}:{os.environ['PATH']}", "HOME": str(home)}
+    owned_dir = Path(directory, ".ddp", "sessions", "resign")
+    owned_dir.mkdir(parents=True)
+    (owned_dir / "devices.json").write_text(json.dumps([{"platform": "android", "device": "own-fake"}]))
+    foreign = ddp_in(directory, "test", "--device", "other-fake", "--app", "fake", "--install", str(apk), "--no-focus-check",
+                     "--session", "resign", "--json", env=resigns)
+    assert json.loads(foreign.stdout)["code"] == "signing_key_differs" and " uninstall " not in resign_log.read_text(), \
+        foreign.stdout + resign_log.read_text()
+    own = ddp_in(directory, "test", "--device", "own-fake", "--app", "fake", "--install", str(apk), "--no-focus-check",
+                 "--session", "resign", env=resigns)
+    assert own.returncode == 0 and "the fake on own-fake was signed with another key, and the emulator is ddp's own, so it was uninstalled first" \
+        in own.stdout and "-s own-fake uninstall fake\n" in resign_log.read_text(), own.stdout + own.stderr + resign_log.read_text()
     # A run that ends early goes on with the tests that are left. The app's process crashing in a test fails that test;
     # the runner then names the rest (`-e log true`) and ddp hands it those in a file.
     crash_adb = Path(directory, "crashes", "adb")
