@@ -37,6 +37,8 @@ pub struct Args {
     pub restarts: Option<usize>,
     /// `test --no-focus-check`.
     pub no_focus_check: bool,
+    /// `test --rerun-failed`: each failed test runs once more.
+    pub rerun_failed: bool,
     /// `up --min-free`: the memory that has to be available before the emulator starts.
     pub min_free: Option<String>,
     pub name: Option<String>,
@@ -414,14 +416,15 @@ pub fn parser() -> Command {
         .subcommand(device_options(sub("stop", "stop the app (Android am force-stop, iOS simctl terminate); ddp launch starts it again")))
         .subcommand(device_options(sub("clear", "clear the app's data, like a fresh install (Android pm clear; iOS its data container, the Keychain stays)")))
         .subcommand(device_options(sub("test", "Android: run the app's instrumentation tests (am instrument), then what passed, failed and was skipped")
-            .arg(opt("class", "only this class, or Class#method").id("filter"))
+            .arg(opt("class", "only this class, or Class#method; several with commas: A,B#method").id("filter"))
             .arg(opt("runner", "the instrumentation, package/runner, when the app has more than one").id("name"))
             .arg(Arg::new("env").long("env").num_args(1).action(ArgAction::Append).value_name("KEY=VALUE")
-                .help("an argument for the tests (am instrument -e KEY VALUE); repeat for more"))
+                .help("an argument for the tests (am instrument -e KEY VALUE); repeat for more; notClass=A#method,B leaves tests out"))
             .arg(opt("stall", "stop the run when no test starts or finishes for this long (5m); default: wait for it"))
             .arg(opt("restarts", "how often an emulator `ddp up` made is started again when it dies or freezes in the run, which then goes on with the tests that are left (3; 0: stop there); needs --install")
                 .value_parser(clap::value_parser!(usize)))
             .arg(flag("no-focus-check", "do not check first that an app's window can take the focus on the device"))
+            .arg(flag("rerun-failed", "run each failed test once more after the run; one that passes then is FLAKY, not failed"))
             .arg(Arg::new("install").long("install").num_args(1).action(ArgAction::Append).value_name("APK")
                 .help("an APK to put on every device first (the app, the test APK); not sent again when the device has the same bytes; repeat for more"))
             .arg(opt("on", "split the run over these devices, one shard each at the same time: emulator-5560,emulator-5562"))))
@@ -550,6 +553,7 @@ pub fn parse(argv: &[String]) -> Result<Args, clap::Error> {
         hwui: string(m, "hwui"),
         restarts: number::<usize>(m, "restarts"),
         no_focus_check: boolean(m, "no-focus-check"),
+        rerun_failed: boolean(m, "rerun-failed"),
         min_free: string(m, "min-free"),
         name: string(m, "name"),
         on: string(m, "on"),

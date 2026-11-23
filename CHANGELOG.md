@@ -2,7 +2,7 @@
 
 Changes that users or agents will notice. Before 1.0, a minor version may change the protocol or the output; those changes are marked.
 
-## Unreleased
+## 0.5.2 (not released yet)
 
 ### Added
 
@@ -14,6 +14,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 - `ddp test` prints where the time went: `phases: boot 6.6s (from the snapshot ddp_vulkan, at ddp up), install 0.3s (2 of 2 unchanged), runner start 1.1s, tests 41.2s`; `phases` in `--json`.
 - `ddp test` goes on after a run ends early. An emulator `ddp up` made that dies or freezes in the run is started again on its port, gets the `--install` APKs again, and the run goes on with the test that was running and the ones after it (`RESTARTED emulator-5560 in 16.9s (in Class#method): ...`); a test the emulator is lost in twice is given up on and the rest still runs. `--restarts N` sets how often (3; 0 for the old behaviour).
 - `ddp test` checks before the tests that an app's window can take the focus on the device (the screen on, the keyguard away, Settings opened and closed). A device where the focus stays on the launcher ends with `no_focus`, an emulator of ddp's own is started again. `--no-focus-check` skips it; `focus` is a phase.
+- `ddp test --rerun-failed`: each failed test runs once more after the run; one that passes then is `FLAKY` and counts as passed. `--class` takes several classes with commas, and `--env notClass=...` leaves tests out.
 - `ddp up --hwui skiagl|skiavk`: what the apps in the guest draw with (`debug.hwui.renderer`), set after the boot and read back.
 - The core guide says how to use Xcode's own tools and ddp together.
 
@@ -22,6 +23,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 - An install Android turns down is reported in adb's own words, whole. An app installed with another signing key gets its own code, `signing_key_differs`, and the uninstall as the next step.
 - `ddp up --install` passes `-t` to adb, so a build marked test-only installs.
 - `ddp test`: the app's process crashing in a test was `STOPPED in Class#method: Process crashed.` and ended the run. It is now `FAIL Class#method: Process crashed.` and the tests after it still run. `STOPPED` is left for a run that could not go on.
+- `ddp test`: a run with no test in it (a filter that matched none, a device gone before the first test) was a pass with `0 passed`. It is now `STOPPED no test ran ...` and exit 1.
 - `ddp down` and a restart remove the temp images (about 1 GB per read-only emulator) of an emulator that was killed or died.
 
 ### Fixed

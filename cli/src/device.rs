@@ -554,6 +554,10 @@ struct TestRun {
     stopped: Option<(String, Option<String>)>,
     /// Every test that got its final code, in the order they ran.
     finished: Vec<String>,
+    /// The tests that passed, by name.
+    passed_tests: Vec<String>,
+    /// Failed, then passed when run once more (`--rerun-failed`): the first failure's line.
+    flaky: Vec<(String, String)>,
 }
 
 /// What a run says when its output ends with neither a result nor a crash message.
@@ -582,7 +586,10 @@ fn instrumentation_run(output: &str) -> TestRun {
             let test = format!("{}#{}", field("class"), field("test"));
             match code.trim() {
                 "1" => running = Some(test.clone()),
-                "0" => run.passed += 1,
+                "0" => {
+                    run.passed += 1;
+                    run.passed_tests.push(test.clone());
+                }
                 "-1" | "-2" => {
                     let stack = field("stack");
                     run.failed.push((test.clone(), stack.lines().next().unwrap_or("").trim().to_string()));
@@ -764,6 +771,7 @@ struct TestPlan<'a> {
     installs: &'a [String],
     restarts: usize,
     check_focus: bool,
+    rerun_failed: bool,
 }
 
 /// How long an app's window gets to take the focus.
@@ -1008,7 +1016,30 @@ fn run_tests_on(device: &str, runner: &str, shard: Option<(usize, usize)>, plan:
             ));
         }
     }
+    if plan.rerun_failed && total.stopped.is_none() {
+        rerun_failed(&adb_program, device, runner, plan, &mut total)?;
+    }
     Ok(DeviceRun { device: device.to_string(), run: total, seconds: since(started), runner_start, focus, restarts })
+}
+
+/// Runs each failed test once more, on the same device. One that passes then moves to `flaky` and counts as passed;
+/// any other answer (failed again, skipped, the run cut short) leaves it failed, with its first failure's line.
+fn rerun_failed(adb_program: &str, device: &str, runner: &str, plan: &TestPlan, total: &mut TestRun) -> Result<()> {
+    let failed_tests: Vec<&String> = total.failed.iter().map(|(test, _)| test).collect();
+    if failed_tests.is_empty() || !push_test_file(adb_program, device, &failed_tests) {
+        return Ok(());
+    }
+    let mut command: Vec<&str> = vec!["-s", device, "shell", "am", "instrument", "-w", "-r"];
+    command.extend(plan.environment.iter().map(String::as_str));
+    command.extend(["-e", "testFile", TEST_FILE, runner]);
+    let (output, _, _) = instrument(adb_program, &command, device, plan.app, plan.stall)?;
+    let again = instrumentation_run(&output);
+    let (flaky, still_failed) =
+        std::mem::take(&mut total.failed).into_iter().partition(|(test, _)| again.passed_tests.contains(test));
+    total.failed = still_failed;
+    total.passed += flaky.len();
+    total.flaky = flaky;
+    Ok(())
 }
 
 /// Names the tests that have no verdict yet to the runner, for the next part of the run. False when there are none
@@ -1162,6 +1193,7 @@ pub fn test(args: &mut Args) -> Result<i32> {
         installs: &args.installs,
         restarts: args.restarts.unwrap_or(DEFAULT_RESTARTS),
         check_focus: !args.no_focus_check,
+        rerun_failed: args.rerun_failed,
     };
     for device in &devices {
         if crate::runner::stop(device).unwrap_or(false) {
@@ -1176,7 +1208,7 @@ pub fn test(args: &mut Args) -> Result<i32> {
     }
     let started = Instant::now();
     let shards = devices.len();
-    let runs: Vec<DeviceRun> = if shards == 1 {
+    let mut runs: Vec<DeviceRun> = if shards == 1 {
         vec![run_tests_on(&devices[0], &runners[0], None, &plan)?]
     } else {
         std::thread::scope(|scope| {
@@ -1202,10 +1234,21 @@ pub fn test(args: &mut Args) -> Result<i32> {
         })?
     };
     let seconds = py::round_f(started.elapsed().as_secs_f64(), 1);
+    // A run with no test in it proves nothing, so it is no pass: a filter that matched none, or a device that went
+    // away before the runner said a word.
+    let tests_in = |r: &DeviceRun| r.run.passed + r.run.skipped + r.run.failed.len();
+    if runs.iter().all(|r| tests_in(r) == 0 && r.run.stopped.is_none()) {
+        let adb_program = adb_path()?;
+        let why = devices.iter().find_map(|device| device_gone(&adb_program, device)).unwrap_or_else(|| {
+            "no test ran: the runner found none to run (check --class, and notClass in --env)".to_string()
+        });
+        runs[0].run.stopped = Some((why, None));
+    }
     let runner = &runners[0];
     let passed: usize = runs.iter().map(|r| r.run.passed).sum();
     let skipped: usize = runs.iter().map(|r| r.run.skipped).sum();
     let failures: usize = runs.iter().map(|r| r.run.failed.len()).sum();
+    let flaky: usize = runs.iter().map(|r| r.run.flaky.len()).sum();
     let all_ran = runs.iter().all(|r| r.run.failed.is_empty() && r.run.stopped.is_none());
     let (phases_line, phases) = test_phases(&devices, install, &runs, seconds);
     if ctx().json {
@@ -1238,6 +1281,14 @@ pub fn test(args: &mut Args) -> Result<i32> {
         if !restarts.is_empty() {
             result["restarts"] = json!(restarts);
         }
+        if flaky > 0 {
+            result["flaky"] = runs
+                .iter()
+                .flat_map(|r| {
+                    r.run.flaky.iter().map(|(test, message)| on(&r.device, json!({"test": test, "message": message})))
+                })
+                .collect();
+        }
         if shards == 1 {
             result["stopped"] = stopped.into_iter().next().unwrap_or(Value::Null);
         } else {
@@ -1259,6 +1310,9 @@ pub fn test(args: &mut Args) -> Result<i32> {
         for (test, message) in &device_run.run.failed {
             say!("FAIL {test}{on}: {message}");
         }
+        for (test, message) in &device_run.run.flaky {
+            say!("FLAKY {test}{on}: failed first ({message}), passed when run again");
+        }
         if let Some((why, test)) = &device_run.run.stopped {
             let on = on.trim_start();
             let place = match (test, on.is_empty()) {
@@ -1271,8 +1325,9 @@ pub fn test(args: &mut Args) -> Result<i32> {
         }
     }
     say!("{phases_line}");
+    let flaky = if flaky > 0 { format!(", {flaky} of the passed flaky") } else { String::new() };
     if shards == 1 {
-        say!("{runner} in {seconds}s: {passed} passed, {failures} failed, {skipped} skipped");
+        say!("{runner} in {seconds}s: {passed} passed, {failures} failed, {skipped} skipped{flaky}");
     } else {
         let each: Vec<String> = runs
             .iter()
@@ -1288,7 +1343,7 @@ pub fn test(args: &mut Args) -> Result<i32> {
             })
             .collect();
         say!(
-            "{runner} on {shards} devices in {seconds}s: {passed} passed, {failures} failed, {skipped} skipped ({})",
+            "{runner} on {shards} devices in {seconds}s: {passed} passed, {failures} failed, {skipped} skipped{flaky} ({})",
             each.join("; ")
         );
     }
@@ -2273,6 +2328,8 @@ mod tests {
                 finished: ["packageName", "failsWhenAsked", "skipped"]
                     .map(|test| format!("dev.app.SampleTest#{test}"))
                     .to_vec(),
+                passed_tests: vec!["dev.app.SampleTest#packageName".into()],
+                flaky: Vec::new(),
             }
         );
         // The process dies in the middle of a test: no code for it, a short message for the run.

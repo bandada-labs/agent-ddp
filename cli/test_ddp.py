@@ -1228,6 +1228,36 @@ with tempfile.TemporaryDirectory() as directory:
     assert json.loads(stuck.stdout)["code"] == "no_focus" and "com.launcher/com.launcher.Home" in stuck.stdout \
         and "am instrument" not in crash_log.read_text(), stuck.stdout + crash_log.read_text()
     assert ddp_in(directory, "test", "--device", "focus-fake", "--app", "fake", "--no-focus-check", env=crashes).returncode == 1
+    # --rerun-failed: a failed test runs once more; passing then makes it flaky, not failed. One that fails again stays
+    # failed. A run with no test in it is no pass.
+    rerun_adb = Path(directory, "reruns", "adb")
+    rerun_adb.parent.mkdir()
+    rerun_log = Path(directory, "reruns.log")
+    rerun_adb.write_text("#!/bin/sh\n"
+                         f"echo \"$*\" >> {rerun_log}\n"
+                         "case \"$*\" in\n"
+                         "*'pm list instrumentation'*) echo 'instrumentation:fake.test/androidx.test.runner.AndroidJUnitRunner (target=fake)';;\n"
+                         "*'-s none-fake'*'am instrument'*) echo 'INSTRUMENTATION_CODE: -1';;\n"
+                         "*'-e testFile'*) " + block("two", 0) + block("three", -2, "echo 'INSTRUMENTATION_STATUS: stack=again'; ")
+                         + "echo 'INSTRUMENTATION_CODE: -1';;\n"
+                         "*'am instrument'*) " + block("one", 0) + block("two", -2, "echo 'INSTRUMENTATION_STATUS: stack=first'; ")
+                         + block("three", -2, "echo 'INSTRUMENTATION_STATUS: stack=always'; ") + "echo 'INSTRUMENTATION_CODE: -1';;\n"
+                         "*' get-state'*) echo device;;\n"
+                         "esac\n")
+    rerun_adb.chmod(0o755)
+    reruns = {"PATH": f"{rerun_adb.parent}:{os.environ['PATH']}", "HOME": str(home)}
+    plain = ddp_in(directory, "test", "--device", "rerun-fake", "--app", "fake", "--no-focus-check", env=reruns)
+    assert plain.returncode == 1 and "FLAKY" not in plain.stdout and "testFile" not in rerun_log.read_text() and \
+        re.search(r"in [\d.]+s: 1 passed, 2 failed, 0 skipped\n", plain.stdout), plain.stdout + plain.stderr
+    again = ddp_in(directory, "test", "--device", "rerun-fake", "--app", "fake", "--no-focus-check", "--rerun-failed", env=reruns)
+    assert again.returncode == 1 and "FLAKY fake.Suite#two: failed first (first), passed when run again\n" in again.stdout \
+        and "FAIL fake.Suite#three: always\n" in again.stdout and "FAIL fake.Suite#two" not in again.stdout \
+        and re.search(r"in [\d.]+s: 2 passed, 1 failed, 0 skipped, 1 of the passed flaky\n", again.stdout), again.stdout + again.stderr
+    again_json = json.loads(ddp_in(directory, "test", "--device", "rerun-fake", "--app", "fake", "--no-focus-check", "--rerun-failed",
+                                   "--json", env=reruns).stdout)
+    assert again_json["flaky"] == [{"test": "fake.Suite#two", "message": "first"}] and again_json["passed"] == 2, again_json
+    none = ddp_in(directory, "test", "--device", "none-fake", "--app", "fake", "--no-focus-check", "--class", "fake.Nothing", env=reruns)
+    assert none.returncode == 1 and "STOPPED no test ran: the runner found none to run" in none.stdout, none.stdout + none.stderr
     no_apk = ddp_in(directory, "test", "--device", "install-fake", "--app", "fake", "--install", str(Path(directory, "none.apk")), env=installs)
     assert no_apk.returncode == 1 and "no APK at" in no_apk.stderr, no_apk.stderr
     # The memory bar is read before anything starts; where the memory cannot be read (off Linux) nothing is refused.
