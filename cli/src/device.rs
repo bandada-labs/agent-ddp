@@ -548,6 +548,8 @@ pub fn clear(args: &mut Args) -> Result<i32> {
 struct TestRun {
     passed: usize,
     skipped: usize,
+    /// The skipped tests (ignored, or an assumption that did not hold), by name.
+    skipped_tests: Vec<String>,
     /// `Class#method` and the first line of its stack.
     failed: Vec<(String, String)>,
     /// The run ended early: the process died, or the instrumentation never ran. The test running then, if any.
@@ -594,7 +596,10 @@ fn instrumentation_run(output: &str) -> TestRun {
                     let stack = field("stack");
                     run.failed.push((test.clone(), stack.lines().next().unwrap_or("").trim().to_string()));
                 }
-                "-3" | "-4" => run.skipped += 1,
+                "-3" | "-4" => {
+                    run.skipped += 1;
+                    run.skipped_tests.push(test.clone());
+                }
                 _ => {}
             }
             if code.trim() != "1" {
@@ -633,15 +638,14 @@ const STALL_FRAME_WINDOW: Duration = Duration::from_secs(2);
 
 /// Runs `am instrument` and reads what it prints as it comes. A long run that goes silent is not waited on forever
 /// when its device is gone: the emulator died or hangs, or adb lost the device. With `stall`, a run with no test
-/// line for that long is stopped too, with what the app drew meanwhile. Returns the output, why ddp stopped it, and
-/// how long the instrumentation took to say its first line (its process starting and finding the tests).
+/// line for that long is stopped too, with what the app drew meanwhile.
 fn instrument(
     adb_program: &str,
     words: &[&str],
     device: &str,
     app: &str,
     stall: Option<Duration>,
-) -> Result<(String, Option<String>, Option<Duration>)> {
+) -> Result<Instrumented> {
     use std::io::BufRead;
     use std::sync::mpsc::{channel, RecvTimeoutError};
     let mut child = std::process::Command::new(adb_program)
@@ -662,6 +666,7 @@ fn instrument(
         });
     }
     let mut output = String::new();
+    let mut line_times = Vec::new();
     let started = Instant::now();
     let mut first_line = None;
     let mut last_line = Instant::now();
@@ -670,6 +675,7 @@ fn instrument(
         match lines.recv_timeout(Duration::from_millis(500)) {
             Ok(line) => {
                 first_line.get_or_insert_with(|| started.elapsed());
+                line_times.push(started.elapsed().as_secs_f64());
                 output.push_str(&line);
                 output.push('\n');
                 last_line = Instant::now();
@@ -694,7 +700,18 @@ fn instrument(
         let _ = child.kill();
     }
     let _ = child.wait();
-    Ok((output, stopped, first_line))
+    Ok(Instrumented { output, stopped, first_line, line_times })
+}
+
+/// What `am instrument` printed, and how.
+struct Instrumented {
+    output: String,
+    /// Why ddp stopped the run, when it did.
+    stopped: Option<String>,
+    /// How long the instrumentation took to say its first line (its process starting and finding the tests).
+    first_line: Option<Duration>,
+    /// When each line came, in seconds from the start.
+    line_times: Vec<f64>,
 }
 
 /// Why the device no longer runs the tests, when it does not: ddp's own emulator died or hangs, or adb lost it.
@@ -749,6 +766,8 @@ struct DeviceRun {
     /// The focus check before the tests. None when it was not asked for.
     focus: Option<f64>,
     restarts: Vec<Restart>,
+    /// How long each test took on this device.
+    times: Vec<(String, f64)>,
 }
 
 /// An emulator that was lost in the run and started again.
@@ -762,8 +781,6 @@ struct Restart {
 /// What a test run was asked with, the same for every device.
 struct TestPlan<'a> {
     app: &'a str,
-    /// The class filter, as `am instrument` words.
-    filter: &'a [String],
     /// The `--env` pairs, as `am instrument` words. A continued run passes these and names its tests itself.
     environment: &'a [String],
     stall: Option<Duration>,
@@ -818,7 +835,17 @@ fn takes_focus(adb_program: &str, device: &str) -> Result<()> {
 /// runner did not get to the end of the list.
 fn listed_tests(adb_program: &str, device: &str, runner: &str, asked: &[String]) -> Option<Vec<String>> {
     let mut command: Vec<&str> = vec!["-s", device, "shell", "am", "instrument", "-w", "-r", "-e", "log", "true"];
-    command.extend(asked.iter().map(String::as_str));
+    // A listener changes nothing about which tests run, and one that resets the device per test would do that for
+    // every name listed.
+    let mut words = asked.iter().map(String::as_str);
+    while let Some(word) = words.next() {
+        match (word, words.clone().next().map(|key| key.trim_matches('\''))) {
+            ("-e", Some("listener")) => {
+                words.nth(1);
+            }
+            _ => command.push(word),
+        }
+    }
     command.push(runner);
     let listed = crate::up::capture_within(adb_program, &command, Duration::from_secs(120))?;
     let run = instrumentation_run(&listed.stdout);
@@ -891,42 +918,92 @@ fn instrumentation_arguments(args: &Args) -> Result<(Vec<String>, Vec<String>)> 
     Ok((filter, environment))
 }
 
-/// Runs the instrumentation on one device, all of it or one shard of `shards` (AndroidJUnitRunner's own split:
-/// every test lands in exactly one shard).
-///
-/// A run that ends early goes on with the tests that are left, named in a file for the runner:
-/// - the device was lost (it died, froze, or the run stalled): an emulator `ddp up` made is started again and the
-///   test that was running runs once more; lost in it a second time, that test is given up on;
-/// - the app's process crashed: that test failed, and the rest runs on the same device;
-/// - the output just ended and the device answers: that test runs once more, then it is given up on.
-fn run_tests_on(device: &str, runner: &str, shard: Option<(usize, usize)>, plan: &TestPlan) -> Result<DeviceRun> {
+/// What one device runs: what the run was asked for (a run on one device), or tests ddp named (its share of a run
+/// over several devices).
+enum Part<'a> {
+    Asked(&'a [String]),
+    Named(&'a [String]),
+}
+
+impl Part<'_> {
+    /// Every test in this part, for going on after the run ended early. None when the runner could not list them.
+    fn tests(&self, adb_program: &str, device: &str, runner: &str) -> Option<Vec<String>> {
+        match self {
+            Part::Asked(asked) => listed_tests(adb_program, device, runner, asked),
+            Part::Named(tests) => Some(tests.to_vec()),
+        }
+    }
+}
+
+fn can_start_again(device: &str, plan: &TestPlan, restarts: &[Restart]) -> bool {
+    restarts.len() < plan.restarts && !plan.installs.is_empty() && crate::up::can_restart(device)
+}
+
+/// Runs the instrumentation on one device: what was asked, or the tests named for it.
+fn run_tests_on(device: &str, runner: &str, part: &Part, plan: &TestPlan) -> Result<DeviceRun> {
     let adb_program = adb_path()?;
     let started = Instant::now();
     let since = |moment: Instant| py::round_f(moment.elapsed().as_secs_f64(), 1);
-    let mut restarts: Vec<Restart> = Vec::new();
-    let can_start_again = |restarts: &[Restart]| {
-        restarts.len() < plan.restarts && !plan.installs.is_empty() && crate::up::can_restart(device)
+    let mut done = DeviceRun {
+        device: device.to_string(),
+        run: TestRun::default(),
+        seconds: 0.0,
+        runner_start: None,
+        focus: None,
+        restarts: Vec::new(),
+        times: Vec::new(),
     };
-    let mut focus = None;
+    // A device whose share of the split is empty has nothing to be ready for.
+    if matches!(part, Part::Named(tests) if tests.is_empty()) {
+        return Ok(done);
+    }
     if plan.check_focus {
         if let Err(no_focus) = takes_focus(&adb_program, device) {
-            if !can_start_again(&restarts) {
+            if !can_start_again(device, plan, &done.restarts) {
                 return Err(no_focus);
             }
             let again = Instant::now();
             start_again(&adb_program, device, plan)?;
-            restarts.push(Restart { why: no_focus.message, test: None, seconds: since(again) });
+            done.restarts.push(Restart { why: no_focus.message, test: None, seconds: since(again) });
         }
-        focus = Some(since(started));
+        done.focus = Some(since(started));
     }
-    let mut asked: Vec<String> = plan.filter.iter().chain(plan.environment).cloned().collect();
-    if let Some((index, shards)) = shard {
-        asked.extend(["-e".into(), "numShards".into(), shards.to_string()]);
-        asked.extend(["-e".into(), "shardIndex".into(), index.to_string()]);
+    run_part(&adb_program, device, runner, part, plan, &mut done)?;
+    if plan.rerun_failed && done.run.stopped.is_none() {
+        rerun_failed(&adb_program, device, runner, plan, &mut done.run)?;
     }
-    let mut total = TestRun::default();
-    let mut runner_start = None;
-    let mut continued = false;
+    done.seconds = since(started);
+    Ok(done)
+}
+
+/// Runs one part on a device. A run that ends early goes on with the tests that are left, named in a file for the
+/// runner:
+/// - the device was lost (it died, froze, or the run stalled): an emulator `ddp up` made is started again and the
+///   test that was running runs once more; lost in it a second time, that test is given up on;
+/// - the app's process crashed: that test failed, and the rest runs on the same device;
+/// - the output just ended and the device answers: that test runs once more, then it is given up on.
+fn run_part(
+    adb_program: &str,
+    device: &str,
+    runner: &str,
+    part: &Part,
+    plan: &TestPlan,
+    done: &mut DeviceRun,
+) -> Result<()> {
+    let since = |moment: Instant| py::round_f(moment.elapsed().as_secs_f64(), 1);
+    let total = &mut done.run;
+    let asked: Vec<String> = match part {
+        Part::Asked(asked) => asked.to_vec(),
+        Part::Named(_) => Vec::new(),
+    };
+    // Named tests go to the runner in the file from the start, like the rest of a run that went on.
+    let mut continued = matches!(part, Part::Named(_));
+    if let Part::Named(tests) = part {
+        if !push_test_file(adb_program, device, &tests.iter().collect::<Vec<_>>()) {
+            total.stopped = Some((format!("the {} tests could not be named to the runner", tests.len()), None));
+            return Ok(());
+        }
+    }
     // The test the run last ended in without a verdict on it: ending there again is its last chance.
     let mut ended_in: Option<String> = None;
     loop {
@@ -938,12 +1015,15 @@ fn run_tests_on(device: &str, runner: &str, shard: Option<(usize, usize)>, plan:
             command.extend(asked.iter().map(String::as_str));
         }
         command.push(runner);
-        let (output, stopped_from_outside, first_line) =
-            instrument(&adb_program, &command, device, plan.app, plan.stall)?;
-        runner_start = runner_start.or(first_line.map(|waited| py::round_f(waited.as_secs_f64(), 1)));
+        let Instrumented { output, stopped: stopped_from_outside, first_line, line_times } =
+            instrument(adb_program, &command, device, plan.app, plan.stall)?;
+        done.runner_start = done.runner_start.or(first_line.map(|waited| py::round_f(waited.as_secs_f64(), 1)));
+        done.times.extend(test_seconds(&output, &line_times));
         let run = instrumentation_run(&output);
         total.passed += run.passed;
+        total.passed_tests.extend(run.passed_tests);
         total.skipped += run.skipped;
+        total.skipped_tests.extend(run.skipped_tests);
         total.failed.extend(run.failed);
         total.finished.extend(run.finished);
         // Why it ended early, the test running then, and whether the device is lost. An emulator that dies takes the
@@ -951,7 +1031,7 @@ fn run_tests_on(device: &str, runner: &str, shard: Option<(usize, usize)>, plan:
         let (why, running, lost) = match (stopped_from_outside, run.stopped) {
             (None, None) => break,
             (Some(why), stopped) => (why, stopped.and_then(|(_, test)| test), true),
-            (None, Some((why, running))) if why == NO_RESULT => match device_gone(&adb_program, device) {
+            (None, Some((why, running))) if why == NO_RESULT => match device_gone(adb_program, device) {
                 Some(gone) => (gone, running, true),
                 None => (why, running, false),
             },
@@ -959,16 +1039,16 @@ fn run_tests_on(device: &str, runner: &str, shard: Option<(usize, usize)>, plan:
         };
         let crashed = !lost && why != NO_RESULT;
         if lost {
-            if !can_start_again(&restarts) {
+            if !can_start_again(device, plan, &done.restarts) {
                 total.stopped = Some((why, running));
                 break;
             }
             let again = Instant::now();
-            if let Err(not_back) = start_again(&adb_program, device, plan) {
+            if let Err(not_back) = start_again(adb_program, device, plan) {
                 total.stopped = Some((format!("{why} Starting it again failed: {}", not_back.message), running));
                 break;
             }
-            restarts.push(Restart { why: why.clone(), test: running.clone(), seconds: since(again) });
+            done.restarts.push(Restart { why: why.clone(), test: running.clone(), seconds: since(again) });
         }
         let Some(test) = running else {
             // Before the first test or between two: nothing to hold against a test. On a new emulator the run goes on.
@@ -979,7 +1059,7 @@ fn run_tests_on(device: &str, runner: &str, shard: Option<(usize, usize)>, plan:
                 break;
             }
             ended_in = None;
-            if !continue_with_the_rest(&adb_program, device, runner, &asked, &mut total) {
+            if !continue_with_the_rest(adb_program, device, runner, part, total) {
                 break;
             }
             continue;
@@ -994,32 +1074,27 @@ fn run_tests_on(device: &str, runner: &str, shard: Option<(usize, usize)>, plan:
             ended_in = Some(test);
         }
         continued = true;
-        if !continue_with_the_rest(&adb_program, device, runner, &asked, &mut total) {
+        if !continue_with_the_rest(adb_program, device, runner, part, total) {
             break;
         }
     }
-    // A continued run names its tests to the runner. One it did not take (a name the runner filters another way)
-    // would be missing from the counts without a word.
+    // A run that names its tests to the runner: one it did not take (a name the runner filters another way) would be
+    // missing from the counts without a word.
     if continued && total.stopped.is_none() {
-        let never_ran: Vec<String> = listed_tests(&adb_program, device, runner, &asked)
+        let never_ran: Vec<String> = part
+            .tests(adb_program, device, runner)
             .unwrap_or_default()
             .into_iter()
             .filter(|test| !total.finished.contains(test))
             .collect();
         if let Some(first) = never_ran.first() {
             total.stopped = Some((
-                format!(
-                    "{} of the tests left did not run after the run was continued, {first} the first",
-                    never_ran.len()
-                ),
+                format!("{} of the tests named to the runner did not run, {first} the first", never_ran.len()),
                 None,
             ));
         }
     }
-    if plan.rerun_failed && total.stopped.is_none() {
-        rerun_failed(&adb_program, device, runner, plan, &mut total)?;
-    }
-    Ok(DeviceRun { device: device.to_string(), run: total, seconds: since(started), runner_start, focus, restarts })
+    Ok(())
 }
 
 /// Runs each failed test once more, on the same device. One that passes then moves to `flaky` and counts as passed;
@@ -1032,8 +1107,7 @@ fn rerun_failed(adb_program: &str, device: &str, runner: &str, plan: &TestPlan, 
     let mut command: Vec<&str> = vec!["-s", device, "shell", "am", "instrument", "-w", "-r"];
     command.extend(plan.environment.iter().map(String::as_str));
     command.extend(["-e", "testFile", TEST_FILE, runner]);
-    let (output, _, _) = instrument(adb_program, &command, device, plan.app, plan.stall)?;
-    let again = instrumentation_run(&output);
+    let again = instrumentation_run(&instrument(adb_program, &command, device, plan.app, plan.stall)?.output);
     let (flaky, still_failed) =
         std::mem::take(&mut total.failed).into_iter().partition(|(test, _)| again.passed_tests.contains(test));
     total.failed = still_failed;
@@ -1044,14 +1118,8 @@ fn rerun_failed(adb_program: &str, device: &str, runner: &str, plan: &TestPlan, 
 
 /// Names the tests that have no verdict yet to the runner, for the next part of the run. False when there are none
 /// left, or when they could not be named: then `stopped` says so.
-fn continue_with_the_rest(
-    adb_program: &str,
-    device: &str,
-    runner: &str,
-    asked: &[String],
-    total: &mut TestRun,
-) -> bool {
-    let Some(all) = listed_tests(adb_program, device, runner, asked) else {
+fn continue_with_the_rest(adb_program: &str, device: &str, runner: &str, part: &Part, total: &mut TestRun) -> bool {
+    let Some(all) = part.tests(adb_program, device, runner) else {
         total.stopped =
             Some(("the run ended early and the tests that were left could not be listed".to_string(), None));
         return false;
@@ -1070,11 +1138,96 @@ fn continue_with_the_rest(
     true
 }
 
+/// How long each test took, from when the runner said it started to its verdict, as ddp read the lines (`at`: the
+/// seconds of each output line).
+fn test_seconds(output: &str, at: &[f64]) -> Vec<(String, f64)> {
+    let mut times = Vec::new();
+    let (mut class, mut name) = (String::new(), String::new());
+    let mut began: Option<(String, f64)> = None;
+    for (line, seconds) in output.lines().zip(at) {
+        let line = line.trim_end_matches('\r');
+        if let Some(value) = line.strip_prefix("INSTRUMENTATION_STATUS: class=") {
+            class = value.to_string();
+        } else if let Some(value) = line.strip_prefix("INSTRUMENTATION_STATUS: test=") {
+            name = value.to_string();
+        } else if let Some(code) = line.strip_prefix("INSTRUMENTATION_STATUS_CODE: ") {
+            let test = format!("{class}#{name}");
+            if code.trim() == "1" {
+                began = Some((test, *seconds));
+            } else if let Some((started, from)) = began.take().filter(|(started, _)| *started == test) {
+                times.push((started, py::round_f(seconds - from, 2)));
+            }
+        }
+    }
+    times
+}
+
+/// Where ddp keeps how long each of an app's tests took when it last ran: in the home folder, so every folder (a
+/// gate's fresh worktree too) splits its next run by them.
+fn test_times_file(app: &str) -> Option<std::path::PathBuf> {
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
+    let name: String =
+        app.chars().map(|c| if c.is_ascii_alphanumeric() || "-_.".contains(c) { c } else { '_' }).collect();
+    Some(std::path::PathBuf::from(home).join(".ddp").join("test-times").join(format!("{name}.json")))
+}
+
+fn known_test_times(app: &str) -> std::collections::HashMap<String, f64> {
+    test_times_file(app)
+        .and_then(|file| read_json(&file))
+        .and_then(|times| serde_json::from_value(times).ok())
+        .unwrap_or_default()
+}
+
+/// Adds this run's times to the known ones. Written to a new file and moved over the old one, so two runs at once
+/// never leave half a file. Unsure is no failure: without the file the next split is by count.
+fn save_test_times(app: &str, times: impl Iterator<Item = (String, f64)>) {
+    let Some(file) = test_times_file(app) else { return };
+    let mut known = known_test_times(app);
+    known.extend(times);
+    let fresh = file.with_extension(format!("json.{}", std::process::id()));
+    if write_file(&fresh, serde_json::to_string(&known).unwrap_or_default()).is_ok() {
+        let _ = std::fs::rename(&fresh, &file);
+    }
+}
+
+/// The tests split over `devices` by how long each took when it last ran, whole classes each (a class's setup runs
+/// once), the longest class first onto the device with the least time so far: one runner start per device, and the
+/// devices end close together. A test with no time yet counts as the mean of those with one, or 1 s when none has.
+fn split_by_time(tests: &[String], known: &std::collections::HashMap<String, f64>, devices: usize) -> Vec<Vec<String>> {
+    let mut classes: Vec<Vec<String>> = Vec::new();
+    let mut class_at: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for test in tests {
+        let class = test.split('#').next().unwrap_or(test);
+        let at = *class_at.entry(class).or_insert_with(|| {
+            classes.push(Vec::new());
+            classes.len() - 1
+        });
+        classes[at].push(test.clone());
+    }
+    let timed: Vec<f64> = tests.iter().filter_map(|test| known.get(test).copied()).collect();
+    let mean = if timed.is_empty() { 1.0 } else { timed.iter().sum::<f64>() / timed.len() as f64 };
+    let mut weighed: Vec<(f64, Vec<String>)> = classes
+        .into_iter()
+        .map(|class| (class.iter().map(|test| known.get(test).copied().unwrap_or(mean)).sum(), class))
+        .collect();
+    // Stable: classes that weigh the same keep the order the runner listed them in.
+    weighed.sort_by(|a, b| b.0.total_cmp(&a.0));
+    let mut parts: Vec<(f64, Vec<String>)> = vec![(0.0, Vec::new()); devices];
+    for (seconds, class) in weighed {
+        if let Some(lightest) = parts.iter_mut().min_by(|a, b| a.0.total_cmp(&b.0)) {
+            lightest.0 += seconds;
+            lightest.1.extend(class);
+        }
+    }
+    parts.into_iter().map(|(_, tests)| tests).collect()
+}
+
 /// Where a test run's time went, phase by phase, as far as ddp saw it: the boot only for emulators `ddp up` made
 /// (their lease keeps it), the install only with `--install`.
 fn test_phases(
     devices: &[String],
     install: Option<(f64, usize, usize)>,
+    listing: Option<f64>,
     runs: &[DeviceRun],
     seconds: f64,
 ) -> (String, Value) {
@@ -1104,6 +1257,11 @@ fn test_phases(
     // With several devices each phase is its slowest device's: they ran side by side.
     let slowest = |of: &dyn Fn(&DeviceRun) -> Option<f64>| runs.iter().filter_map(of).max_by(f64::total_cmp);
     let mut tests = seconds;
+    if let Some(listing) = listing {
+        said.push(format!("listing {listing}s"));
+        phases["listing"] = json!(listing);
+        tests -= listing;
+    }
     if let Some(focus) = slowest(&|run| run.focus) {
         said.push(format!("focus {focus}s"));
         phases["focus"] = json!(focus);
@@ -1187,7 +1345,6 @@ pub fn test(args: &mut Args) -> Result<i32> {
     let stall = args.stall.as_deref().map(state::parse_ms).transpose()?.map(|ms| Duration::from_millis(ms as u64));
     let plan = TestPlan {
         app: &app,
-        filter: &filter,
         environment: &environment,
         stall,
         installs: &args.installs,
@@ -1206,22 +1363,35 @@ pub fn test(args: &mut Args) -> Result<i32> {
             }
         }
     }
+    let asked: Vec<String> = filter.into_iter().chain(environment.iter().cloned()).collect();
     let started = Instant::now();
     let shards = devices.len();
+    let mut listing = None;
     let mut runs: Vec<DeviceRun> = if shards == 1 {
-        vec![run_tests_on(&devices[0], &runners[0], None, &plan)?]
+        vec![run_tests_on(&devices[0], &runners[0], &Part::Asked(&asked), &plan)?]
     } else {
+        // Split by time, not by AndroidJUnitRunner's numShards: that one splits by count, and on one suite of 360
+        // tests its two halves took 205 s and 264 s.
+        let Some(tests) = listed_tests(&adb_path()?, &devices[0], &runners[0], &asked) else {
+            fail!(
+                format!("the runner on {} could not list the tests, so the run could not be split", devices[0]),
+                "no_tests",
+                format!("ddp test --device {} --app {app} --class <one class>", devices[0])
+            );
+        };
+        listing = Some(py::round_f(started.elapsed().as_secs_f64(), 1));
+        let parts = split_by_time(&tests, &known_test_times(&app), shards);
         std::thread::scope(|scope| {
             let running: Vec<_> = devices
                 .iter()
                 .zip(&runners)
-                .enumerate()
-                .map(|(index, (device, runner))| {
+                .zip(&parts)
+                .map(|((device, runner), part)| {
                     let (plan, context) = (&plan, ctx());
                     scope.spawn(move || {
                         // The session's folder and output mode are per thread.
                         state::use_context(context.session_name.as_deref(), context.json);
-                        run_tests_on(device, runner, Some((index, shards)), plan)
+                        run_tests_on(device, runner, &Part::Named(part), plan)
                     })
                 })
                 .collect();
@@ -1234,6 +1404,7 @@ pub fn test(args: &mut Args) -> Result<i32> {
         })?
     };
     let seconds = py::round_f(started.elapsed().as_secs_f64(), 1);
+    save_test_times(&app, runs.iter().flat_map(|r| r.times.iter().cloned()));
     // A run with no test in it proves nothing, so it is no pass: a filter that matched none, or a device that went
     // away before the runner said a word.
     let tests_in = |r: &DeviceRun| r.run.passed + r.run.skipped + r.run.failed.len();
@@ -1250,7 +1421,7 @@ pub fn test(args: &mut Args) -> Result<i32> {
     let failures: usize = runs.iter().map(|r| r.run.failed.len()).sum();
     let flaky: usize = runs.iter().map(|r| r.run.flaky.len()).sum();
     let all_ran = runs.iter().all(|r| r.run.failed.is_empty() && r.run.stopped.is_none());
-    let (phases_line, phases) = test_phases(&devices, install, &runs, seconds);
+    let (phases_line, phases) = test_phases(&devices, install, listing, &runs, seconds);
     if ctx().json {
         let on = |device: &str, mut entry: Value| {
             if shards > 1 {
@@ -1280,6 +1451,13 @@ pub fn test(args: &mut Args) -> Result<i32> {
             .collect();
         if !restarts.is_empty() {
             result["restarts"] = json!(restarts);
+        }
+        let skipped_tests: Vec<Value> = runs
+            .iter()
+            .flat_map(|r| r.run.skipped_tests.iter().map(|test| on(&r.device, json!({"test": test}))))
+            .collect();
+        if !skipped_tests.is_empty() {
+            result["skipped_tests"] = json!(skipped_tests);
         }
         if flaky > 0 {
             result["flaky"] = runs
@@ -1312,6 +1490,9 @@ pub fn test(args: &mut Args) -> Result<i32> {
         }
         for (test, message) in &device_run.run.flaky {
             say!("FLAKY {test}{on}: failed first ({message}), passed when run again");
+        }
+        for test in &device_run.run.skipped_tests {
+            say!("SKIPPED {test}{on}");
         }
         if let Some((why, test)) = &device_run.run.stopped {
             let on = on.trim_start();
@@ -2306,6 +2487,47 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_split_by_time_keeps_classes_whole_and_evens_the_devices_out() {
+        let tests: Vec<String> = ["a.Long#one", "a.Long#two", "a.Mid#one", "a.Short#one", "a.Short#two", "a.New#one"]
+            .map(String::from)
+            .to_vec();
+        let known: std::collections::HashMap<String, f64> = [
+            ("a.Long#one", 50.0),
+            ("a.Long#two", 30.0),
+            ("a.Mid#one", 40.0),
+            ("a.Short#one", 10.0),
+            ("a.Short#two", 10.0),
+        ]
+        .map(|(test, seconds)| (test.to_string(), seconds))
+        .into();
+        // Long 80 to the first device; Mid 40, Short 20 and New (the mean, 28) to the second: 80 against 88.
+        assert_eq!(
+            split_by_time(&tests, &known, 2),
+            vec![
+                vec!["a.Long#one".to_string(), "a.Long#two".into()],
+                vec!["a.Mid#one".to_string(), "a.New#one".into(), "a.Short#one".into(), "a.Short#two".into()],
+            ]
+        );
+        // No times yet: by count, whole classes, the listing's order for classes that weigh the same.
+        let by_count = split_by_time(&tests, &std::collections::HashMap::new(), 2);
+        assert_eq!(by_count[0], vec!["a.Long#one".to_string(), "a.Long#two".into(), "a.Mid#one".into()]);
+        assert_eq!(by_count[1], vec!["a.Short#one".to_string(), "a.Short#two".into(), "a.New#one".into()]);
+        // More devices than classes: some get nothing.
+        assert_eq!(split_by_time(&tests[..2], &known, 3).iter().filter(|part| part.is_empty()).count(), 2);
+    }
+
+    #[test]
+    fn a_tests_time_runs_from_its_start_line_to_its_verdict() {
+        let output =
+            "INSTRUMENTATION_STATUS: class=a.B\nINSTRUMENTATION_STATUS: test=one\nINSTRUMENTATION_STATUS_CODE: 1\n\
+            INSTRUMENTATION_STATUS: class=a.B\nINSTRUMENTATION_STATUS: test=one\nINSTRUMENTATION_STATUS_CODE: 0\n\
+            INSTRUMENTATION_STATUS: class=a.B\nINSTRUMENTATION_STATUS: test=two\nINSTRUMENTATION_STATUS_CODE: 1\n";
+        let at = [0.5, 0.5, 0.6, 2.0, 2.0, 2.1, 2.2, 2.2, 2.3];
+        // `two` never got its verdict: no time for it.
+        assert_eq!(test_seconds(output, &at), vec![("a.B#one".to_string(), 1.5)]);
+    }
+
+    #[test]
     fn an_instrumentation_run_counts_each_test_by_its_final_code() {
         let status = |test: &str, code: i32, extra: &str| {
             format!("INSTRUMENTATION_STATUS: class=dev.app.SampleTest\nINSTRUMENTATION_STATUS: current=1\n{extra}INSTRUMENTATION_STATUS: test={test}\nINSTRUMENTATION_STATUS_CODE: {code}\n")
@@ -2320,6 +2542,7 @@ mod tests {
             TestRun {
                 passed: 1,
                 skipped: 1,
+                skipped_tests: vec!["dev.app.SampleTest#skipped".into()],
                 failed: vec![(
                     "dev.app.SampleTest#failsWhenAsked".into(),
                     "org.junit.ComparisonFailure: expected:<[expected]> but was:<[actual]>".into()

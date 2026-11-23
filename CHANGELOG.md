@@ -2,7 +2,7 @@
 
 Changes that users or agents will notice. Before 1.0, a minor version may change the protocol or the output; those changes are marked.
 
-## 0.5.2 (not released yet)
+## 0.5.3 (not released yet)
 
 ### Added
 
@@ -23,6 +23,8 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 - An install Android turns down is reported in adb's own words, whole. An app installed with another signing key gets its own code, `signing_key_differs`, and the uninstall as the next step.
 - `ddp up --install` passes `-t` to adb, so a build marked test-only installs.
 - `ddp test`: the app's process crashing in a test was `STOPPED in Class#method: Process crashed.` and ended the run. It is now `FAIL Class#method: Process crashed.` and the tests after it still run. `STOPPED` is left for a run that could not go on.
+- `ddp test --on`: the run is split by how long each test took when it last ran (kept in `~/.ddp/test-times/<app>.json`), whole classes per device, not by AndroidJUnitRunner's `numShards`, which splits by count: on one suite of 360 tests its two halves took 205 s and 264 s. The first run of an app splits by count. `listing` is a new phase.
+- `ddp test` names each skipped test: `SKIPPED Class#method`, `skipped_tests` in `--json`.
 - `ddp test`: a run with no test in it (a filter that matched none, a device gone before the first test) was a pass with `0 passed`. It is now `STOPPED no test ran ...` and exit 1.
 - `ddp down` and a restart remove the temp images (about 1 GB per read-only emulator) of an emulator that was killed or died.
 

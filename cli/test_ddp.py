@@ -1082,36 +1082,56 @@ with tempfile.TemporaryDirectory() as directory:
     assert "FAIL emulator-5998 died" in dead_doctor.stdout, dead_doctor.stdout + dead_doctor.stderr
     assert ddp_in(directory, "down", "--session", "dead", env=host).stdout == "down android emulator-5998\n"
     assert json.loads((dead / "devices.json").read_text()) == []
-    # One test run split over two devices: each gets its shard (AndroidJUnitRunner's numShards and shardIndex) at
-    # the same time, the counts are joined, and a failing test says which device ran it.
+    # One test run split over two devices: ddp lists the tests on the first, splits them by the time each took last
+    # (by count, whole classes, when it knows none), names each device its share in a file, and joins the counts; a
+    # failing test says which device ran it. Each test's time is kept in the home folder for the next split.
     shard_adb = Path(directory, "shards", "adb")
     shard_adb.parent.mkdir()
     shard_log = Path(directory, "shards.log")
+    shard_home = Path(directory, "shard-home")
+    shard_home.mkdir()
     block = lambda test, code, extra="": (f"echo 'INSTRUMENTATION_STATUS: class=fake.Suite'; echo 'INSTRUMENTATION_STATUS: test={test}'; "
                                           f"echo 'INSTRUMENTATION_STATUS_CODE: 1'; echo 'INSTRUMENTATION_STATUS: class=fake.Suite'; "
                                           f"echo 'INSTRUMENTATION_STATUS: test={test}'; {extra}echo 'INSTRUMENTATION_STATUS_CODE: {code}'; ")
     shard_adb.write_text("#!/bin/sh\n"
                          f"echo \"$*\" >> {shard_log}\n"
+                         "run() { while read -r t; do c=${t%%#*}; n=${t#*#}; for code in 1 end; do\n"
+                         "  echo \"INSTRUMENTATION_STATUS: class=$c\"; echo \"INSTRUMENTATION_STATUS: test=$n\"\n"
+                         "  if [ $code = 1 ]; then echo 'INSTRUMENTATION_STATUS_CODE: 1'\n"
+                         "  elif [ $n = four ]; then echo 'INSTRUMENTATION_STATUS: stack=java.lang.AssertionError: boom'; echo 'INSTRUMENTATION_STATUS_CODE: -2'\n"
+                         "  else echo 'INSTRUMENTATION_STATUS_CODE: 0'; fi; done; done; echo 'INSTRUMENTATION_CODE: -1'; }\n"
                          "case \"$*\" in\n"
                          "*'-s shard-none'*) ;;\n"
                          "*'pm list instrumentation'*) echo 'instrumentation:fake.test/androidx.test.runner.AndroidJUnitRunner (target=fake)';;\n"
-                         "*'-s shard-a'*'am instrument'*) " + block("one", 0) + block("two", 0) + "echo 'INSTRUMENTATION_CODE: -1';;\n"
-                         "*'-s shard-b'*'am instrument'*) " + block("three", 0)
-                         + block("four", -2, "echo 'INSTRUMENTATION_STATUS: stack=java.lang.AssertionError: boom'; ") + "echo 'INSTRUMENTATION_CODE: -1';;\n"
+                         "*' push '*) cp \"$4\" " + str(Path(directory, "pushed-")) + "$2;;\n"
+                         "*'-e log true'*) printf 'fake.A#one\\nfake.A#two\\nfake.B#three\\nfake.B#four\\n' | run;;\n"
+                         "*'am instrument'*) run < " + str(Path(directory, "pushed-")) + "$2;;\n"
+                         "*' get-state'*) echo device;;\n"
                          "esac\n")
     shard_adb.chmod(0o755)
-    shards = {"PATH": f"{shard_adb.parent}:{os.environ['PATH']}"}
-    split = ddp_in(directory, "test", "--on", "shard-a,shard-b", "--app", "fake", env=shards)
-    assert split.returncode == 1 and "FAIL fake.Suite#four on shard-b: java.lang.AssertionError: boom\n" in split.stdout and re.search(
+    shards = {"PATH": f"{shard_adb.parent}:{os.environ['PATH']}", "HOME": str(shard_home)}
+    split = ddp_in(directory, "test", "--on", "shard-a,shard-b", "--app", "fake", "--no-focus-check", env=shards)
+    assert split.returncode == 1 and "FAIL fake.B#four on shard-b: java.lang.AssertionError: boom\n" in split.stdout and re.search(
         r"fake\.test/androidx\.test\.runner\.AndroidJUnitRunner on 2 devices in [\d.]+s: 3 passed, 1 failed, 0 skipped "
-        r"\(shard-a: 2 passed, 0 failed, 0 skipped in [\d.]+s; shard-b: 1 passed, 1 failed, 0 skipped in [\d.]+s\)\n", split.stdout), \
-        split.stdout + split.stderr
+        r"\(shard-a: 2 passed, 0 failed, 0 skipped in [\d.]+s; shard-b: 1 passed, 1 failed, 0 skipped in [\d.]+s\)\n", split.stdout) \
+        and re.search(r"phases: listing [\d.]+s, runner start", split.stdout), split.stdout + split.stderr
+    assert Path(directory, "pushed-shard-a").read_text() == "fake.A#one\nfake.A#two\n" \
+        and Path(directory, "pushed-shard-b").read_text() == "fake.B#three\nfake.B#four\n", shard_log.read_text()
     asked = shard_log.read_text()
-    assert "-s shard-a shell am instrument -w -r -e numShards 2 -e shardIndex 0 fake.test/" in asked and \
-        "-s shard-b shell am instrument -w -r -e numShards 2 -e shardIndex 1 fake.test/" in asked, asked
-    split_json = json.loads(ddp_in(directory, "test", "--on", "shard-a,shard-b", "--app", "fake", "--json", env=shards).stdout)
-    assert split_json["passed"] == 3 and split_json["failed"] == [{"test": "fake.Suite#four", "message": "java.lang.AssertionError: boom", "device": "shard-b"}] \
-        and [d["device"] for d in split_json["devices"]] == ["shard-a", "shard-b"], split_json
+    assert "numShards" not in asked and "-s shard-a shell am instrument -w -r -e testFile /data/local/tmp/ddp-tests.txt fake.test/" in asked \
+        and "-s shard-b shell am instrument -w -r -e testFile /data/local/tmp/ddp-tests.txt fake.test/" in asked, asked
+    times_file = Path(shard_home, ".ddp", "test-times", "fake.json")
+    assert set(json.loads(times_file.read_text())) == {"fake.A#one", "fake.A#two", "fake.B#three", "fake.B#four"}, times_file.read_text()
+    # With times known, the longest class goes first, to the first device.
+    times_file.write_text(json.dumps({"fake.A#one": 1, "fake.A#two": 1, "fake.B#three": 100, "fake.B#four": 1}))
+    shard_log.write_text("")
+    split_json = json.loads(ddp_in(directory, "test", "--on", "shard-a,shard-b", "--app", "fake", "--no-focus-check", "--json",
+                                   "--env", "listener=fake.Reset", "--env", "notClass=fake.C", env=shards).stdout)
+    listing = next(line for line in shard_log.read_text().splitlines() if "-e log true" in line)
+    assert "listener" not in listing and "-e 'notClass' 'fake.C'" in listing, listing
+    assert split_json["passed"] == 3 and split_json["failed"] == [{"test": "fake.B#four", "message": "java.lang.AssertionError: boom", "device": "shard-a"}] \
+        and [d["device"] for d in split_json["devices"]] == ["shard-a", "shard-b"] and "listing" in split_json["phases"], split_json
+    assert Path(directory, "pushed-shard-a").read_text() == "fake.B#three\nfake.B#four\n", Path(directory, "pushed-shard-a").read_text()
     # A device without the tests stops the run before any test starts on the others.
     shard_log.write_text("")
     missing = ddp_in(directory, "test", "--on", "shard-a,shard-none", "--app", "fake", env=shards)
@@ -1241,21 +1261,24 @@ with tempfile.TemporaryDirectory() as directory:
                          "*'-e testFile'*) " + block("two", 0) + block("three", -2, "echo 'INSTRUMENTATION_STATUS: stack=again'; ")
                          + "echo 'INSTRUMENTATION_CODE: -1';;\n"
                          "*'am instrument'*) " + block("one", 0) + block("two", -2, "echo 'INSTRUMENTATION_STATUS: stack=first'; ")
-                         + block("three", -2, "echo 'INSTRUMENTATION_STATUS: stack=always'; ") + "echo 'INSTRUMENTATION_CODE: -1';;\n"
+                         + block("three", -2, "echo 'INSTRUMENTATION_STATUS: stack=always'; ") + block("four", -3)
+                         + "echo 'INSTRUMENTATION_CODE: -1';;\n"
                          "*' get-state'*) echo device;;\n"
                          "esac\n")
     rerun_adb.chmod(0o755)
     reruns = {"PATH": f"{rerun_adb.parent}:{os.environ['PATH']}", "HOME": str(home)}
     plain = ddp_in(directory, "test", "--device", "rerun-fake", "--app", "fake", "--no-focus-check", env=reruns)
     assert plain.returncode == 1 and "FLAKY" not in plain.stdout and "testFile" not in rerun_log.read_text() and \
-        re.search(r"in [\d.]+s: 1 passed, 2 failed, 0 skipped\n", plain.stdout), plain.stdout + plain.stderr
+        "SKIPPED fake.Suite#four\n" in plain.stdout and \
+        re.search(r"in [\d.]+s: 1 passed, 2 failed, 1 skipped\n", plain.stdout), plain.stdout + plain.stderr
     again = ddp_in(directory, "test", "--device", "rerun-fake", "--app", "fake", "--no-focus-check", "--rerun-failed", env=reruns)
     assert again.returncode == 1 and "FLAKY fake.Suite#two: failed first (first), passed when run again\n" in again.stdout \
         and "FAIL fake.Suite#three: always\n" in again.stdout and "FAIL fake.Suite#two" not in again.stdout \
-        and re.search(r"in [\d.]+s: 2 passed, 1 failed, 0 skipped, 1 of the passed flaky\n", again.stdout), again.stdout + again.stderr
+        and re.search(r"in [\d.]+s: 2 passed, 1 failed, 1 skipped, 1 of the passed flaky\n", again.stdout), again.stdout + again.stderr
     again_json = json.loads(ddp_in(directory, "test", "--device", "rerun-fake", "--app", "fake", "--no-focus-check", "--rerun-failed",
                                    "--json", env=reruns).stdout)
-    assert again_json["flaky"] == [{"test": "fake.Suite#two", "message": "first"}] and again_json["passed"] == 2, again_json
+    assert again_json["flaky"] == [{"test": "fake.Suite#two", "message": "first"}] and again_json["passed"] == 2 \
+        and again_json["skipped_tests"] == [{"test": "fake.Suite#four"}], again_json
     none = ddp_in(directory, "test", "--device", "none-fake", "--app", "fake", "--no-focus-check", "--class", "fake.Nothing", env=reruns)
     assert none.returncode == 1 and "STOPPED no test ran: the runner found none to run" in none.stdout, none.stdout + none.stderr
     no_apk = ddp_in(directory, "test", "--device", "install-fake", "--app", "fake", "--install", str(Path(directory, "none.apk")), env=installs)

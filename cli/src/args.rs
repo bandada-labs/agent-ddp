@@ -427,7 +427,7 @@ pub fn parser() -> Command {
             .arg(flag("rerun-failed", "run each failed test once more after the run; one that passes then is FLAKY, not failed"))
             .arg(Arg::new("install").long("install").num_args(1).action(ArgAction::Append).value_name("APK")
                 .help("an APK to put on every device first (the app, the test APK); not sent again when the device has the same bytes; repeat for more"))
-            .arg(opt("on", "split the run over these devices, one shard each at the same time: emulator-5560,emulator-5562"))))
+            .arg(opt("on", "split the run over these devices, by how long each test took last time, all at once: emulator-5560,emulator-5562"))))
         .subcommand(device_options(sub("job", "Android: run one of the app's scheduled jobs now (JobScheduler, WorkManager)")
             .arg(positional("value", "the job id").required(true))))
         .subcommand(sub("compare", "how far the screen is from a reference image, or one element from the other phone")
