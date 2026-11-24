@@ -291,6 +291,35 @@ fn outcome(settled: &Frame, after: &Frame, changed: &[String], still_changing: b
     let refs = crate::runner::refs_for(changed)?;
     let (was, is) = (settled.keys(), after.keys());
     let named = |key: &String| refs.get(key).map(|r| format!("{r} {key}")).unwrap_or_else(|| key.clone());
+    // A text known by its label that says something else now, at the same place: `@e3 "A" -> "B"`, one change.
+    let text_at = |frame: &Frame, key: &String| {
+        frame.named(key).filter(|e| e["id"].is_null() && e["label"] == key.as_str()).map(|e| rect(&e["frame"]))
+    };
+    let mut relabeled: Vec<(String, String)> = Vec::new();
+    for new_key in changed.iter().filter(|k| !was.contains(k)) {
+        let Some(place) = text_at(after, new_key) else { continue };
+        let old_key = changed.iter().find(|k| {
+            !is.contains(k)
+                && !relabeled.iter().any(|(old, _)| old == *k)
+                && text_at(settled, k).is_some_and(|old| old[..2] == place[..2])
+        });
+        if let Some(old_key) = old_key {
+            relabeled.push((old_key.clone(), new_key.clone()));
+        }
+    }
+    let paired = |key: &String| relabeled.iter().any(|(old, new)| old == key || new == key);
+    let quoted = |key: &String| py::dumps(&json!(key));
+    let mut changed_text: Vec<String> = relabeled
+        .iter()
+        .map(|(old, new)| match refs.get(new) {
+            Some(r) => format!("{r} {} -> {}", quoted(old), quoted(new)),
+            None => format!("{} -> {}", quoted(old), quoted(new)),
+        })
+        .collect();
+    changed_text.extend(changed.iter().filter(|k| was.contains(k) && is.contains(k)).map(&named));
+    let new = changed.iter().filter(|k| !was.contains(k)).cloned().collect();
+    let changed: Vec<String> = changed.iter().filter(|k| !paired(k)).cloned().collect();
+    let changed = &changed[..];
     let group = |label: &str, keep: &dyn Fn(&String) -> bool| {
         let keys: Vec<&String> = changed.iter().filter(|k| keep(k)).collect();
         (!keys.is_empty()).then(|| {
@@ -301,19 +330,23 @@ fn outcome(settled: &Frame, after: &Frame, changed: &[String], still_changing: b
             format!("{label}: {}", shown.join(", "))
         })
     };
-    // A label is the name of an element without an id, so a new label reads as one element gone, one new.
-    let mut parts: Vec<String> = [
-        group("changed", &|k| was.contains(k) && is.contains(k)),
-        group("new", &|k| !was.contains(k)),
-        group("gone", &|k| !is.contains(k)),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
+    let listed = |label: &str, items: Vec<String>| {
+        (!items.is_empty()).then(|| {
+            let mut shown: Vec<String> = items.iter().take(5).cloned().collect();
+            if items.len() > 5 {
+                shown.push(format!("+{}", items.len() - 5));
+            }
+            format!("{label}: {}", shown.join(", "))
+        })
+    };
+    let mut parts: Vec<String> =
+        [listed("changed", changed_text), group("new", &|k| !was.contains(k)), group("gone", &|k| !is.contains(k))]
+            .into_iter()
+            .flatten()
+            .collect();
     if still_changing {
         parts.push("still changing".into());
     }
-    let new = changed.iter().filter(|k| !was.contains(k)).cloned().collect();
     Ok((parts.join("; "), new))
 }
 

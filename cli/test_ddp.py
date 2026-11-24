@@ -433,7 +433,7 @@ class FakeApp:
         self.toggles, self.wifi, self.scrolled = False, False, False
         self.touches, self.runner, self.saved, self.hide_save, self.rows = [], [], False, False, False
         self.locked, self.menu, self.windows, self.modal = False, False, False, False
-        self.scrolls, self.save_late, self.late_id = False, 0, False
+        self.scrolls, self.save_late, self.late_id, self.status = False, 0, False, False
         self.panned = False
         self.server = socket.socket()
         self.server.bind(("127.0.0.1", 0))
@@ -464,6 +464,9 @@ class FakeApp:
             elements.append({"id": "above", "label": "Above", "tap": True, "frame": [0, -200, 100, 50]})
         nodes = [{"z": 0, "kind": "layer", "fill": "#0000FFFF", "frame": [0, 0, 100, 50]},
                  {"z": 1, "kind": "layer", "fill": "#000000FF", "frame": [0, 100, 20 + i % 3, 20]}]
+        if self.status:
+            # A text known only by its label, which a tap changes in place.
+            elements.append({"label": "Status: saved" if self.tapped_at is not None else "Status: idle", "frame": [0, 300, 100, 20]})
         if self.tapped_at is not None:
             alpha = min(1, (i - self.tapped_at) / 5)
             if alpha > 0:
@@ -578,6 +581,9 @@ class FakeApp:
                         shown.insert(0, {"type": "Button", "label": "Save", "id": "save", "frame": [10, 20, 200, 80], "tap": True})
                     if self.saved:
                         shown.append({"type": "TextView", "label": "Saved", "frame": [10, 120, 100, 30]})
+                    if self.status:
+                        # A text known only by its label, which Save changes in place.
+                        shown.append({"type": "TextView", "label": "Status: saved" if self.saved else "Status: idle", "frame": [0, 700, 100, 20]})
                     if self.toggles:
                         shown.append({"type": "Switch", "label": "Wi-Fi", "frame": [0, 500, 100, 40], "tap": True, "checked": self.wifi})
                     if self.rows:
@@ -716,7 +722,10 @@ with tempfile.TemporaryDirectory() as directory:
     assert "@e1 button" in live.stdout and "@e2 spinner" in live.stdout, live.stdout + live.stderr
     tapped = ddp_in(directory, "tap", "@e1").stdout
     assert "tapped button at (50, 25)" in tapped and re.search(r"new: @e\d+ toast", tapped), tapped
-    app.tapped_at = None
+    app.tapped_at, app.status = None, True
+    relabeled = ddp_in(directory, "tap", "button").stdout
+    assert re.search(r'; changed: @e\d+ "Status: idle" -> "Status: saved"; new: @e\d+ toast', relabeled) and "gone" not in relabeled, relabeled
+    app.tapped_at, app.status = None, False
     # The app's hit test says a touch misses it: tap refuses, check tappable reports it, --force touches anyway.
     refused = ddp_in(directory, "tap", "locked")
     assert refused.returncode == 1 and "locked is covered by scrim" in refused.stderr, refused.stderr
@@ -923,6 +932,12 @@ with tempfile.TemporaryDirectory() as directory:
     at_point = ddp_in(directory, "activate", "10,10", "--device", "runner-fake", env=host)
     assert at_point.returncode == 1 and "activate presses an element, not a point" in at_point.stderr, at_point.stderr
     app.saved = False
+    # A text that says something else at the same place is one change, "A" -> "B", not one gone and one new. The
+    # device came from --device, so the line names it.
+    app.saved, app.status = False, True
+    relabeled = ddp_in(directory, "tap", "Save", "--device", "runner-fake", env=host)
+    assert re.fullmatch(r'tap Save on runner-fake in \d+ms; new: @e\d+ "Saved"; changed: @e\d+ "Status: idle" -> "Status: saved"; no checks \(no SDK\)\n', relabeled.stdout), relabeled.stdout + relabeled.stderr
+    app.saved, app.status = False, False
     # A locked screen is said before the target is looked for: its tree would read as "no element".
     app.locked, sent = True, len(app.runner)
     locked = ddp_in(directory, "tap", "Nope", "--device", "runner-fake", env=host)
@@ -1066,7 +1081,8 @@ with tempfile.TemporaryDirectory() as directory:
     front.mkdir(parents=True)
     (front / "session.json").write_text(json.dumps({"mode": "device", "platform": "android", "device": "runner-fake", "app": "other"}))
     over = ddp_in(directory, "tree", "--session", "front", env=host)
-    assert over.stdout.endswith("elements on runner-fake; in front: fake, not other; no checks (no SDK)\n"), over.stdout + over.stderr
+    # The device came from the session: the line does not name it.
+    assert over.stdout.endswith("3 elements; in front: fake, not other; no checks (no SDK)\n"), over.stdout + over.stderr
     # A key has no target: with another app in front (a USB install dialog) it would go to that app, so it is refused.
     app.typed = ""
     keyed = ddp_in(directory, "back", "--session", "front", env=host)

@@ -23,11 +23,11 @@ $ ddp up --platform ios --app com.apple.Preferences
 up ios BA5429F9-9C73-48CB-A3E4-EF6813BEA834 in 7.7s
 com.apple.Preferences did not answer as an app with the library (the app has no control endpoint): tree, tap, type, swipe, press and walk now go through the platform, with no checks; if it has the library, ddp connect BA5429F9-9C73-48CB-A3E4-EF6813BEA834 --app com.apple.Preferences
 $ ddp tap General
-tap General on BA5429F9-9C73-48CB-A3E4-EF6813BEA834 in 1331ms; new: @e1 "Settings", @e24 "General", @e25 "Manage your overall setup and preferences for iPhone, such as software updates, device language, CarPlay, AirDrop, and more.", @e26 "About", @e27 "AutoFill & Passwords", +5; gone: @e6 "Dictate", @e7 "Settings", @e8 "Accessibility", @e9 "Action Button", @e10 "Appearance", +10; no checks (no SDK)
+tap General in 1331ms; new: @e1 "Settings", @e24 "General", @e25 "Manage your overall setup and preferences for iPhone, such as software updates, device language, CarPlay, AirDrop, and more.", @e26 "About", @e27 "AutoFill & Passwords", +5; gone: @e6 "Dictate", @e7 "Settings", @e8 "Accessibility", @e9 "Action Button", @e10 "Appearance", +10; no checks (no SDK)
 $ ddp tap About
-tap About on BA5429F9-9C73-48CB-A3E4-EF6813BEA834 in 7ms; new: @e33 "About", @e34 "Certificate Trust Settings", @e35 "Name, iPhone", @e36 "Photos, 6", @e37 "Model Number, A3472LL/A", +7; gone: @e24 "General", @e25 "Manage your overall setup and preferences for iPhone, such as software updates, device language, CarPlay, AirDrop, and more.", @e26 "About", @e27 "AutoFill & Passwords", @e28 "Dictionary", +4; changed: @e1 "General"; no checks (no SDK)
+tap About in 7ms; new: @e33 "About", @e34 "Certificate Trust Settings", @e35 "Name, iPhone", @e36 "Photos, 6", @e37 "Model Number, A3472LL/A", +7; gone: @e24 "General", @e25 "Manage your overall setup and preferences for iPhone, such as software updates, device language, CarPlay, AirDrop, and more.", @e26 "About", @e27 "AutoFill & Passwords", @e28 "Dictionary", +4; changed: @e1 "General"; no checks (no SDK)
 $ ddp back
-back (edge swipe) on BA5429F9-9C73-48CB-A3E4-EF6813BEA834 in 363ms; new: @e24 "General", @e25 "Manage your overall setup and preferences for iPhone, such as software updates, device language, CarPlay, AirDrop, and more.", @e26 "About", @e27 "AutoFill & Passwords", @e28 "Dictionary", +5; gone: @e33 "About", @e34 "Certificate Trust Settings", @e35 "Name, iPhone", @e36 "Photos, 6", @e37 "Model Number, A3472LL/A", +7; changed: @e1 "Settings"; no checks (no SDK)
+back (edge swipe) in 363ms; new: @e24 "General", @e25 "Manage your overall setup and preferences for iPhone, such as software updates, device language, CarPlay, AirDrop, and more.", @e26 "About", @e27 "AutoFill & Passwords", @e28 "Dictionary", +5; gone: @e33 "About", @e34 "Certificate Trust Settings", @e35 "Name, iPhone", @e36 "Photos, 6", @e37 "Model Number, A3472LL/A", +7; changed: @e1 "Settings"; no checks (no SDK)
 ```
 
 That is the whole loop, on Settings, an app ddp knows nothing about. One line per action, about 100 tokens, and the refs in it (`@e26`) work in the next command. On Android a tap takes about 35 ms. On iOS a command takes about 200 ms and nothing is installed in the simulator: ddp talks to the simulator's own touch and accessibility services from the Mac, with no XCTest.
@@ -59,7 +59,7 @@ tapped Tap me at (201, 146); changed: @e1 animatedButton, @e2 canvasDot, @e3 cus
 $ ddp long-press "Row with context menu"
 long-press Row with context menu (201, 684); changed: @e7 Last action: none; new: @e6 Delete, @e8 Rename, @e9 Row with context menu
 $ ddp tap Rename
-tapped Rename at (201, 569); changed: @e6 Delete, @e8 Rename; new: @e10 Last action: rename; gone: @e7 Last action: none
+tapped Rename at (201, 569); changed: @e10 "Last action: none" -> "Last action: rename", @e6 Delete, @e8 Rename
 $ ddp walk expect "Last action: rename"
 expect "Last action: rename": on screen
 $ ddp walk end pass
@@ -67,7 +67,7 @@ walk rename-a-row: PASS, 4 steps on ios BA5429F9-9C73-48CB-A3E4-EF6813BEA834
 task: rename a row
 1. tapped Tap me at (201, 146); changed: @e1 animatedButton, @e2 canvasDot, @e3 customPath, @e4 drawingGroupBox, @e5 gradientCapsule
 2. long-press Row with context menu (201, 684); changed: @e7 Last action: none; new: @e6 Delete, @e8 Rename, @e9 Row with context menu
-3. tapped Rename at (201, 569); changed: @e6 Delete, @e8 Rename; new: @e10 Last action: rename; gone: @e7 Last action: none
+3. tapped Rename at (201, 569); changed: @e10 "Last action: none" -> "Last action: rename", @e6 Delete, @e8 Rename
 4. expect "Last action: rename": on screen
 file: .ddp/sessions/sample/walks/rename-a-row.jsonl; screenshots: .ddp/sessions/sample/walks/rename-a-row
 next: ddp walk replay rename-a-row (no model, on any device)

@@ -686,6 +686,8 @@ pub struct Change {
     pub changed: Vec<Value>,
     pub moved: usize,
     pub still_changing: bool,
+    /// A text known by its label that now says something else: (was, is), also listed in `gone` and `new`.
+    pub relabeled: Vec<(Value, Value)>,
 }
 
 fn off_screen(element: &Value) -> bool {
@@ -734,7 +736,26 @@ fn change(before: &[Value], after: &[Value], busy: &HashSet<String>) -> Change {
     change.new.retain(|element| !same_place(element, &gone));
     change.gone.retain(|element| !same_place(element, &new));
     pair_unnamed(&mut change, lost, found);
+    change.relabeled = relabeled(&change);
     change
+}
+
+/// A gone and a new element keyed by their label, with no id, of one type, starting at one place and under one
+/// parent: one text that says something else now ("Last action: none" -> "Last action: rename"). Each pairs once.
+fn relabeled(change: &Change) -> Vec<(Value, Value)> {
+    let text = |e: &Value| e["id"].is_null() && e["label"].is_string();
+    let mut gone: Vec<&Value> = change.gone.iter().filter(|e| text(e)).collect();
+    change
+        .new
+        .iter()
+        .filter(|e| text(e))
+        .filter_map(|is| {
+            let at = gone.iter().position(|was| {
+                was["type"] == is["type"] && was["parent"] == is["parent"] && frame_of(was)[..2] == frame_of(is)[..2]
+            })?;
+            Some((gone.remove(at).clone(), is.clone()))
+        })
+        .collect()
 }
 
 /// The app's windows a menu, a dialog or a sheet is open over, each with its elements as they were: kept by
@@ -891,29 +912,41 @@ fn named(element: &Value, refs: &BTreeMap<String, String>) -> String {
 
 /// The change as one line: new, gone, changed (with its value), moved; or that nothing changed.
 pub fn describe(change: &Change, refs: &BTreeMap<String, String>) -> String {
-    let group = |name: &str, elements: &[Value], with_value: bool| {
-        (!elements.is_empty()).then(|| {
-            let mut shown: Vec<String> = elements
-                .iter()
-                .take(SHOWN)
-                .map(|e| {
-                    let value =
-                        e["value"].as_str().filter(|_| with_value).map(|v| format!(" = {}", py::dumps(&json!(v))));
-                    let marks = if with_value { marks(e, false) } else { String::new() };
-                    format!("{}{}{marks}", named(e, refs), value.unwrap_or_default())
-                })
-                .collect();
-            if elements.len() > SHOWN {
-                shown.push(format!("+{}", elements.len() - SHOWN));
+    let shown = |e: &Value, with_value: bool| {
+        let value = e["value"].as_str().filter(|_| with_value).map(|v| format!(" = {}", py::dumps(&json!(v))));
+        let marks = if with_value { marks(e, false) } else { String::new() };
+        format!("{}{}{marks}", named(e, refs), value.unwrap_or_default())
+    };
+    let group = |name: &str, items: Vec<String>| {
+        (!items.is_empty()).then(|| {
+            let mut listed: Vec<String> = items.iter().take(SHOWN).cloned().collect();
+            if items.len() > SHOWN {
+                listed.push(format!("+{}", items.len() - SHOWN));
             }
-            format!("{name}: {}", shown.join(", "))
+            format!("{name}: {}", listed.join(", "))
         })
     };
-    let mut parts: Vec<String> =
-        [group("new", &change.new, true), group("gone", &change.gone, false), group("changed", &change.changed, true)]
-            .into_iter()
-            .flatten()
-            .collect();
+    // A relabeled text reads as one change, `@e3 "A" -> "B"`, not as one element gone and another new.
+    let paired = |e: &Value| change.relabeled.iter().any(|(was, is)| was == e || is == e);
+    let unpaired = |elements: &[Value], with_value: bool| -> Vec<String> {
+        elements.iter().filter(|e| !paired(e)).map(|e| shown(e, with_value)).collect()
+    };
+    let relabeled = change.relabeled.iter().map(|(was, is)| {
+        let label = |e: &Value| py::dumps(&e["label"]);
+        match refs.get(&element_key(is)) {
+            Some(reference) => format!("{reference} {} -> {}", label(was), label(is)),
+            None => format!("{} -> {}", label(was), label(is)),
+        }
+    });
+    let changed: Vec<String> = relabeled.chain(change.changed.iter().map(|e| shown(e, true))).collect();
+    let mut parts: Vec<String> = [
+        group("new", unpaired(&change.new, true)),
+        group("gone", unpaired(&change.gone, false)),
+        group("changed", changed),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
     if change.moved > 0 {
         parts.push(format!("{} moved", change.moved));
     }
@@ -1062,7 +1095,7 @@ fn perform(
     let refs = refs_for(&named_keys(&change))?;
     let outcome = describe(&change, &refs);
     let front = screen.front_note(app.as_deref());
-    say!("{verb} on {device} in {}ms; {window}{outcome}{front}; {NO_CHECKS}", took.round() as i64);
+    say!("{verb}{} in {}ms; {window}{outcome}{front}; {NO_CHECKS}", on(args, &device), took.round() as i64);
     let mut note = json!({
         "mode": "device",
         "platform": platform,
@@ -1082,6 +1115,11 @@ fn perform(
     }
     crate::walk::note(note);
     Ok(0)
+}
+
+/// ` on <device>` when the agent named it; a device from the session goes without saying, which saves every line it.
+fn on(args: &Args, device: &str) -> String {
+    args.device.as_ref().map(|_| format!(" on {device}")).unwrap_or_default()
 }
 
 fn duration(args: &Args, default_ms: f64) -> Result<f64> {
@@ -1279,7 +1317,8 @@ pub fn scroll(args: &Args) -> Result<i32> {
             let more = if found.len() > 1 { format!(" (+{} more)", found.len() - 1) } else { String::new() };
             let ms = started.elapsed().as_millis();
             say!(
-                "scroll {direction} --to {target} on {device}: {}{more} on screen after {} in {ms}ms; {NO_CHECKS}",
+                "scroll {direction} --to {target}{}: {}{more} on screen after {} in {ms}ms; {NO_CHECKS}",
+                on(args, &device),
                 tree_line(first, &refs),
                 count(scrolls, "scroll")
             );
@@ -1355,7 +1394,7 @@ pub fn tree(args: &Args) -> Result<i32> {
             format!("; {top} is open over {} (its {} elements take no touches)", window_title(window), kept.len())
         })
         .collect::<String>();
-    say!("{} elements on {device}{over}{front}; {NO_CHECKS}", elements.len());
+    say!("{} elements{}{over}{front}; {NO_CHECKS}", elements.len(), on(args, &device));
     Ok(0)
 }
 
@@ -1455,7 +1494,7 @@ pub fn find(args: &Args) -> Result<i32> {
     for element in &found {
         say!("{}", tree_line(element, &refs));
     }
-    say!("{} of {} elements on {device}; {NO_CHECKS}", found.len(), elements.len());
+    say!("{} of {} elements{}; {NO_CHECKS}", found.len(), elements.len(), on(args, &device));
     Ok(0)
 }
 
