@@ -33,7 +33,35 @@ fn owned_devices() -> Vec<Value> {
 }
 
 fn save_owned(devices: &[Value]) -> Result<()> {
-    write_file(&devices_file(), py::dumps(&Value::Array(devices.to_vec())))
+    write_file(&devices_file(), py::dumps(&Value::Array(devices.to_vec())))?;
+    for device in devices.iter().filter(|d| d["platform"] == "android") {
+        if let Some(file) = machine_file(&py::str(&device["device"])) {
+            let mut entry = device.clone();
+            if let Ok(folder) = std::env::current_dir() {
+                entry["folder"] = json!(folder.display().to_string());
+            }
+            if let Some(session) = ctx().session_name {
+                entry["session"] = json!(session);
+            }
+            write_file(&file, py::dumps(&entry))?;
+        }
+    }
+    Ok(())
+}
+
+/// The emulators `ddp up` made on this machine, in any folder, kept in the home folder like the leases, so
+/// `ddp devices` gives the same answer from anywhere. `down` and restarts still go through the folder `up` ran in.
+fn machine_file(device: &str) -> Option<PathBuf> {
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
+    Some(PathBuf::from(home).join(".ddp").join("emulators").join(format!("{device}.json")))
+}
+
+fn machine_devices() -> Vec<Value> {
+    let Some(folder) = machine_file("x").and_then(|file| file.parent().map(Path::to_path_buf)) else {
+        return Vec::new();
+    };
+    let files = std::fs::read_dir(folder).into_iter().flatten().flatten();
+    files.filter_map(|entry| read_json(&entry.path())).collect()
 }
 
 pub fn up(args: &mut Args) -> Result<i32> {
@@ -196,6 +224,11 @@ pub fn down(args: &mut Args) -> Result<i32> {
             }
         }
         say!("down {} {id}", py::str(&device["platform"]));
+    }
+    for device in &wanted {
+        if let Some(file) = machine_file(&py::str(&device["device"])) {
+            let _ = std::fs::remove_file(file);
+        }
     }
     let kept: Vec<Value> = owned.into_iter().filter(|d| !wanted.contains(d)).collect();
     save_owned(&kept)?;
@@ -682,6 +715,12 @@ fn emulator_log(port: u16) -> PathBuf {
 }
 
 /// The last lines the emulator wrote, for a boot that failed.
+/// Whether the emulator's log says its OpenGL context on the host was lost: the X server's error, then EGL's.
+fn lost_gl_context(device: &Value) -> bool {
+    let log = device["log"].as_str().and_then(|log| std::fs::read_to_string(log).ok()).unwrap_or_default();
+    ["GLXBadContextTag", "eglMakeCurrent failed"].iter().any(|line| log.contains(line))
+}
+
 fn last_words(log_file: &Path) -> String {
     const LINES: usize = 5;
     let text = std::fs::read_to_string(log_file).unwrap_or_default();
@@ -989,10 +1028,17 @@ pub fn lost_emulator(id: &str) -> Option<Failure> {
     let pid = py::str(&device["pid"]);
     let said = device["log"].as_str().map(|log| last_words(Path::new(log))).unwrap_or_default();
     let said = if said.is_empty() { String::new() } else { format!(" The emulator's last lines:{said}") };
-    let next = format!("ddp down {id}, then {}", up_again(&device));
+    let mut next = format!("ddp down {id}, then {}", up_again(&device));
+    // On Linux with NVIDIA, OpenGL through GLX lost its context twice in a 9-minute suite (mb-fqy4); Vulkan lasts.
+    let cause = if device["gpu"] == "host" && lost_gl_context(&device) {
+        next = next.replace("--gpu host", "--gpu vulkan");
+        " Its OpenGL context on the graphics card was lost (--gpu host); --gpu vulkan does not draw through it."
+    } else {
+        ""
+    };
     if !emulator_runs(&device)? {
         return Some(failure(
-            format!("{id} died: the emulator's process (pid {pid}) is gone.{said}"),
+            format!("{id} died: the emulator's process (pid {pid}) is gone.{cause}{said}"),
             "emulator_died",
             Some(&next),
         ));
@@ -1063,14 +1109,33 @@ pub fn devices(args: &mut Args) -> Result<i32> {
             }
         }
     }
-    // An emulator ddp up made here that adb no longer lists: say what became of it, not nothing.
-    for device in owned_devices().iter().filter(|d| d["platform"] == "android") {
+    let here = owned_devices();
+    let elsewhere: Vec<Value> = machine_devices()
+        .into_iter()
+        .filter(|d| d["platform"] == "android" && !here.iter().any(|h| h["device"] == d["device"]))
+        .collect();
+    // The index outlives an emulator that died unseen; on a port adb lists, it counts only while its own process runs,
+    // so an emulator another tool started later on that port is not taken for ddp's.
+    let elsewhere: Vec<Value> = elsewhere
+        .into_iter()
+        .filter(|d| {
+            let listed = found.iter().any(|(_, id, _)| d["device"] == id.as_str());
+            !listed || emulator_runs(d) == Some(true)
+        })
+        .collect();
+    // An emulator ddp up made that adb no longer lists: say what became of it, not nothing.
+    for device in here.iter().chain(&elsewhere).filter(|d| d["platform"] == "android") {
         let id = py::str(&device["device"]);
         if found.iter().any(|(_, listed, _)| *listed == id) {
             continue;
         }
+        let session = device["session"].as_str().map(|name| format!(" --session {name}")).unwrap_or_default();
+        let down = match device["folder"].as_str() {
+            Some(folder) => format!("ddp down {id}{session} in {folder}"),
+            None => format!("ddp down {id}"),
+        };
         let what = match emulator_runs(device) {
-            Some(false) => format!("died, its process is gone (ddp down {id} clears it)"),
+            Some(false) => format!("died, its process is gone ({down} clears it)"),
             Some(true) => "its process runs but adb does not list it".to_string(),
             None => "not listed by adb".to_string(),
         };
@@ -1108,11 +1173,12 @@ pub fn devices(args: &mut Args) -> Result<i32> {
         );
     }
     let made = |id: &str| {
-        folders.iter().any(|(_, dir)| {
-            read_json(&dir.join("devices.json"))
-                .and_then(|v| v.as_array().cloned())
-                .is_some_and(|owned| owned.iter().any(|d| d["device"] == id))
-        })
+        elsewhere.iter().any(|d| d["device"] == id)
+            || folders.iter().any(|(_, dir)| {
+                read_json(&dir.join("devices.json"))
+                    .and_then(|v| v.as_array().cloned())
+                    .is_some_and(|owned| owned.iter().any(|d| d["device"] == id))
+            })
     };
     let sessions = |id: &str| -> Vec<String> {
         folders

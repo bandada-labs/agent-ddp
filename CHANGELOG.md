@@ -30,6 +30,8 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 - `ddp up --platform android --port <N>`: the emulator's console port, even, 5554 to 5682, refused when taken (`port_taken`). Without it the first free port from 5560, as before.
 - `ddp test` names each skipped test: `SKIPPED Class#method`, `skipped_tests` in `--json`.
 - `ddp test`: a run with no test in it (a filter that matched none, a device gone before the first test) was a pass with `0 passed`. It is now `STOPPED no test ran ...` and exit 1.
+- `ddp devices` gave another answer in another folder: an emulator `ddp up` made elsewhere had no `ddp up made it`, no `draws with`, and once dead it was not listed. `up` now also keeps its emulators in `~/.ddp/emulators/`, so `devices` says the same from any folder; a dead one names the folder to run `ddp down` in.
+- An emulator from `--gpu host` that died because its OpenGL context was lost (`GLXBadContextTag`, `eglMakeCurrent failed` in its log; on Linux with NVIDIA, twice in a 9-minute suite) says so, and the next step is `--gpu vulkan`, which does not draw through that context.
 - `ddp down` and a restart remove the temp images (about 1 GB per read-only emulator) of an emulator that was killed or died.
 
 ### Fixed

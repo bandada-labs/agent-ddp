@@ -62,12 +62,13 @@ with tempfile.TemporaryDirectory() as directory:
     assert refused.returncode == 1 and json.loads(refused.stdout)["code"] == "protocol_too_new", refused.stdout
     assert "agent-ddp@latest" in json.loads(refused.stdout)["next"], refused.stdout
 
+    # emulator-5990: no port anyone uses, so these never reach a live emulator (a lease check would ask it).
     # connect --wait takes a time like every other duration, and says so before it touches a device.
-    bad_wait = ddp_in(directory, "connect", "emulator-5554", "--app", "dev.agentddp.sample", "--wait", "soon", "--json")
+    bad_wait = ddp_in(directory, "connect", "emulator-5990", "--app", "dev.agentddp.sample", "--wait", "soon", "--json")
     assert bad_wait.returncode == 1 and json.loads(bad_wait.stdout)["code"] == "bad_time", bad_wait.stdout
 
     # Launch arguments are iOS only: Android refuses before it touches a device.
-    no_args = ddp_in(directory, "launch", "emulator-5554", "--app", "dev.agentddp.sample", "--arg", "-Flag", "--json")
+    no_args = ddp_in(directory, "launch", "emulator-5990", "--app", "dev.agentddp.sample", "--arg", "-Flag", "--json")
     assert no_args.returncode == 1 and json.loads(no_args.stdout)["code"] == "not_supported", no_args.stdout
 
     summary = run("read", recording=recording)
@@ -1067,14 +1068,16 @@ with tempfile.TemporaryDirectory() as directory:
     # bring it back, devices lists it as died, doctor stops at it, and down clears it.
     dead = Path(directory, ".ddp", "sessions", "dead")
     dead.mkdir(parents=True)
-    (dead / "emulator-5998.log").write_text("INFO | boot completed\nERROR | the last thing it said\n")
+    (dead / "emulator-5998.log").write_text("INFO | boot completed\nX Error of failed request:  GLXBadContextTag\nERROR | the last thing it said\n")
     (dead / "devices.json").write_text(json.dumps([{"platform": "android", "device": "emulator-5998", "name": "ddp_base",
                                                     "pid": 4194000, "log": str(dead / "emulator-5998.log"), "gpu": "host"}]))
     (dead / "session.json").write_text(json.dumps({"platform": "android", "app": "fake", "device": "emulator-5998", "port": 1}))
     died = ddp_in(directory, "tap", "button", "--session", "dead", env=host)
-    assert died.returncode == 1 and "emulator-5998 died: the emulator's process (pid 4194000) is gone. The emulator's last lines:" in died.stderr \
+    assert died.returncode == 1 and "emulator-5998 died: the emulator's process (pid 4194000) is gone. Its OpenGL" in died.stderr \
+        and "draw through it. The emulator's last lines:" in died.stderr \
         and "ERROR | the last thing it said" in died.stderr \
-        and "next: ddp down emulator-5998, then ddp up --platform android --gpu host" in died.stderr, died.stderr
+        and "is gone. Its OpenGL context on the graphics card was lost (--gpu host); --gpu vulkan does not draw through it." in died.stderr \
+        and "next: ddp down emulator-5998, then ddp up --platform android --gpu vulkan" in died.stderr, died.stderr
     assert '"code": "emulator_died"' in ddp_in(directory, "tap", "button", "--session", "dead", "--json", env=host).stdout
     assert "android emulator-5998: died, its process is gone (ddp down emulator-5998 clears it); ddp up made it" in \
         ddp_in(directory, "devices", "--session", "dead", env=host).stdout
@@ -1082,6 +1085,20 @@ with tempfile.TemporaryDirectory() as directory:
     assert "FAIL emulator-5998 died" in dead_doctor.stdout, dead_doctor.stdout + dead_doctor.stderr
     assert ddp_in(directory, "down", "--session", "dead", env=host).stdout == "down android emulator-5998\n"
     assert json.loads((dead / "devices.json").read_text()) == []
+    # The emulators up made are also kept in the home folder, so devices says the same from any folder: one that died
+    # names the folder to run down in; an entry on a port adb lists whose process is gone is not taken for ddp's.
+    anywhere_home = Path(directory, "anywhere-home")
+    made = anywhere_home / ".ddp" / "emulators"
+    made.mkdir(parents=True)
+    (made / "emulator-5996.json").write_text(json.dumps({"platform": "android", "device": "emulator-5996", "pid": 4194001,
+                                                         "folder": "/work/app", "session": "gate"}))
+    (made / "runner-fake.json").write_text(json.dumps({"platform": "android", "device": "runner-fake", "pid": 4194002}))
+    other_folder = Path(directory, "other-folder")
+    other_folder.mkdir()
+    anywhere = ddp_in(other_folder, "devices", env={**host, "HOME": str(anywhere_home)})
+    assert "android emulator-5996: died, its process is gone (ddp down emulator-5996 --session gate in /work/app clears it); ddp up made it" \
+        in anywhere.stdout and "android runner-fake: device" in anywhere.stdout \
+        and "runner-fake: device; ddp up made it" not in anywhere.stdout, anywhere.stdout + anywhere.stderr
     # One test run split over two devices: ddp lists the tests on the first, splits them by the time each took last
     # (by count, whole classes, when it knows none), names each device its share in a file, and joins the counts; a
     # failing test says which device ran it. Each test's time is kept in the home folder for the next split.
@@ -1105,6 +1122,7 @@ with tempfile.TemporaryDirectory() as directory:
                          "*'pm list instrumentation'*) echo 'instrumentation:fake.test/androidx.test.runner.AndroidJUnitRunner (target=fake)';;\n"
                          "*' push '*) cp \"$4\" " + str(Path(directory, "pushed-")) + "$2;;\n"
                          "*'-e log true'*) printf 'fake.A#one\\nfake.A#two\\nfake.B#three\\nfake.B#four\\n' | run;;\n"
+                         "*'-s shard-mute shell am instrument'*) echo 'INSTRUMENTATION_CODE: -1';;\n"
                          "*'am instrument'*) run < " + str(Path(directory, "pushed-")) + "$2;;\n"
                          "*' get-state'*) echo device;;\n"
                          "esac\n")
@@ -1132,6 +1150,11 @@ with tempfile.TemporaryDirectory() as directory:
     assert split_json["passed"] == 3 and split_json["failed"] == [{"test": "fake.B#four", "message": "java.lang.AssertionError: boom", "device": "shard-a"}] \
         and [d["device"] for d in split_json["devices"]] == ["shard-a", "shard-b"] and "listing" in split_json["phases"], split_json
     assert Path(directory, "pushed-shard-a").read_text() == "fake.B#three\nfake.B#four\n", Path(directory, "pushed-shard-a").read_text()
+    # One device that ran none of its share is no pass, though the other's passed.
+    times_file.write_text(json.dumps({"fake.A#one": 1, "fake.A#two": 1, "fake.B#three": 1, "fake.B#four": 1}))
+    mute = ddp_in(directory, "test", "--on", "shard-a,shard-mute", "--app", "fake", "--no-focus-check", env=shards)
+    assert mute.returncode == 1 and "STOPPED on shard-mute: 2 of the tests named to the runner did not run" in mute.stdout \
+        and "shard-mute: 0 passed, 0 failed, 0 skipped" in mute.stdout, mute.stdout + mute.stderr
     # A device without the tests stops the run before any test starts on the others.
     shard_log.write_text("")
     missing = ddp_in(directory, "test", "--on", "shard-a,shard-none", "--app", "fake", env=shards)
@@ -1345,7 +1368,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert compared.returncode == 1 and compared.stdout == ("step 2: ios passed, android passed; new on Android only: Undo\n"
         "parity save-the-form: ios passed, android passed; 1 step differs\n"), compared.stdout + compared.stderr
     # Host commands refuse what a platform has no public way to do, before running anything.
-    sim, emu = "5A9A96DD-128D-475C-B007-46F50ED266A7", "emulator-5554"
+    sim, emu = "5A9A96DD-128D-475C-B007-46F50ED266A7", "emulator-5990"
     for args, said in [(("set", "orientation", "landscape", "--device", sim), "no public way to rotate"),
                        (("set", "location", "200,10", "--device", sim), "location is LAT,LON"),
                        (("push", "p.json", "--device", emu, "--app", "x"), "no local way to deliver a push"),
