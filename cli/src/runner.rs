@@ -827,8 +827,11 @@ fn settle(screen: &mut Screen, before: &[Value], busy: &HashSet<String>) -> Resu
     let started = Instant::now();
     let mut last: Option<Vec<Value>> = None;
     let mut quiet = 0;
+    let mut looked = Instant::now();
     loop {
-        pause(LOOK_EVERY);
+        // Looks start LOOK_EVERY apart: a look that took that long already was the wait.
+        pause(LOOK_EVERY.saturating_sub(looked.elapsed()));
+        looked = Instant::now();
         let now = screen.look()?;
         match &last {
             None if differing(before, &now).is_subset(busy) => {

@@ -28,6 +28,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 - `--install` on an emulator `ddp up` started: an app there signed with another key (one baked into the base's snapshot by an earlier build) is uninstalled and the install runs once more. Other devices still get `signing_key_differs`.
 - `ddp up --json` printed its text line, not JSON. It now answers one object (`platform`, `device`, `seconds`, and `boot`, `renderer`, `hwui`, `port` when known); what the install and the app's start print goes to stderr.
 - An adb command whose output did not fit in a pipe (64 KB) waited until its deadline and counted as no answer: a listing of a few hundred tests, so `ddp test --on` and a run that went on after a restart could not list the tests of a big suite. The output is now read while the command runs.
+- Without the library, an action looks again as soon as the last look ends when that look took 100 ms or more, instead of waiting 100 ms more.
 - `ddp up --platform android --port <N>`: the emulator's console port, even, 5554 to 5682, refused when taken (`port_taken`). Without it the first free port from 5560, as before.
 - `ddp test` names each skipped test: `SKIPPED Class#method`, `skipped_tests` in `--json`.
 - `ddp test`: a run with no test in it (a filter that matched none, a device gone before the first test) was a pass with `0 passed`. It is now `STOPPED no test ran ...` and exit 1.
@@ -37,7 +38,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 
 ### Fixed
 
-- Without the library on Android 14 and later, an action said `nothing changed within 1000ms` when the screen did change: the runner read a cached accessibility tree that a Compose app does not tell it to drop. On the sample, 7 of 8 taps and activates that changed a label were reported as no change. The runner now drops the cache before each read: every change seen, 16 of 16, at about 2.4 s per action instead of 1.3 s. Before Android 14 a read can still be stale.
+- Without the library on Android 14 and later, an action said `nothing changed within 1000ms` when the screen did change: the runner read a cached accessibility tree that a Compose app does not tell it to drop. On the sample, 7 of 8 taps and activates that changed a label were reported as no change. The runner now drops the cache before each read and reads the tree back a level at a time, each level asked for at once (the app answers one request a frame while it draws): every change seen, 16 of 16, at about 1.0 s per action against 1.3 s before. Before Android 14 a read can still be stale.
 - Android with the library: an element that has only an accessibility action (a Compose `semantics { onClick }` with no pointer input) was reported as covered by its own parent. The reason is now `untouchable`.
 
 ## 0.5.1 (2026-11-16)

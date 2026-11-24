@@ -25,6 +25,8 @@ import org.json.JSONObject
 import java.io.BufferedInputStream
 import java.io.InputStream
 import java.io.OutputStream
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
 import kotlin.concurrent.thread
 
 /**
@@ -46,6 +48,7 @@ class Runner : Instrumentation() {
         }
     }
     private val lock = Any()
+    private val fetchers by lazy { Executors.newFixedThreadPool(FETCH_THREADS) }
     @Volatile private var stopped = false
     @Volatile private var lastRequest = SystemClock.elapsedRealtime()
 
@@ -280,14 +283,28 @@ class Runner : Instrumentation() {
 
     private fun root(): AccessibilityNodeInfo? {
         // UiAutomation answers from a cache that the app's change events clear, and a Compose app sends none while no
-        // accessibility service is on: a label changed after an action read as unchanged, 5 of 8 taps on the sample
+        // accessibility service is on: a label changed after an action read as unchanged, 7 of 8 actions on the sample
         // (API 36). Android 14 lets the cache be dropped; before it, reads can still be stale.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) automation.clearCache()
+        val fresh = Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
+        if (fresh) automation.clearCache()
         val deadline = SystemClock.uptimeMillis() + ROOT_WAIT_MS
         while (true) {
-            automation.rootInActiveWindow?.let { return it }
+            automation.rootInActiveWindow?.let { root -> return root.also { if (fresh) warm(it) } }
             if (SystemClock.uptimeMillis() >= deadline) return null
             runCatching { automation.waitForIdle(50, 200) }
+        }
+    }
+
+    /**
+     * Fills the dropped cache a level of the tree at a time, each level's nodes asked for at once. The app answers
+     * accessibility requests on its main thread, one each pass, about a frame apart while it draws: asked one by one,
+     * 54 nodes took 400 ms on the sample, asked a level at once 155 ms. Reads after this come from the cache.
+     */
+    private fun warm(root: AccessibilityNodeInfo) {
+        var level = listOf(root)
+        while (level.isNotEmpty()) {
+            val children = level.flatMap { node -> (0 until node.childCount).map { index -> Callable { node.getChild(index) } } }
+            level = fetchers.invokeAll(children).mapNotNull { it.get() }
         }
     }
 
@@ -431,6 +448,8 @@ class Runner : Instrumentation() {
         const val SOCKET_NAME = "agentddp.runner.control"
         const val FRAME_MS = 16L
         const val ROOT_WAIT_MS = 2000L
+        /** Requests in flight while the tree is read: more than a level of a screen holds rarely helps. */
+        const val FETCH_THREADS = 8
         /** Raised when what the runner answers changes; the CLI replaces a runner with another number. */
         const val VERSION = 10
         const val FOCUS_WAIT_MS = 1000L
