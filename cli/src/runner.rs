@@ -24,7 +24,7 @@ const APK: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/runner.apk"));
 /// `am instrument` to the socket open took 2 s on a warm emulator, 21 s on one booted a minute before.
 const START_PATIENCE: Duration = Duration::from_secs(40);
 /// The runner's `VERSION` (Runner.kt) this ddp speaks.
-pub const RUNNER_VERSION: u64 = 9;
+pub const RUNNER_VERSION: u64 = 10;
 const POLL: Duration = Duration::from_millis(100);
 
 /// What every runner answer ends with: the runner did it, nothing was checked.
@@ -350,6 +350,28 @@ impl Screen {
                 self.android("input.type", json!({"text": text}))
             }
             Action::Key(key) => self.android("input.key", json!({"key": key})),
+            Action::Activate(element) => {
+                let Screen::Android(control) = self else { unreachable!("iOS returned above") };
+                let mut params = json!({"frame": element["frame"]});
+                for field in ["label", "id"] {
+                    if let Some(text) = element[field].as_str() {
+                        params[field] = json!(text);
+                    }
+                }
+                let answer = control.call("input.activate", params)?;
+                let name = format!("'{}'", display(element));
+                if answer["action"] != true {
+                    fail!(
+                        format!("{name} has no click action in the accessibility tree: nothing was pressed"),
+                        "no_action",
+                        format!("ddp tap '{}'", element_key(element))
+                    );
+                }
+                if answer["done"] != true {
+                    fail!(format!("{name} refused its click action: nothing was pressed"), "refused", "ddp tree");
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -419,6 +441,7 @@ fn ios_act(simulator: &mut Simulator, action: &Action) -> Result<()> {
             };
             press_key(simulator, usage)?;
         }
+        Action::Activate(_) => unreachable!("activate refuses iOS before it looks"),
     }
     simulator.delivered()
 }
@@ -454,6 +477,9 @@ enum Action {
         clear: bool,
     },
     Key(String),
+    /// The element's click action through the accessibility service: the element as listed, which the runner finds
+    /// again by its frame, label and id.
+    Activate(Value),
 }
 
 /// A place as the agent gave it, where it is now, and the element seen there: a walk keeps what was seen, so a
@@ -1102,6 +1128,43 @@ pub fn gesture(args: &Args) -> Result<i32> {
         };
         Ok((action, [Some(from), to].into_iter().flatten().collect()))
     })
+}
+
+/// `activate`: the element's own click action through the accessibility service, as a screen reader presses it. No
+/// touch, so it presses an element that takes none (a Compose `semantics { onClick }`, refused by `tap` as
+/// `untouchable`). Android only; with the library too, since the runner is the accessibility service.
+pub fn activate(args: &Args) -> Result<i32> {
+    let text = args.id.clone().unwrap_or_default();
+    let (platform, device, _) = crate::device::target(args)?;
+    if platform == "ios" {
+        fail!("activate works on Android only for now", "not_supported", format!("ddp tap '{text}' --device {device}"));
+    }
+    if crate::hit::point(&text).is_some() {
+        fail!("activate presses an element, not a point", "bad_value", format!("ddp tree --device {device}"));
+    }
+    // With the library an id is often a Compose testTag, which the accessibility tree lacks unless the app sets
+    // testTagsAsResourceId: the element is found in the library's tree and looked for by its label.
+    let verb = format!("activate {text}");
+    let (text, from_ref) = match device_mode(args) {
+        true => (text, args.id_from_ref),
+        false => (label_in_library(&text)?, false),
+    };
+    perform(args, &verb, json!({}), |elements, device, screen| {
+        let place = screen.reach(elements, place(elements, &text, from_ref, device)?, device)?;
+        let element = place.seen.clone().expect("a named place has its element");
+        Ok((Action::Activate(element), vec![place]))
+    })
+}
+
+/// The name the accessibility tree knows an element the library lists by: its label.
+fn label_in_library(key: &str) -> Result<String> {
+    let session = crate::live::require_session()?;
+    let recording = crate::live::snapshot_live(&session)?;
+    let Some(element) = recording.frames.last().unwrap().named(key).cloned() else {
+        fail!(format!("no element '{key}' on screen"), "unknown_element", "ddp tree -i");
+    };
+    // No label: its id, which a View's resource id is in both trees.
+    Ok(element["label"].as_str().filter(|label| !label.is_empty()).unwrap_or(key).to_string())
 }
 
 /// `type` without the library: into the focused field, or into `--into` after tapping it.

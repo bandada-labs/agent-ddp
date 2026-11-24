@@ -8,6 +8,7 @@ import android.app.UiAutomation
 import android.content.res.Resources
 import android.graphics.Rect
 import android.net.LocalServerSocket
+import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.os.SystemClock
@@ -180,6 +181,23 @@ class Runner : Instrumentation() {
             press(KeyEvent.KEYCODE_DEL)
             JSONObject()
         }
+        // What a screen reader's double tap does: the element's own click action, through the accessibility service,
+        // with no touch. It presses an element that takes no touch at all (a Compose `semantics { onClick }`).
+        "input.activate" -> {
+            val frame = params.optJSONArray("frame") ?: throw RunnerError.missing("frame")
+            val wanted = { node: AccessibilityNodeInfo ->
+                val bounds = frame(node)
+                (0 until 4).all { bounds.getInt(it) == frame.optInt(it) } &&
+                    label(node).orEmpty() == params.optString("label") &&
+                    node.viewIdResourceName?.substringAfter(":id/").orEmpty() == params.optString("id")
+            }
+            // The CLI picked the element from screen.elements, which reads the app's other windows too (a menu).
+            val node = firstNode(root(), wanted)
+                ?: automation.windows.firstNotNullOfOrNull { window -> window.root?.let { firstNode(it, wanted) } }
+                ?: throw RunnerError("the element is no longer at $frame", -32000)
+            val clickable = AccessibilityNodeInfo.AccessibilityAction.ACTION_CLICK in node.actionList
+            JSONObject().put("action", clickable).put("done", clickable && node.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+        }
         "screen.find" -> {
             val label = params.optString("label").ifEmpty { throw RunnerError.missing("label") }
             val found = find(label)
@@ -261,6 +279,10 @@ class Runner : Instrumentation() {
     }
 
     private fun root(): AccessibilityNodeInfo? {
+        // UiAutomation answers from a cache that the app's change events clear, and a Compose app sends none while no
+        // accessibility service is on: a label changed after an action read as unchanged, 5 of 8 taps on the sample
+        // (API 36). Android 14 lets the cache be dropped; before it, reads can still be stale.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) automation.clearCache()
         val deadline = SystemClock.uptimeMillis() + ROOT_WAIT_MS
         while (true) {
             automation.rootInActiveWindow?.let { return it }
@@ -276,8 +298,10 @@ class Runner : Instrumentation() {
         automation.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.takeIf { it.isEditable }
             ?: firstNode { it.isFocused && it.isEditable }
 
-    private fun firstNode(wanted: (AccessibilityNodeInfo) -> Boolean): AccessibilityNodeInfo? {
-        val root = root() ?: return null
+    private fun firstNode(wanted: (AccessibilityNodeInfo) -> Boolean): AccessibilityNodeInfo? = firstNode(root(), wanted)
+
+    private fun firstNode(root: AccessibilityNodeInfo?, wanted: (AccessibilityNodeInfo) -> Boolean): AccessibilityNodeInfo? {
+        root ?: return null
         val queue = ArrayDeque(listOf(root))
         while (queue.isNotEmpty()) {
             val node = queue.removeFirst()
@@ -408,7 +432,7 @@ class Runner : Instrumentation() {
         const val FRAME_MS = 16L
         const val ROOT_WAIT_MS = 2000L
         /** Raised when what the runner answers changes; the CLI replaces a runner with another number. */
-        const val VERSION = 9
+        const val VERSION = 10
         const val FOCUS_WAIT_MS = 1000L
         const val IDLE_MS = 5 * 60_000L
         const val IDLE_CHECK_MS = 10_000L

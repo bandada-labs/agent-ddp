@@ -17,6 +17,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 - `ddp test --rerun-failed`: each failed test runs once more after the run; one that passes then is `FLAKY` and counts as passed. `--class` takes several classes with commas, and `--env notClass=...` leaves tests out.
 - `ddp up --hwui skiagl|skiavk`: what the apps in the guest draw with (`debug.hwui.renderer`), set after the boot and read back.
 - The core guide says how to use Xcode's own tools and ddp together.
+- `ddp activate <element>` on Android: the element's click action through the accessibility service, as TalkBack presses it, with no touch. It presses what `tap` refuses as `untouchable` (a Compose `semantics { onClick }` with no pointer input). An element with no click action is refused (`no_action`), never reported as pressed. With or without the library; the runner is version 10. iOS follows.
 
 ### Changed
 
@@ -36,6 +37,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 
 ### Fixed
 
+- Without the library on Android 14 and later, an action said `nothing changed within 1000ms` when the screen did change: the runner read a cached accessibility tree that a Compose app does not tell it to drop. On the sample, 7 of 8 taps and activates that changed a label were reported as no change. The runner now drops the cache before each read: every change seen, 16 of 16, at about 2.4 s per action instead of 1.3 s. Before Android 14 a read can still be stale.
 - Android with the library: an element that has only an accessibility action (a Compose `semantics { onClick }` with no pointer input) was reported as covered by its own parent. The reason is now `untouchable`.
 
 ## 0.5.1 (2026-11-16)

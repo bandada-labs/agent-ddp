@@ -125,6 +125,7 @@ ddp watch @e3 --until 'alpha>0.9'
 ```
 ddp tap @e3                      # a real touch, once the app's hit test says it reaches @e3; prints what changed
 ddp swipe list 0,100             # also drag, double-tap, long-press; places are elements or x,y
+ddp activate @e3                 # Android: its accessibility click action, as TalkBack presses it, no touch
 ddp check tappable               # controls a touch does not reach (disabled, covered, outside or taken by their parent), no touching
 ddp type "ana@example.com" --into @e5   # tap the field, then type as the keyboard does
 ddp press Enter
@@ -200,7 +201,8 @@ Every error ends with a `next:` line. The common ones:
 - `no elements` (after connect or record): run `ddp doctor`. On iOS the accessibility tree is off until the library starts; on Android give the element a `testTag`.
 - `can't reach the app`: the app was killed or restarted. `ddp connect` again.
 - `library_too_old`: the app has an agent-ddp library before 0.2.0. Update it to the version `ddp --version` prints.
-- `covered`, `disabled`, `untouchable`, `outside`, `intercepted` (from `tap`): a touch would not reach the element, or a parent would take it first. `ddp check tappable` shows every control; fix the app, or `tap --force` to touch anyway.
+- `covered`, `disabled`, `untouchable`, `outside`, `intercepted` (from `tap`): a touch would not reach the element, or a parent would take it first. `ddp check tappable` shows every control; fix the app, or `tap --force` to touch anyway. On Android, `untouchable` with only an accessibility action (a Compose `semantics { onClick }`) is pressed by `ddp activate`.
+- `no_action` (from `activate`): the element has no click action in the accessibility tree; nothing was pressed.
 - `no element 'x'`: the name is the accessibility id or test tag, or the label when there is none. Use `ddp find text <part of it>`.
 - A case `MISSING` with "the recording ends at ... before this case": record longer (`--for 5s`).
 - The action from `--then` shows up late: on a simulator a tap lands about 0.5 s after recording starts. Record 120 frames or more.

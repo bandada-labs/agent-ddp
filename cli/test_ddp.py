@@ -554,6 +554,12 @@ class FakeApp:
                     elif method == "input.tap" and self.modal and params.get("y") == 60:
                         self.modal, self.saved = False, True
                     result = {"ms": 30.4}
+                elif method == "input.activate":
+                    # The click action of the element the runner finds at that frame: Save has one, Off has none.
+                    self.runner.append((method, params))
+                    has_action = params.get("label") == "Save"
+                    self.saved = self.saved or has_action
+                    result = {"action": has_action, "done": has_action}
                 elif method == "screen.elements":
                     shown = [{"type": "TextView", "label": "Off", "frame": [0, 0, 50, 10], "enabled": False}]
                     if self.late_id and self.saved:
@@ -906,6 +912,17 @@ with tempfile.TemporaryDirectory() as directory:
     # An action says what changed, with the ref to act on next, once the screen settles.
     saved = ddp_in(directory, "tap", "Save", "--device", "runner-fake", env=host)
     assert re.search(r'tap Save on runner-fake in \d+ms; new: @e\d+ "Saved"; no checks', saved.stdout), saved.stdout + saved.stderr
+    # activate: the element's own click action, found again by its frame, label and id; no touch.
+    app.saved, sent = False, len(app.runner)
+    activated = ddp_in(directory, "activate", "Save", "--device", "runner-fake", env=host)
+    assert re.fullmatch(r'activate Save on runner-fake in \d+ms; new: @e\d+ "Saved"; no checks \(no SDK\)\n', activated.stdout) and \
+        app.runner[sent:] == [("input.activate", {"frame": [10, 20, 200, 80], "label": "Save", "id": "save"})], activated.stdout + activated.stderr + str(app.runner)
+    no_action = ddp_in(directory, "activate", "Off", "--device", "runner-fake", env=host)
+    assert no_action.returncode == 1 and "'Off' has no click action in the accessibility tree: nothing was pressed" in no_action.stderr and \
+        "next: ddp tap 'Off'" in no_action.stderr, no_action.stderr
+    at_point = ddp_in(directory, "activate", "10,10", "--device", "runner-fake", env=host)
+    assert at_point.returncode == 1 and "activate presses an element, not a point" in at_point.stderr, at_point.stderr
+    app.saved = False
     # A locked screen is said before the target is looked for: its tree would read as "no element".
     app.locked, sent = True, len(app.runner)
     locked = ddp_in(directory, "tap", "Nope", "--device", "runner-fake", env=host)

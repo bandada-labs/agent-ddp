@@ -65,6 +65,7 @@ fn handler(command: &str) -> fn(&mut Args) -> Result<i32> {
         "read" => summary::read,
         "check" => run_check,
         "tap" => hit::tap,
+        "activate" => |args| crate::runner::activate(args),
         "type" => device::type_text,
         "press" => device::press,
         "permission" => device::permission,
