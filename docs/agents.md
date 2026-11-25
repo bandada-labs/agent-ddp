@@ -44,7 +44,7 @@ ddp tap <x,y>                                      a real touch at a point, then
 ddp swipe <from> <to> [--for 300ms]                a quick move (scroll, page); places are elements or x,y
 ddp drag <from> <to> [--for 600ms]                 hold 500ms, move slowly, let go (reorder, drag and drop)
 ddp double-tap <place> | long-press <place> [--for 800ms]
-ddp activate <element>                     Android: its accessibility click action (as TalkBack), no touch; with or without the library
+ddp activate <element>                     Android only (iOS in 0.6.1): its accessibility click action (as TalkBack), no touch; with or without the library
 ddp tap|double-tap|swipe|drag|long-press|type|press|tree ... --device <device>   without the library: labels or x,y, no checks
 ddp walk start "<task>" | expect <element> | end pass|fail [--note ..] | show | list   a task step by step, kept as a file
 ddp walk replay [<walk>] [--device <id>] | parity [<walk>]   the walk again with no model; iOS against Android

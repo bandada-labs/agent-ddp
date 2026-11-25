@@ -2,7 +2,7 @@
 
 Changes that users or agents will notice. Before 1.0, a minor version may change the protocol or the output; those changes are marked.
 
-## 0.5.4 (not released yet)
+## 0.6.0 (2026-11-25)
 
 ### Added
 
@@ -17,7 +17,7 @@ Changes that users or agents will notice. Before 1.0, a minor version may change
 - `ddp test --rerun-failed`: each failed test runs once more after the run; one that passes then is `FLAKY` and counts as passed. `--class` takes several classes with commas, and `--env notClass=...` leaves tests out.
 - `ddp up --hwui skiagl|skiavk`: what the apps in the guest draw with (`debug.hwui.renderer`), set after the boot and read back.
 - The core guide says how to use Xcode's own tools and ddp together.
-- `ddp activate <element>` on Android: the element's click action through the accessibility service, as TalkBack presses it, with no touch. It presses what `tap` refuses as `untouchable` (a Compose `semantics { onClick }` with no pointer input). An element with no click action is refused (`no_action`), never reported as pressed. With or without the library; the runner is version 10. iOS follows.
+- `ddp activate <element>` on Android: the element's click action through the accessibility service, as TalkBack presses it, with no touch. It presses what `tap` refuses as `untouchable` (a Compose `semantics { onClick }` with no pointer input). An element with no click action is refused (`no_action`), never reported as pressed. Android only for now: on iOS it is refused (`not_supported`); iOS follows in 0.6.1. With or without the library; the runner is version 10.
 
 ### Changed
 

@@ -180,3 +180,6 @@ Asked to check for false positives before anything ships: "no push yet, necesito
 
 ### 2026-11-19: device runs that are fast and do not collide
 An app team lost test runs to emulators used by two sessions at once, to memory kills, and to an install failure nobody saw. Asked whether ddp should take this on while the team speeds up its own runner. Answer: "yes, agent-ddp's session builds it in parallel with the team's speed round; the team's own Android runner moves to 'ddp test' once it is faster". Built: leases, a memory bar before the boot, `ddp clean`, warm snapshots on the graphics card, no reinstall of an unchanged APK, adb's own words on a failed install, the time per phase in `ddp test`. One thing done another way than asked: the signing key is not checked before the install. Reading an APK's signer needs `apksigner` (a JVM start on every changed install), and with a rotated key a comparison of digests would refuse an update Android accepts. Android decides at the install and ddp explains its answer.
+
+### 2026-11-25: 0.6.0 with activate on Android only
+Asked whether to wait for the iOS half of `ddp activate` before the next release. Answer: "Release 0.6.0 now, after agent-ddp's final pass (one live run of beta.8 + all tests); activate says Android only". On iOS `activate` is refused as `not_supported`; the iOS half follows in 0.6.1.

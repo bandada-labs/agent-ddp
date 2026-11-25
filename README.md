@@ -142,11 +142,11 @@ Set up agent-ddp so you can use and check this app's UI: https://github.com/band
 2. Run `ddp skills get core` and follow it. Start with `ddp doctor`. With nothing in the app you can
    already drive it on a simulator, an emulator or an Android phone.
 3. To see what each element drew and run the checks, add the library to the Debug build only:
-   - iOS: add the Swift package https://github.com/bandada-labs/agent-ddp (from 0.5.1) and call
+   - iOS: add the Swift package https://github.com/bandada-labs/agent-ddp (from 0.6.0) and call
      AgentDDP.start() at launch. It does nothing in Release. Simulator only for now. Xcode 16.4 or later.
      Without Xcode or SwiftPM: ios/build-swiftc.sh builds a static library and module for plain swiftc.
    - Android: add maven("https://jitpack.io") to the repositories and
-     debugImplementation("com.github.bandada-labs:agent-ddp:v0.5.1"). It starts by itself.
+     debugImplementation("com.github.bandada-labs:agent-ddp:v0.6.0"). It starts by itself.
 ```
 
 `samples/ios` and `samples/android` are small apps with the library already wired in.
