@@ -1,12 +1,14 @@
 # Status
 
-Last update: 2026-11-19. Read this after a break, then [DECISIONS.md](DECISIONS.md).
+Last update: 2026-11-27. Read this after a break, then [DECISIONS.md](DECISIONS.md).
 
 ## In one paragraph
 
 A small library inside a Debug build of an iOS or Android app serves what the app draws, frame by frame (ADR 0001). The `ddp` CLI, one Rust binary on npm (ADR 0002, 0003), reads it live or from recordings and prints short text for coding agents (ADR 0006). The protocol between them is versioned (ADR 0004). A flight recorder keeps the last 15 minutes on both platforms (ADR 0005).
 
 ## Released
+
+0.6.2 on 2026-11-27 (not published yet; CLI only): `ddp activate` on iOS simulators, the simulator's accessibility press as VoiceOver does it (request type 7, action 5), with and without the library. Checked: unit tests, `test_ddp.py`, clippy for Linux and both Mac targets, a Windows check, and a live run on the Mac (iOS 27.0 simulator, Xcode 27.2): 12 of 12 checks of `probes/ios-activate`.
 
 0.6.1 on 2026-11-26 (not published yet; CLI only): `activate` fixes on Android (a disabled element gets no `tap` hint; with the library the line ends `no checks (done through the accessibility tree)`), a visual README with a real emulator recording, fixed badges, docs/faq.md, a new npm description, test_ddp.py 76 s to 56 s. Checked: unit tests, `test_ddp.py`, clippy for Linux and both Mac targets, a Windows check. iOS `activate` moves to 0.6.2.
 

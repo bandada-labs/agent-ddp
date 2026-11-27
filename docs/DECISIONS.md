@@ -72,3 +72,4 @@ A line leaves this file when the maintainer replaces it or when its work has lan
 - 0.6.0 ships `ddp activate` on Android only; iOS follows in 0.6.1. (2026-11-25, "activate says Android only")
 - The README is mostly images and recordings; what can be shown is not written. Long text lives in docs (docs/faq.md). The npm page is the same README. (2026-11-26, "si el texto es representable en imagen entonces que se quede como imagen")
 - 0.6.1 ships the Android `activate` fixes and the README; iOS `activate` moves to 0.6.2, after the Mac runner restart is live. (2026-11-26, brain's ruling on mb-77w0)
+- iOS `activate` is checked on the Mac through a runner job (`ddp-dev`) that builds the branch; the maintainer does no Mac step by hand. The probe for the press request uses no debugger and asks the Mac for nothing (no lldb, no DevToolsSecurity). (2026-11-27, owner's yes on panel fa1a3d, brain's ruling on mb-77w0)

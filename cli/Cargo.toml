@@ -1,6 +1,6 @@
 [package]
 name = "agent-ddp"
-version = "0.6.1"
+version = "0.6.2"
 edition = "2021"
 description = "ddp: your coding agent drives native iOS and Android apps and sees what changed, frame by frame"
 license = "MIT"

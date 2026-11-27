@@ -2,7 +2,7 @@
 
 Changes that users or agents will notice. Before 1.0, a minor version may change the protocol or the output; those changes are marked.
 
-## Unreleased
+## 0.6.2 (2026-11-27)
 
 ### Added
 
