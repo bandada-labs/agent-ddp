@@ -32,15 +32,23 @@ func properties(of cls: AnyClass) -> [String] {
 }
 
 // 1. The classes.
+// By name from the framework's own image: objc_copyClassList hands Swift every class in the process, and holding one
+// that is not an NSObject (__NSGenericDeallocHandler) aborts it.
 var classCount: UInt32 = 0
-let classes = objc_copyClassList(&classCount)!
 var names: [String] = []
-for index in 0..<Int(classCount) {
-    let name = String(cString: class_getName(classes[index]))
-    if name.hasPrefix("AXP") { names.append(name) }
+if let list = objc_copyClassNamesForImage(framework, &classCount) {
+    for index in 0..<Int(classCount) { names.append(String(cString: list[index])) }
+    free(list)
+}
+print("IMAGE CLASSES \(names.count)")
+if names.isEmpty {  // the image under another name than its path: the classes this probe uses at least
+    names = ["AXPTranslator", "AXPTranslatorRequest", "AXPTranslatorResponse", "AXPTranslationObject", "AXPMacPlatformElement"]
 }
 for name in names.sorted() {
-    let cls: AnyClass = objc_getClass(name) as! AnyClass
+    guard let cls = objc_getClass(name) as? AnyClass else {
+        print("NO CLASS \(name)")
+        continue
+    }
     print("CLASS \(name) : \(class_getSuperclass(cls).map { String(cString: class_getName($0)) } ?? "-")")
     var count: UInt32 = 0
     if let list = class_copyPropertyList(cls, &count) {
@@ -50,7 +58,7 @@ for name in names.sorted() {
         }
         free(list)
     }
-    for (prefix, owner) in [("-", cls), ("+", object_getClass(cls)!)] {
+    for (prefix, owner) in [("-", cls), ("+", object_getClass(cls)!)] as [(String, AnyClass)] {
         guard let list = class_copyMethodList(owner, &count) else { continue }
         for index in 0..<Int(count) {
             let types = method_getTypeEncoding(list[index]).map { String(cString: $0) } ?? ""
