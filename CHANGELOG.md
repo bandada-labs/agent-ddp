@@ -2,6 +2,18 @@
 
 Changes that users or agents will notice. Before 1.0, a minor version may change the protocol or the output; those changes are marked.
 
+## 0.6.1 (not released yet)
+
+### Changed
+
+- `ddp activate` on a disabled element that has no click action: `next:` is `ddp tree` to wait until the app enables it, no longer a `ddp tap` that would be refused too.
+- `ddp activate` with the library in the app ends `no checks (done through the accessibility tree)`, no longer `no checks (no SDK)`.
+- README: a real recording of a walk and its replay on an Android emulator, images in place of most text; FAQ, MCP and limits moved to `docs/faq.md`. The npm page shows the same README and a new description.
+
+### Fixed
+
+- The README's npm, CI and license badges showed as broken images on GitHub (its image proxy timed out on the live badges); they are fixed badges now, and CI is GitHub's own.
+
 ## 0.6.0 (2026-11-25)
 
 ### Added

@@ -248,7 +248,9 @@ fn elements_now((mode, platform, device): &(String, String, String)) -> Result<V
 
 /// Shortens an action's line for the report: the device and the no-checks tail are said once at the top.
 fn short(line: &str, device: &str) -> String {
-    line.replace(&format!(" on {device}"), "").replace(&format!("; {}", crate::runner::NO_CHECKS), "")
+    line.replace(&format!(" on {device}"), "")
+        .replace(&format!("; {}", crate::runner::NO_CHECKS), "")
+        .replace(&format!("; {}", crate::runner::NO_CHECKS_AROUND_LIBRARY), "")
 }
 
 /// One line per step, the result, where the file and screenshots are.

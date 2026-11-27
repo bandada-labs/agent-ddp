@@ -29,6 +29,8 @@ const POLL: Duration = Duration::from_millis(100);
 
 /// What every runner answer ends with: the runner did it, nothing was checked.
 pub const NO_CHECKS: &str = "no checks (no SDK)";
+/// The same with the library in the app: `activate` went around it, through the accessibility tree.
+pub const NO_CHECKS_AROUND_LIBRARY: &str = "no checks (done through the accessibility tree)";
 
 /// A connection to the runner on this Android device, started (and installed) when it is not running. A runner
 /// another ddp left running answers differently: it is stopped and replaced by the one this ddp carries.
@@ -361,10 +363,15 @@ impl Screen {
                 let answer = control.call("input.activate", params)?;
                 let name = format!("'{}'", display(element));
                 if answer["action"] != true {
+                    // A disabled element has no click action either, and a tap on it would be refused too.
+                    let next = match element["enabled"] == false {
+                        true => "ddp tree: it is disabled, wait until the app enables it".to_string(),
+                        false => format!("ddp tap '{}'", element_key(element)),
+                    };
                     fail!(
                         format!("{name} has no click action in the accessibility tree: nothing was pressed"),
                         "no_action",
-                        format!("ddp tap '{}'", element_key(element))
+                        next
                     );
                 }
                 if answer["done"] != true {
@@ -1095,7 +1102,8 @@ fn perform(
     let refs = refs_for(&named_keys(&change))?;
     let outcome = describe(&change, &refs);
     let front = screen.front_note(app.as_deref());
-    say!("{verb}{} in {}ms; {window}{outcome}{front}; {NO_CHECKS}", on(args, &device), took.round() as i64);
+    let checks = if device_mode(args) { NO_CHECKS } else { NO_CHECKS_AROUND_LIBRARY };
+    say!("{verb}{} in {}ms; {window}{outcome}{front}; {checks}", on(args, &device), took.round() as i64);
     let mut note = json!({
         "mode": "device",
         "platform": platform,

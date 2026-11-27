@@ -928,7 +928,7 @@ with tempfile.TemporaryDirectory() as directory:
         app.runner[sent:] == [("input.activate", {"frame": [10, 20, 200, 80], "label": "Save", "id": "save"})], activated.stdout + activated.stderr + str(app.runner)
     no_action = ddp_in(directory, "activate", "Off", "--device", "runner-fake", env=host)
     assert no_action.returncode == 1 and "'Off' has no click action in the accessibility tree: nothing was pressed" in no_action.stderr and \
-        "next: ddp tap 'Off'" in no_action.stderr, no_action.stderr
+        "next: ddp tree: it is disabled, wait until the app enables it" in no_action.stderr, no_action.stderr
     at_point = ddp_in(directory, "activate", "10,10", "--device", "runner-fake", env=host)
     assert at_point.returncode == 1 and "activate presses an element, not a point" in at_point.stderr, at_point.stderr
     app.saved = False
@@ -1329,7 +1329,7 @@ with tempfile.TemporaryDirectory() as directory:
                          "*' get-state'*) echo device;;\n"
                          "esac\n")
     crash_adb.chmod(0o755)
-    crashes = {"PATH": f"{crash_adb.parent}:{os.environ['PATH']}", "HOME": str(home)}
+    crashes = {"PATH": f"{crash_adb.parent}:{os.environ['PATH']}", "HOME": str(home), "DDP_FOCUS_PATIENCE_MS": "200"}
     went_on = ddp_in(directory, "test", "--device", "crash-fake", "--app", "fake", env=crashes)
     assert went_on.returncode == 1 and "FAIL fake.Suite#two: Process crashed.\n" in went_on.stdout and "STOPPED" not in went_on.stdout \
         and re.search(r"AndroidJUnitRunner in [\d.]+s: 2 passed, 1 failed, 0 skipped\n", went_on.stdout), went_on.stdout + went_on.stderr

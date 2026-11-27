@@ -791,8 +791,12 @@ struct TestPlan<'a> {
     rerun_failed: bool,
 }
 
-/// How long an app's window gets to take the focus.
-const FOCUS_PATIENCE: Duration = Duration::from_secs(10);
+/// How long an app's window gets to take the focus. `DDP_FOCUS_PATIENCE_MS` shortens it for the fake devices in
+/// test_ddp.py, where the focus never comes.
+fn focus_patience() -> Duration {
+    let ms = std::env::var("DDP_FOCUS_PATIENCE_MS").ok().and_then(|ms| ms.parse().ok()).unwrap_or(10_000);
+    Duration::from_millis(ms)
+}
 
 /// Before the tests: the screen on and unlocked, and proof that an app's window takes the focus on this device. An
 /// emulator can leave the focus on the launcher with an app in front; then popups never draw, injected touches reach
@@ -807,7 +811,7 @@ fn takes_focus(adb_program: &str, device: &str) -> Result<()> {
         let opened = shell("am start -W -a android.settings.SETTINGS");
         let settings = opened.lines().find_map(|line| line.trim().strip_prefix("Activity: ")?.split('/').next());
         let Some(settings) = settings else { return Ok(()) };
-        let deadline = Instant::now() + FOCUS_PATIENCE;
+        let deadline = Instant::now() + focus_patience();
         let mut focused = false;
         while !focused && Instant::now() < deadline {
             focus = shell("dumpsys window | grep -m1 mCurrentFocus").trim().to_string();
