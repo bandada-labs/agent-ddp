@@ -33,6 +33,10 @@ const FLAT_TREE: u64 = 0;
 const FULL_TREE: u64 = 2;
 const FRONTMOST_APPLICATION: u64 = 4;
 const READ_ATTRIBUTES: u64 = 5;
+/// An action on an element, with the action in `actionType`; a press is what the Mac's own
+/// `AXPMacPlatformElement.accessibilityPerformPress` sends (probes/ios-activate, Xcode 26 on the Mac runner).
+const PERFORM_ACTION: u64 = 7;
+const PRESS: u64 = 5;
 /// frame, role, isRemoteElement, label, identifier, value, isEnabled, traits, window, children. Never the visible
 /// point for a whole tree: the app hit-tests each element for it, a long list goes from milliseconds to seconds.
 const ATTRIBUTES: [u64; 10] = [21, 45, 66, 33, 25, 53, 27, 77, WINDOW, 8];
@@ -88,6 +92,7 @@ extern "C" {
     fn class_getClassMethod(class: Id, selector: Sel) -> *const c_void;
     fn objc_autoreleasePoolPush() -> *mut c_void;
     fn objc_autoreleasePoolPop(pool: *mut c_void);
+    fn object_getClassName(object: Id) -> *const c_char;
 }
 
 #[link(name = "Foundation", kind = "framework")]
@@ -255,6 +260,14 @@ fn count_of(object: Id) -> usize {
     }
 }
 
+/// What an answer is, for an error that says what came instead of what was expected.
+fn class_name(object: Id) -> String {
+    if object.is_null() {
+        return "nil".to_string();
+    }
+    unsafe { CStr::from_ptr(object_getClassName(object)) }.to_string_lossy().into_owned()
+}
+
 fn number_of(object: Id) -> Option<i64> {
     is_a(object, c"NSNumber").then(|| unsafe { send0::<i64>(object, "longLongValue") })
 }
@@ -315,6 +328,8 @@ pub struct Simulator {
     /// The last walk's elements as the accessibility service names them, in the same order: a touch asks about one.
     /// They live as long as `pool`.
     handles: Vec<Id>,
+    /// The same walk's elements as it gave them, to find the handle of one an action names.
+    listed: Vec<Value>,
     /// `tree` asks for the containers VoiceOver's flat tree leaves out.
     with_containers: bool,
     /// What the pasteboard held before ddp pasted into the app: it goes back when ddp lets go of the simulator, after
@@ -360,6 +375,7 @@ impl Simulator {
             hid: None,
             accessibility: None,
             handles: Vec::new(),
+            listed: Vec::new(),
             with_containers: false,
             held_pasteboard: None,
         };
@@ -598,7 +614,7 @@ impl Simulator {
         class(
             ACCESSIBILITY_HOOK,
             "AXPTranslatorRequest",
-            &["setRequestType:", "setClientType:", "setParameters:"],
+            &["setRequestType:", "setClientType:", "setParameters:", "setActionType:"],
             &["requestWithTranslation:"],
         )?;
         class(ACCESSIBILITY_HOOK, "AXPTranslatorResponse", &["resultData"], &[])?;
@@ -608,6 +624,17 @@ impl Simulator {
     }
 
     fn accessibility_request(&mut self, kind: u64, translation: Id, parameters: Id, client: u64) -> Result<Id> {
+        self.accessibility_action(kind, 0, translation, parameters, client)
+    }
+
+    fn accessibility_action(
+        &mut self,
+        kind: u64,
+        action: u64,
+        translation: Id,
+        parameters: Id,
+        client: u64,
+    ) -> Result<Id> {
         self.load_accessibility()?;
         let silent = || {
             failure(
@@ -621,6 +648,7 @@ impl Simulator {
                 send1(objc_getClass(c"AXPTranslatorRequest".as_ptr()), "requestWithTranslation:", translation);
             send1::<u64, ()>(request, "setRequestType:", kind);
             send1::<u64, ()>(request, "setClientType:", client);
+            send1::<u64, ()>(request, "setActionType:", action);
             send1::<Id, ()>(request, "setParameters:", parameters);
             let null_error: *mut Id = std::ptr::null_mut();
             let archived: Id = send3(
@@ -772,6 +800,7 @@ impl Simulator {
         }
         mark_keyboard(&mut walk.elements);
         self.handles = walk.handles;
+        self.listed = walk.elements.clone();
         Ok(walk.elements)
     }
 
@@ -875,6 +904,20 @@ impl Simulator {
         }
         let point = point_of(unsafe { send1(answer, "objectForKey:", ns_number(VISIBLE_POINT)) });
         Ok(point.map(|[x, y]| (x >= 0.0 && y >= 0.0).then_some((x, y))))
+    }
+
+    /// Presses the element of the last walk with that frame, label and id through its accessibility, as VoiceOver
+    /// does: the app's `accessibilityActivate`, no touch. `None`: no such element in the last walk. `Some(false)`: the
+    /// app said it did nothing.
+    pub fn press(&mut self, element: &Value) -> Result<Option<bool>> {
+        let same = |listed: &Value| ["frame", "label", "id"].iter().all(|field| listed[field] == element[field]);
+        let Some(index) = self.listed.iter().position(same) else { return Ok(None) };
+        let handle = self.handles[index];
+        let answer = self.accessibility_action(PERFORM_ACTION, PRESS, handle, std::ptr::null_mut(), FLAT_TREE)?;
+        match number_of(answer) {
+            Some(done) => Ok(Some(done != 0)),
+            None => Err(missing(ACCESSIBILITY_HOOK, &format!("a yes or no to a press ({})", class_name(answer)))),
+        }
     }
 
     /// The app in front, as the accessibility service names it. Right after a launch it can still be resolving.

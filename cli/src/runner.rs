@@ -448,9 +448,29 @@ fn ios_act(simulator: &mut Simulator, action: &Action) -> Result<()> {
             };
             press_key(simulator, usage)?;
         }
-        Action::Activate(_) => unreachable!("activate refuses iOS before it looks"),
+        // No touch, so nothing for the HID service to deliver.
+        Action::Activate(element) => return ios_press(simulator, element),
     }
     simulator.delivered()
+}
+
+/// VoiceOver presses a disabled element too, and UIKit and SwiftUI then do nothing: refused before, as on Android.
+fn ios_press(simulator: &mut Simulator, element: &Value) -> Result<()> {
+    let name = format!("'{}'", display(element));
+    if element["enabled"] == false {
+        fail!(
+            format!("{name} is disabled: nothing was pressed"),
+            "no_action",
+            "ddp tree: it is disabled, wait until the app enables it"
+        );
+    }
+    match simulator.press(element)? {
+        Some(true) => Ok(()),
+        Some(false) => {
+            fail!(format!("{name} refused its accessibility action: nothing was pressed"), "refused", "ddp tree")
+        }
+        None => fail!(format!("{name} went away before the press: nothing was pressed"), "unknown_element", "ddp tree"),
+    }
 }
 
 fn press_key(simulator: &mut Simulator, usage: u64) -> Result<()> {
@@ -1181,13 +1201,11 @@ pub fn gesture(args: &Args) -> Result<i32> {
 
 /// `activate`: the element's own click action through the accessibility service, as a screen reader presses it. No
 /// touch, so it presses an element that takes none (a Compose `semantics { onClick }`, refused by `tap` as
-/// `untouchable`). Android only; with the library too, since the runner is the accessibility service.
+/// `untouchable`; on iOS a view with `allowsHitTesting(false)`). With the library too: on Android the runner is the
+/// accessibility service, on iOS the simulator's accessibility answers either way.
 pub fn activate(args: &Args) -> Result<i32> {
     let text = args.id.clone().unwrap_or_default();
-    let (platform, device, _) = crate::device::target(args)?;
-    if platform == "ios" {
-        fail!("activate works on Android only for now", "not_supported", format!("ddp tap '{text}' --device {device}"));
-    }
+    let (_, device, _) = crate::device::target(args)?;
     if crate::hit::point(&text).is_some() {
         fail!("activate presses an element, not a point", "bad_value", format!("ddp tree --device {device}"));
     }
@@ -1199,7 +1217,10 @@ pub fn activate(args: &Args) -> Result<i32> {
         false => (label_in_library(&text)?, false),
     };
     perform(args, &verb, json!({}), |elements, device, screen| {
-        let place = screen.reach(elements, place(elements, &text, from_ref, device)?, device)?;
+        let place = place(elements, &text, from_ref, device)?;
+        // On iOS `reach` asks where a touch lands; a press is no touch, and refusing a covered element would refuse
+        // the very elements activate is for.
+        let place = if matches!(screen, Screen::Ios(_)) { place } else { screen.reach(elements, place, device)? };
         let element = place.seen.clone().expect("a named place has its element");
         Ok((Action::Activate(element), vec![place]))
     })
@@ -1626,6 +1647,9 @@ mod mac_only {
         }
         pub fn list_containers(&mut self) {}
         pub fn visible_point(&mut self, _: usize) -> Result<Option<Option<(f64, f64)>>> {
+            unreachable!()
+        }
+        pub fn press(&mut self, _: &Value) -> Result<Option<bool>> {
             unreachable!()
         }
     }
