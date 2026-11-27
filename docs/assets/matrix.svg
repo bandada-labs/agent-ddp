@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="484" viewBox="0 0 1280 484" role="img" aria-label="What works without the library and what the Debug library adds">
+<rect width="1280" height="484" rx="20" fill="#26231C"/>
+<g font-family="ui-rounded, 'SF Pro Rounded', Nunito, system-ui, -apple-system, 'Segoe UI', sans-serif" font-weight="700" font-size="20" fill="#F5C22E" text-anchor="middle"><text x="860" y="62">any build</text><text x="1110" y="62">+ Debug library</text></g>
+<line x1="40" x2="1240" y1="78" y2="78" stroke="#F4F4F2" stroke-opacity="0.08"/>
+<text x="48" y="112" font-family="ui-rounded, 'SF Pro Rounded', Nunito, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="21" font-weight="600" fill="#F4F4F2" fill-opacity="0.85">Tap, type, swipe, scroll, back</text>
+<circle cx="860" cy="105" r="13" fill="#F5C22E" fill-opacity="1"/><path d="M854 105 l4 4 l8 -9" fill="none" stroke="#26231C" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="1110" cy="105" r="13" fill="#F5C22E" fill-opacity="1"/><path d="M1104 105 l4 4 l8 -9" fill="none" stroke="#26231C" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<line x1="40" x2="1240" y1="130" y2="130" stroke="#F4F4F2" stroke-opacity="0.08"/>
+<text x="48" y="164" font-family="ui-rounded, 'SF Pro Rounded', Nunito, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="21" font-weight="600" fill="#F4F4F2" fill-opacity="0.85">Accessibility tree with refs</text>
+<circle cx="860" cy="157" r="13" fill="#F5C22E" fill-opacity="1"/><path d="M854 157 l4 4 l8 -9" fill="none" stroke="#26231C" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="1110" cy="157" r="13" fill="#F5C22E" fill-opacity="1"/><path d="M1104 157 l4 4 l8 -9" fill="none" stroke="#26231C" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<line x1="40" x2="1240" y1="182" y2="182" stroke="#F4F4F2" stroke-opacity="0.08"/>
+<text x="48" y="216" font-family="ui-rounded, 'SF Pro Rounded', Nunito, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="21" font-weight="600" fill="#F4F4F2" fill-opacity="0.85">Walk, replay, iOS vs Android parity</text>
+<circle cx="860" cy="209" r="13" fill="#F5C22E" fill-opacity="1"/><path d="M854 209 l4 4 l8 -9" fill="none" stroke="#26231C" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="1110" cy="209" r="13" fill="#F5C22E" fill-opacity="1"/><path d="M1104 209 l4 4 l8 -9" fill="none" stroke="#26231C" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<line x1="40" x2="1240" y1="234" y2="234" stroke="#F4F4F2" stroke-opacity="0.08"/>
+<text x="48" y="268" font-family="ui-rounded, 'SF Pro Rounded', Nunito, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="21" font-weight="600" fill="#F4F4F2" fill-opacity="0.85">Fill, border, corners, opacity, covers</text>
+<circle cx="860" cy="261" r="13" fill="#F4F4F2" fill-opacity="0.08"/>
+<circle cx="1110" cy="261" r="13" fill="#F5C22E" fill-opacity="1"/><path d="M1104 261 l4 4 l8 -9" fill="none" stroke="#26231C" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<line x1="40" x2="1240" y1="286" y2="286" stroke="#F4F4F2" stroke-opacity="0.08"/>
+<text x="48" y="320" font-family="ui-rounded, 'SF Pro Rounded', Nunito, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="21" font-weight="600" fill="#F4F4F2" fill-opacity="0.85">Frame by frame, sparklines, easing</text>
+<circle cx="860" cy="313" r="13" fill="#F4F4F2" fill-opacity="0.08"/>
+<circle cx="1110" cy="313" r="13" fill="#F5C22E" fill-opacity="1"/><path d="M1104 313 l4 4 l8 -9" fill="none" stroke="#26231C" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<line x1="40" x2="1240" y1="338" y2="338" stroke="#F4F4F2" stroke-opacity="0.08"/>
+<text x="48" y="372" font-family="ui-rounded, 'SF Pro Rounded', Nunito, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="21" font-weight="600" fill="#F4F4F2" fill-opacity="0.85">Checks: covered, jank, settle, a11y</text>
+<circle cx="860" cy="365" r="13" fill="#F4F4F2" fill-opacity="0.08"/>
+<circle cx="1110" cy="365" r="13" fill="#F5C22E" fill-opacity="1"/><path d="M1104 365 l4 4 l8 -9" fill="none" stroke="#26231C" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<line x1="40" x2="1240" y1="390" y2="390" stroke="#F4F4F2" stroke-opacity="0.08"/>
+<text x="48" y="424" font-family="ui-rounded, 'SF Pro Rounded', Nunito, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="21" font-weight="600" fill="#F4F4F2" fill-opacity="0.85">Last 15 minutes kept (ddp history)</text>
+<circle cx="860" cy="417" r="13" fill="#F4F4F2" fill-opacity="0.08"/>
+<circle cx="1110" cy="417" r="13" fill="#F5C22E" fill-opacity="1"/><path d="M1104 417 l4 4 l8 -9" fill="none" stroke="#26231C" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

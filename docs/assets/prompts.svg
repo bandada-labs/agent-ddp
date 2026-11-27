@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="382" viewBox="0 0 1280 382" role="img" aria-label="Prompts to give your agent: Sign up as a new user with ddp walk, replay it on Android, tell me what differs. Build the onboarding screen. Fix anything ddp check all finds. The like animation feels slow. Make it 250 ms, ease out. Something flickered on home a few minutes ago. Find it in ddp history.">
+<rect width="1280" height="382" rx="20" fill="#26231C"/>
+<rect x="40" y="34" width="1200" height="60" rx="30" fill="#F4F4F2" fill-opacity="0.07"/>
+<text x="72" y="72" font-family="ui-rounded, 'SF Pro Rounded', Nunito, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="22" font-weight="600" fill="#F4F4F2"><tspan fill="#F5C22E">you  </tspan>Sign up as a new user with ddp walk, replay it on Android, tell me what differs.</text>
+<rect x="40" y="112" width="1200" height="60" rx="30" fill="#F4F4F2" fill-opacity="0.07"/>
+<text x="72" y="150" font-family="ui-rounded, 'SF Pro Rounded', Nunito, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="22" font-weight="600" fill="#F4F4F2"><tspan fill="#F5C22E">you  </tspan>Build the onboarding screen. Fix anything ddp check all finds.</text>
+<rect x="40" y="190" width="1200" height="60" rx="30" fill="#F4F4F2" fill-opacity="0.07"/>
+<text x="72" y="228" font-family="ui-rounded, 'SF Pro Rounded', Nunito, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="22" font-weight="600" fill="#F4F4F2"><tspan fill="#F5C22E">you  </tspan>The like animation feels slow. Make it 250 ms, ease out.</text>
+<rect x="40" y="268" width="1200" height="60" rx="30" fill="#F4F4F2" fill-opacity="0.07"/>
+<text x="72" y="306" font-family="ui-rounded, 'SF Pro Rounded', Nunito, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="22" font-weight="600" fill="#F4F4F2"><tspan fill="#F5C22E">you  </tspan>Something flickered on home a few minutes ago. Find it in ddp history.</text>
+</svg>
