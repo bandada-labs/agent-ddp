@@ -70,3 +70,5 @@ A line leaves this file when the maintainer replaces it or when its work has lan
 - Human-facing text (docs, commits, pull requests) is plain English, short, and never mentions AI.
 - Compose source locations use androidx ui-tooling-data as `compileOnly`: Google's parser, no dependency shipped, no parser of our own. An app without it gets "no source information". (2026-11-03, "usemos eso")
 - 0.6.0 ships `ddp activate` on Android only; iOS follows in 0.6.1. (2026-11-25, "activate says Android only")
+- The README is mostly images and recordings; what can be shown is not written. Long text lives in docs (docs/faq.md). The npm page is the same README. (2026-11-26, "si el texto es representable en imagen entonces que se quede como imagen")
+- 0.6.1 ships the Android `activate` fixes and the README; iOS `activate` moves to 0.6.2, after the Mac runner restart is live. (2026-11-26, brain's ruling on mb-77w0)

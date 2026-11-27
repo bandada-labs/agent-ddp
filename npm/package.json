@@ -1,6 +1,6 @@
 {
   "name": "agent-ddp",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Your coding agent drives native iOS and Android apps and sees what changed after every touch. Walks replay with no model; the Debug library adds frame-by-frame reads and checks. CLI and MCP server.",
   "license": "MIT",
   "author": {

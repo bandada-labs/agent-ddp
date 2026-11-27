@@ -183,3 +183,6 @@ An app team lost test runs to emulators used by two sessions at once, to memory 
 
 ### 2026-11-25: 0.6.0 with activate on Android only
 Asked whether to wait for the iOS half of `ddp activate` before the next release. Answer: "Release 0.6.0 now, after agent-ddp's final pass (one live run of beta.8 + all tests); activate says Android only". On iOS `activate` is refused as `not_supported`; the iOS half follows in 0.6.1.
+
+### 2026-11-26: a visual README, and what 0.6.1 holds
+The badges were broken on GitHub, and the README had too much text. The maintainer: "quiero que sea mas como este https://github.com/google/artemis mas visual que texto y si quiere texto hay u apartado par aeso docs guia y asi, pero que de texto saea poco eso si es imprtante lo de copiar y pegar en el agente", then "si el texto es representable en imagen entonces que se quede como imagen y no texto, y mejor si hay videos", and "en 0.6.1 hay que arreglar tambien la apgina de presentación https://www.npmjs.com/package/agent-ddp". The README now leads with a real recording, keeps the paste-to-agent block as text, and moves FAQ, MCP and limits to docs/faq.md. iOS `activate` waits for the Mac runner restart (mb-67tm), so it moves to 0.6.2.

@@ -125,7 +125,7 @@ ddp watch @e3 --until 'alpha>0.9'
 ```
 ddp tap @e3                      # a real touch, once the app's hit test says it reaches @e3; prints what changed
 ddp swipe list 0,100             # also drag, double-tap, long-press; places are elements or x,y
-ddp activate @e3                 # Android only (iOS in 0.6.1): its accessibility click action, as TalkBack presses it, no touch
+ddp activate @e3                 # Android only (iOS in 0.6.2): its accessibility click action, as TalkBack presses it, no touch
 ddp check tappable               # controls a touch does not reach (disabled, covered, outside or taken by their parent), no touching
 ddp type "ana@example.com" --into @e5   # tap the field, then type as the keyboard does
 ddp press Enter
