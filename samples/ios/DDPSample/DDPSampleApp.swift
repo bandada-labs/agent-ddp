@@ -317,6 +317,11 @@ struct ContentView: View {
                         Button("Rename") { lastAction = "rename" }
                         Button("Delete", role: .destructive) { lastAction = "delete" }
                     }
+                // Reachable only through accessibility: VoiceOver can activate it, and nothing in it takes a touch.
+                Text("Only a11y")
+                    .accessibilityIdentifier("trapAccessibilityOnly")
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityAction { lastAction = "accessibility" }
                 Text("Last action: \(lastAction)")
                 // For `Input` typing: Enter submits and shows the text as the last action.
                 TextField("Name", text: $name)
