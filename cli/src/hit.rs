@@ -209,8 +209,9 @@ fn wait_until_tappable(
             }
             let reason = text(&hit, "reason");
             let next = match reason {
-                // Only an accessibility action takes it (a Compose `semantics { onClick }`): pressed without a touch.
-                "" | "untouchable" => format!("ddp activate {key} (Android), or ddp check tappable"),
+                // Only an accessibility action takes it (a Compose `semantics { onClick }`, a SwiftUI `allowsHitTesting(false)`):
+                // pressed without a touch.
+                "" | "untouchable" => format!("ddp activate {key}, or ddp check tappable"),
                 _ => format!("ddp check tappable, or ddp {command} {key} --force to touch it anyway"),
             };
             let message = if reason == "disabled" {

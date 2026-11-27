@@ -2,6 +2,16 @@
 
 Changes that users or agents will notice. Before 1.0, a minor version may change the protocol or the output; those changes are marked.
 
+## Unreleased
+
+### Added
+
+- `ddp activate <element>` on iOS simulators: the element's accessibility action through the simulator's accessibility, as VoiceOver presses it, with no touch. It presses what `tap` refuses as `untouchable` (a SwiftUI `allowsHitTesting(false)` button, an element with only an `accessibilityAction`). A disabled element is refused before anything is sent (`no_action`); a press the app says did nothing is `refused`, never reported as pressed. With or without the library. Checked live on an iOS 27.0 simulator, Xcode 27.2.
+
+### Changed
+
+- `tap` on an `untouchable` element: `next:` is `ddp activate <element>` on both platforms, no longer Android only.
+
 ## 0.6.1 (2026-11-26)
 
 ### Changed
