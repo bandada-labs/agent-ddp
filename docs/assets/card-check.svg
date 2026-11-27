@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="340" viewBox="0 0 640 340" role="img" aria-label="checks the platform confirms">
+<rect width="640" height="340" rx="20" fill="#26231C"/>
+<circle cx="28" cy="26" r="5" fill="#F4F4F2" fill-opacity="0.18"/>
+<circle cx="46" cy="26" r="5" fill="#F4F4F2" fill-opacity="0.18"/>
+<circle cx="64" cy="26" r="5" fill="#F4F4F2" fill-opacity="0.18"/>
+<text x="612" y="31" text-anchor="end" font-family="ui-rounded, 'SF Pro Rounded', Nunito, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="15" font-weight="700" fill="#F5C22E">checks the platform confirms</text>
+<text x="28" y="72" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" xml:space="preserve"><tspan fill="#F5C22E">$</tspan> ddp check all</text>
+<text x="28" y="94" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F5C22E" xml:space="preserve">COVERED coveredLabel</text>
+<text x="28" y="116" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" fill-opacity="0.55" xml:space="preserve">  the screen shows #8E8E93FF where its text has ink</text>
+<text x="28" y="138" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F5C22E" xml:space="preserve">SMALL TARGET smallTarget</text>
+<text x="28" y="160" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" fill-opacity="0.55" xml:space="preserve">  a touch reaches it over 34x43, under 44x44</text>
+<text x="28" y="182" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F5C22E" xml:space="preserve">LOW CONTRAST faintText</text>
+<text x="28" y="204" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" fill-opacity="0.55" xml:space="preserve">  1.6:1, #CCCCCCFF on #FFFFFFFF, needs 3:1</text>
+<text x="28" y="226" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" fill-opacity="0.55" xml:space="preserve">check all over 61 frames: overlap 1, a11y 2</text>
+<text x="28" y="248" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" xml:space="preserve"><tspan fill="#F5C22E">$</tspan> echo $?</text>
+<text x="28" y="270" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" fill-opacity="0.55" xml:space="preserve">1</text>
+<text x="28" y="292" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" fill-opacity="0.55" xml:space="preserve"></text>
+<text x="28" y="314" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F5C22E" xml:space="preserve">unsure means silent: zero false positives</text>
+</svg>

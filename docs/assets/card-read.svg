@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="340" viewBox="0 0 640 340" role="img" aria-label="see what was drawn">
+<rect width="640" height="340" rx="20" fill="#26231C"/>
+<circle cx="28" cy="26" r="5" fill="#F4F4F2" fill-opacity="0.18"/>
+<circle cx="46" cy="26" r="5" fill="#F4F4F2" fill-opacity="0.18"/>
+<circle cx="64" cy="26" r="5" fill="#F4F4F2" fill-opacity="0.18"/>
+<text x="612" y="31" text-anchor="end" font-family="ui-rounded, 'SF Pro Rounded', Nunito, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="15" font-weight="700" fill="#F5C22E">see what was drawn</text>
+<text x="28" y="72" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" xml:space="preserve"><tspan fill="#F5C22E">$</tspan> ddp read --for 5s --then "ddp tap animatedButton"</text>
+<text x="28" y="94" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" fill-opacity="0.55" xml:space="preserve">ios 300 frames over 5050 ms, unit pt</text>
+<text x="28" y="116" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" fill-opacity="0.55" xml:space="preserve">animatedButton: fill #0088FFFF border 6</text>
+<text x="28" y="138" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" fill-opacity="0.55" xml:space="preserve">  fill:    #FFFFFFFF -&gt; #0088FFFF, 700..2583ms</text>
+<text x="28" y="160" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F5C22E" xml:space="preserve">  border:  2 -&gt; 6  ▁▁▂▅▇███████</text>
+<text x="28" y="182" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F5C22E" xml:space="preserve">  opacity: 1 -&gt; 1  █▁▇█████████  TRANSIENT</text>
+<text x="28" y="204" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" fill-opacity="0.55" xml:space="preserve">  label:   Tap me -&gt; Selected @598ms</text>
+<text x="28" y="226" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" xml:space="preserve"><tspan fill="#F5C22E">$</tspan> ddp tree</text>
+<text x="28" y="248" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" fill-opacity="0.55" xml:space="preserve">@e1 animatedButton "Selected" [134, 122, 134.33, 48.33]</text>
+<text x="28" y="270" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" fill-opacity="0.55" xml:space="preserve">  z=1 layer fill #0088FFFF corner 12</text>
+<text x="28" y="292" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" fill-opacity="0.55" xml:space="preserve">  z=3 layer border 6 #FF8D28FF corner 15</text>
+<text x="28" y="314" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F5C22E" xml:space="preserve">every layer, every frame, from the platform</text>
+</svg>

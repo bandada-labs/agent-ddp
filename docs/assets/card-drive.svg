@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="340" viewBox="0 0 640 340" role="img" aria-label="drive any app">
+<rect width="640" height="340" rx="20" fill="#26231C"/>
+<circle cx="28" cy="26" r="5" fill="#F4F4F2" fill-opacity="0.18"/>
+<circle cx="46" cy="26" r="5" fill="#F4F4F2" fill-opacity="0.18"/>
+<circle cx="64" cy="26" r="5" fill="#F4F4F2" fill-opacity="0.18"/>
+<text x="612" y="31" text-anchor="end" font-family="ui-rounded, 'SF Pro Rounded', Nunito, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="15" font-weight="700" fill="#F5C22E">drive any app</text>
+<text x="28" y="72" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" xml:space="preserve"><tspan fill="#F5C22E">$</tspan> ddp up --platform ios --app com.apple.Preferences</text>
+<text x="28" y="94" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" fill-opacity="0.55" xml:space="preserve">up ios BA5429F9-… in 7.7s</text>
+<text x="28" y="116" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" xml:space="preserve"><tspan fill="#F5C22E">$</tspan> ddp tap General</text>
+<text x="28" y="138" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" fill-opacity="0.55" xml:space="preserve">tap General in 1331ms</text>
+<text x="28" y="160" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" fill-opacity="0.55" xml:space="preserve">  new: @e24 "General", @e26 "About", +5</text>
+<text x="28" y="182" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" fill-opacity="0.55" xml:space="preserve">  gone: @e8 "Accessibility", @e10 "Appearance", +10</text>
+<text x="28" y="204" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" xml:space="preserve"><tspan fill="#F5C22E">$</tspan> ddp tap About</text>
+<text x="28" y="226" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" fill-opacity="0.55" xml:space="preserve">tap About in 7ms</text>
+<text x="28" y="248" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" fill-opacity="0.55" xml:space="preserve">  new: @e35 "Name, iPhone", @e37 "Model Number", +7</text>
+<text x="28" y="270" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" xml:space="preserve"><tspan fill="#F5C22E">$</tspan> ddp back</text>
+<text x="28" y="292" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" fill-opacity="0.55" xml:space="preserve">back (edge swipe) in 363ms; changed: @e1 "Settings"</text>
+<text x="28" y="314" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F5C22E" xml:space="preserve">one line per action, about 100 tokens</text>
+</svg>

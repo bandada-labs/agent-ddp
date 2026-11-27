@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="340" viewBox="0 0 640 340" role="img" aria-label="walk once, replay free">
+<rect width="640" height="340" rx="20" fill="#26231C"/>
+<circle cx="28" cy="26" r="5" fill="#F4F4F2" fill-opacity="0.18"/>
+<circle cx="46" cy="26" r="5" fill="#F4F4F2" fill-opacity="0.18"/>
+<circle cx="64" cy="26" r="5" fill="#F4F4F2" fill-opacity="0.18"/>
+<text x="612" y="31" text-anchor="end" font-family="ui-rounded, 'SF Pro Rounded', Nunito, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="15" font-weight="700" fill="#F5C22E">walk once, replay free</text>
+<text x="28" y="72" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" xml:space="preserve"><tspan fill="#F5C22E">$</tspan> ddp walk start "rename a row"</text>
+<text x="28" y="94" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" xml:space="preserve"><tspan fill="#F5C22E">$</tspan> ddp long-press "Row with context menu"</text>
+<text x="28" y="116" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" xml:space="preserve"><tspan fill="#F5C22E">$</tspan> ddp tap Rename</text>
+<text x="28" y="138" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" xml:space="preserve"><tspan fill="#F5C22E">$</tspan> ddp walk expect "Last action: rename"</text>
+<text x="28" y="160" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" xml:space="preserve"><tspan fill="#F5C22E">$</tspan> ddp walk end pass</text>
+<text x="28" y="182" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" fill-opacity="0.55" xml:space="preserve">walk rename-a-row: PASS, 4 steps on ios</text>
+<text x="28" y="204" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" xml:space="preserve"><tspan fill="#F5C22E">$</tspan> ddp walk replay rename-a-row</text>
+<text x="28" y="226" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" fill-opacity="0.55" xml:space="preserve">replay on ios: 4 steps passed in 6.5s</text>
+<text x="28" y="248" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" xml:space="preserve"><tspan fill="#F5C22E">$</tspan> ddp walk replay rename-a-row --device emulator-5560</text>
+<text x="28" y="270" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" fill-opacity="0.55" xml:space="preserve">replay on android: 4 steps passed in 8.8s</text>
+<text x="28" y="292" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F4F4F2" xml:space="preserve"><tspan fill="#F5C22E">$</tspan> ddp walk parity rename-a-row</text>
+<text x="28" y="314" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="14.5" fill="#F5C22E" xml:space="preserve">ios passed, android passed; 0 steps differ</text>
+</svg>
