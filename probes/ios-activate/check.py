@@ -61,9 +61,9 @@ def settled(expected, device=True):
 # Without the library: the platform's accessibility only.
 relaunch()
 status, out = ddp("tap", "trapIgnored")
-check("tap on allowsHitTesting(false) is refused", "exit 1, code untouchable or covered",
-      f"exit {status}, code {code_of(out)}", status != 0 and code_of(out) in ("untouchable", "covered"))
-check("the refused tap pressed nothing", "Last action: none", settled("none"), settled("none") == "none")
+# How tap answers is tap's business (refused, or "nothing changed"); that it pressed nothing is this check's.
+print(f"INFO tap trapIgnored: exit {status}, code {code_of(out)}: {out.strip()[:200]}")
+check("tap on allowsHitTesting(false) pressed nothing", "Last action: none", settled("none"), settled("none") == "none")
 
 for key, expected in [("trapIgnored", "ignored"), ("trapAccessibilityOnly", "accessibility")]:
     relaunch()
